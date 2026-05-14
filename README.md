@@ -1,6 +1,6 @@
 # phoneME FunKey J2ME Runtime
 
-GitHub-ready snapshot of a `phoneME`-based Java ME runtime and `OPK` wrapper for `FunKey S / RG Nano`.
+A `phoneME`-based Java ME runtime and `OPK` wrapper for `FunKey S / RG Nano`.
 
 Based on the upstream phoneME-GP2X-SDL source at:  
 <https://github.com/j2me-preservation/phoneME-GP2X-SDL>
