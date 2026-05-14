@@ -117,3 +117,9 @@ Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funk
 
 - **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may require tweaking `PHONEME_KEY_PROFILE` and `PHONEME_ENABLE_GP2X_KEYS` env vars inside `r.sh`.
 - **No 3D** — JSR 184 (M3G) is not supported. 3D J2ME games will not run.
+
+## Debugging
+
+After launching a game, the runtime writes a log to:
+
+`/mnt/FunKey/.pm/runmidlet.log`
