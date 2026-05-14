@@ -5,6 +5,15 @@ GitHub-ready snapshot of a `phoneME`-based Java ME runtime and `OPK` wrapper for
 Based on the upstream phoneME-GP2X-SDL source at:  
 <https://github.com/j2me-preservation/phoneME-GP2X-SDL>
 
+## Screenshots
+
+<p float="left">
+  <img src="IMG_0018.PNG" width="240" />
+  <img src="IMG_0019.PNG" width="240" />
+  <img src="IMG_0023.PNG" width="240" />
+  <img src="IMG_0024.PNG" width="240" />
+</p>
+
 This export is split into two parts:
 
 - `phoneme-funkey-clean`
