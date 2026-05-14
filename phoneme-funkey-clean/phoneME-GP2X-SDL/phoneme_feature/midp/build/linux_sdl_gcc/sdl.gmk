@@ -1,0 +1,62 @@
+#
+#  
+#
+# Copyright  1990-2007 Sun Microsystems, Inc. All Rights Reserved.
+# DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License version
+# 2 only, as published by the Free Software Foundation.
+# 
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License version 2 for more details (a copy is
+# included at /legal/license.txt).
+# 
+# You should have received a copy of the GNU General Public License
+# version 2 along with this work; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+# 02110-1301 USA
+# 
+# Please contact Sun Microsystems, Inc., 4150 Network Circle, Santa
+# Clara, CA 95054 or visit www.sun.com if you need additional
+# information or have any questions.
+# 
+# This source file is specific for Qt-based configurations.
+#
+######################################################################
+# SDL Embedded specific defines and targets
+######################################################################
+
+EXTRA_CFLAGS += -D_GNU_SOURCE=1 -D_REENTRANT
+
+ifeq ($(TARGET_CPU), arm)
+  ifneq ($(SDL_CONFIG),)
+    EXTRA_INCLUDES += $(shell $(SDL_CONFIG) --cflags)
+    SDL_LIBS       := $(shell $(SDL_CONFIG) --libs)
+  else
+    EXTRA_INCLUDES += -I/usr/include/SDL
+    SDL_LIBS       := -L/usr/lib/arm-linux-gnueabihf -lSDL
+  endif
+else ifneq ($(shell command -v sdl-config 2>/dev/null),)
+  EXTRA_INCLUDES += $(shell sdl-config --cflags)
+  SDL_LIBS       := $(shell sdl-config --libs)
+else
+  EXTRA_INCLUDES += -I/usr/include/SDL
+endif
+
+ifeq ($(TARGET_CPU), arm)
+  OPENCORE_AMRNB_DIR := $(MIDP_DIR)/src/media-sdl/reference/native/opencore-amrnb
+  EXTRA_INCLUDES += -I$(OPENCORE_AMRNB_DIR)
+  EXTRA_INCLUDES += -I$(shell $(CC) -print-sysroot)/usr/include/SDL
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_mixer -lSDL_gfx $(SDL_MIXER_EXTRA_LIBS) -lm
+  ifneq ($(wildcard $(OPENCORE_AMRNB_DIR)/libopencore-amrnb.a),)
+    LIBS += -L$(OPENCORE_AMRNB_DIR) -lopencore-amrnb
+  endif
+  ifeq ($(USE_LIBFLOAT), true)
+    LIBS += -lfloat
+  endif
+else
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_mixer -lSDL_gfx -lm
+endif
