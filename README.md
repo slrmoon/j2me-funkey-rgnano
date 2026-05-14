@@ -40,6 +40,8 @@ Intentionally not included:
 
 ## Host build requirements
 
+Confirmed working on **Ubuntu 26** (amd64 host).
+
 - `bash`
 - `make`
 - `gcc`
