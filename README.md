@@ -5,15 +5,6 @@ GitHub-ready snapshot of a `phoneME`-based Java ME runtime and `OPK` wrapper for
 Based on the upstream phoneME-GP2X-SDL source at:  
 <https://github.com/j2me-preservation/phoneME-GP2X-SDL>
 
-## Screenshots
-
-<p float="left">
-  <img src="IMG_0018.PNG" width="240" />
-  <img src="IMG_0019.PNG" width="240" />
-  <img src="IMG_0023.PNG" width="240" />
-  <img src="IMG_0024.PNG" width="240" />
-</p>
-
 This export is split into two parts:
 
 - `phoneme-funkey-clean`
@@ -68,11 +59,15 @@ Intentionally not included:
 repo/
   phoneme-funkey-clean/
   phoneme-funkey-opk-wrapper/
-  FunKey-sdk-2.3.0/                       # unpack separately, not committed
-  zulu7.24.0.1-ca-jdk7.0.191-linux_x64/   # unpack separately, not committed
 ```
 
-You can also keep SDK/JDK anywhere else and pass them explicitly via env vars.
+Recommended approach: keep the SDK and JDK outside the repository and pass them explicitly via env vars.
+
+If you prefer local unpacked copies, these are the paths the scripts know how to use by default:
+
+- `phoneme-funkey-clean/FunKey-sdk-2.3.0`
+- `phoneme-funkey-clean/zulu7.24.0.1-ca-jdk7.0.191-linux_x64`
+- `phoneme-funkey-clean/zulu7.24.0.1-jdk7.0.191-linux_x64`
 
 ## Build runtime
 
@@ -92,19 +87,22 @@ Main runtime outputs:
 
 The wrapper builds a self-contained `pm.opk` with the full runtime, SDL launcher, desktop entry and icon.
 
-**Smoke test** (no JAR needed — builds a built-in HelloMidlet):
+**Launcher build** (no external JAR required):
+If no MIDlet is passed, the script still builds the launcher `OPK`. In that mode it also bundles a tiny built-in `HelloMidlet` as a fallback/test MIDlet inside the package, but the main user-facing entry point is still the SDL launcher.
 
 ```bash
 cd phoneme-funkey-opk-wrapper
+FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
 JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
 FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
 ./package-funkey-opk.sh
 ```
 
-**With your own MIDlet:**
+**With your own bundled MIDlet:**
 
 ```bash
 cd phoneme-funkey-opk-wrapper
+FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
 JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
 FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
 ./package-funkey-opk.sh /path/to/game.jar

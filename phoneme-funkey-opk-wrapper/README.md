@@ -65,6 +65,8 @@ Result:
 
 - `../phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
 
+If no `JAR` is provided, the script still builds the launcher `OPK` and bundles a tiny built-in `HelloMidlet` as a fallback/test MIDlet. The main entry point remains the SDL launcher.
+
 ## Current launcher defaults
 
 - App title: `J2ME`
