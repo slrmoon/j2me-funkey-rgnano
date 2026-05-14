@@ -88,22 +88,34 @@ Main runtime outputs:
 - `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/midp/bin/arm/runMidlet`
 - `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/cldc/linux_arm_vfp/dist/bin/cldc_vm`
 
-## Build OPK
+## Build OPK (launcher)
+
+The wrapper builds a self-contained `pm.opk` with the full runtime, SDL launcher, desktop entry and icon.
+
+**Smoke test** (no JAR needed — builds a built-in HelloMidlet):
 
 ```bash
 cd phoneme-funkey-opk-wrapper
-FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
+JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
+FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
+./package-funkey-opk.sh
+```
+
+**With your own MIDlet:**
+
+```bash
+cd phoneme-funkey-opk-wrapper
 JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
 FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
 ./package-funkey-opk.sh /path/to/game.jar
 ```
 
-Result:
+If the JAD is separate, pass it as second argument.  
+Set `FUNKEY_MIDLET_MAIN` to specify the main class explicitly.
 
-- `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
+Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
 
-## Notes
+## Known issues
 
-- The launcher desktop category is currently set to `emulators`.
-- The launcher title is currently set to `J2ME`.
-- If you move the SDK after unpacking, re-run its `relocate-sdk.sh`.
+- **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may require tweaking `PHONEME_KEY_PROFILE` and `PHONEME_ENABLE_GP2X_KEYS` env vars inside `r.sh`.
+- **No 3D** — JSR 184 (M3G) is not supported. 3D J2ME games will not run.
