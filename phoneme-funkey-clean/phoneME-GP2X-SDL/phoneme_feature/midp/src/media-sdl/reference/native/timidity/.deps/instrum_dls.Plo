@@ -1,0 +1,207 @@
+instrum_dls.lo instrum_dls.o: instrum_dls.c \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/stdlib.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/features.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/cdefs.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/gnu/stubs.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/include/stddef.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/types.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/types.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/pthreadtypes.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/sched.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/time.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/endian.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/endian.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/select.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/select.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/sigset.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/time.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/sysmacros.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/alloca.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/string.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_main.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_types.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_getenv.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_error.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/begin_code.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/close_code.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_rwops.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/stdio.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/libio.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/_G_config.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/wchar.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/wchar.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/gconv.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/include/stdarg.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/stdio_lim.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_timer.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_audio.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_byteorder.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_cdrom.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_joystick.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_events.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_active.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_keyboard.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_keysym.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_mouse.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_video.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_mutex.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_quit.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_version.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_endian.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/asm/byteorder.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/asm/types.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/linux/byteorder/little_endian.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/linux/byteorder/swab.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/linux/byteorder/generic.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_rwops.h ../../SDL_sound.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL.h \
+  /gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_endian.h \
+  ../../SDL_sound_internal.h timidity.h options.h instrum.h tables.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/math.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/huge_val.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/mathdef.h \
+  /gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/mathcalls.h \
+  common.h dls1.h dls2.h
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/stdlib.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/features.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/cdefs.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/gnu/stubs.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/include/stddef.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/types.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/types.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/pthreadtypes.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/sched.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/time.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/endian.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/endian.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/select.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/select.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/sigset.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/time.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/sys/sysmacros.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/alloca.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/string.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_main.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_types.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_getenv.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_error.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/begin_code.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/close_code.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_rwops.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/stdio.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/libio.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/_G_config.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/wchar.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/wchar.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/gconv.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/include/stdarg.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/stdio_lim.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_timer.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_audio.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_byteorder.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_cdrom.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_joystick.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_events.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_active.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_keyboard.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_keysym.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_mouse.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_video.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_mutex.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_quit.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_version.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_endian.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/asm/byteorder.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/asm/types.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/linux/byteorder/little_endian.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/linux/byteorder/swab.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/sys-include/linux/byteorder/generic.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_rwops.h:
+
+../../SDL_sound.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL.h:
+
+/gp2xsdk/Tools/arm-gp2x-linux/include/SDL/SDL_endian.h:
+
+../../SDL_sound_internal.h:
+
+timidity.h:
+
+options.h:
+
+instrum.h:
+
+tables.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/math.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/huge_val.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/mathdef.h:
+
+/gp2xsdk/Tools/lib/gcc/arm-gp2x-linux/3.4.6/../../../../arm-gp2x-linux/include/bits/mathcalls.h:
+
+common.h:
+
+dls1.h:
+
+dls2.h:

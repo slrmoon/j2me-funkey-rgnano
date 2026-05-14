@@ -1,0 +1,7 @@
+.toolchains/
+
+phoneME-GP2X-SDL/phoneme_feature/build_output/
+phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/
+
+*.opk
+*.log
