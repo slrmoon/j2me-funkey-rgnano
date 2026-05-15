@@ -26,6 +26,8 @@ Based on the upstream phoneME-GP2X-SDL source at:
   <img src="screenshots/IMG_0027.PNG" width="240" />
 </p>
 
+## Overview
+
 This export is split into two parts:
 
 - `phoneme-funkey-clean`
