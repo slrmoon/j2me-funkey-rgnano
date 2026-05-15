@@ -1,5 +1,7 @@
 # phoneME FunKey J2ME Runtime
 
+> If a specific game doesn't work, feel free to reach out on Telegram: **@slr_moon**
+
 A `phoneME`-based Java ME runtime and `OPK` wrapper for `FunKey S / RG Nano`.
 
 Based on the upstream phoneME-GP2X-SDL source at:  
