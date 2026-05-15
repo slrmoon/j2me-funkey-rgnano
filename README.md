@@ -26,6 +26,13 @@ Based on the upstream phoneME-GP2X-SDL source at:
   <img src="screenshots/IMG_0027.PNG" width="240" />
 </p>
 
+## Installation
+
+1. Download `pm.opk` from the [latest release](https://github.com/slrmoon/j2me-funkey-rgnano/releases/latest)
+2. Place it in the `emulators` folder on your FunKey/RG Nano SD card
+3. Create a `java` folder (lowercase) in the root of the SD card
+4. Put your `.jar` files into that `java/` folder
+
 ## Overview
 
 This export is split into two parts:
