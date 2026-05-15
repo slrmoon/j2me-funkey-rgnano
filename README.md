@@ -1,6 +1,6 @@
 # phoneME FunKey J2ME Runtime
 
-> If a specific game doesn't work, feel free to reach out on Telegram: **@slr_moon**
+> If a specific game doesn't work, feel free to reach out on Telegram: [@slr_moon](https://t.me/slr_moon)
 
 A `phoneME`-based Java ME runtime and `OPK` wrapper for `FunKey S / RG Nano`.
 
