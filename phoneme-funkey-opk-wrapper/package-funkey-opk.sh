@@ -32,6 +32,7 @@ APP_TITLE=${FUNKEY_APP_TITLE:-J2ME}
 APP_COMMENT=${FUNKEY_APP_COMMENT:-Java ME runtime}
 RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
+RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
 
 abs_path() {
     case "$1" in
@@ -60,6 +61,25 @@ copy_nonempty_file() {
         echo "Fallback was also unavailable: $fallback" >&2
     fi
     exit 1
+}
+
+require_runtime_not_stale() {
+    runmidlet=$MIDP_BIN/runMidlet
+
+    if [ ! -s "$runmidlet" ]; then
+        return
+    fi
+
+    for artifact in \
+        "$MIDP_CLASSES" \
+        "$MEHOME/build_output_funkey_s/midp/ROMImage.cpp" \
+        "$MEHOME/build_output_funkey_s/midp/obj/arm/ROMImage.o"; do
+        if [ -f "$artifact" ] && [ "$artifact" -nt "$runmidlet" ]; then
+            echo "Stale runMidlet: $artifact is newer than $runmidlet" >&2
+            echo "Run phoneme-funkey-clean/build-funkey-s.sh before packaging OPK." >&2
+            exit 1
+        fi
+    done
 }
 
 midlet_main_from_text() {
@@ -138,6 +158,7 @@ if [ ! -x "$MIDP_BIN/runMidlet" ] && [ ! -s "$RUNMIDLET_FALLBACK" ]; then
     echo "Run build-funkey-s.sh first." >&2
     exit 1
 fi
+require_runtime_not_stale
 
 if [ ! -x "$JDK_DIR/bin/javac" ]; then
     echo "Missing JDK 7 javac: $JDK_DIR/bin/javac" >&2
@@ -153,7 +174,10 @@ rm -rf "$STAGE" "$HELLO_BUILD" "$OPK"
 mkdir -p "$STAGE/bin" "$STAGE/midlets" "$HELLO_BUILD/classes" "$HELLO_BUILD/meta"
 mkdir -p "$HELLO_BUILD/verified"
 
-if [ -n "$APP_JAR" ]; then
+if [ "$RUNTIME_ONLY" = "1" ]; then
+    rmdir "$STAGE/midlets"
+    echo "Packaging runtime only: no built-in MIDlet"
+elif [ -n "$APP_JAR" ]; then
     APP_JAR=$(abs_path "$APP_JAR")
     if [ ! -f "$APP_JAR" ]; then
         echo "Missing MIDlet jar: $APP_JAR" >&2
@@ -227,16 +251,18 @@ MicroEdition-Profile: MIDP-2.0
 EOF
 fi
 
-JAR_SIZE=$(wc -c < "$STAGE/midlets/a.jar" | tr -d ' ')
-sed '/^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Uu][Rr][Ll]:/d; /^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Ss][Ii][Zz][Ee]:/d' \
-    "$STAGE/midlets/a.jad" > "$HELLO_BUILD/meta/a.jad"
-{
-    cat "$HELLO_BUILD/meta/a.jad"
-    printf 'MIDlet-Jar-URL: a.jar\n'
-    printf 'MIDlet-Jar-Size: %s\n\n' "$JAR_SIZE"
-} > "$STAGE/midlets/a.jad"
-printf '%s\n' "$APP_MAIN" > "$STAGE/midlets/main-class"
-echo "Packaging MIDlet class: $APP_MAIN"
+if [ "$RUNTIME_ONLY" != "1" ]; then
+    JAR_SIZE=$(wc -c < "$STAGE/midlets/a.jar" | tr -d ' ')
+    sed '/^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Uu][Rr][Ll]:/d; /^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Ss][Ii][Zz][Ee]:/d' \
+        "$STAGE/midlets/a.jad" > "$HELLO_BUILD/meta/a.jad"
+    {
+        cat "$HELLO_BUILD/meta/a.jad"
+        printf 'MIDlet-Jar-URL: a.jar\n'
+        printf 'MIDlet-Jar-Size: %s\n\n' "$JAR_SIZE"
+    } > "$STAGE/midlets/a.jad"
+    printf '%s\n' "$APP_MAIN" > "$STAGE/midlets/main-class"
+    echo "Packaging MIDlet class: $APP_MAIN"
+fi
 
 copy_nonempty_file "$MIDP_BIN/runMidlet" "$STAGE/bin/runMidlet" "$RUNMIDLET_FALLBACK"
 cp "$MIDP_BIN/installMidlet" "$STAGE/bin/"

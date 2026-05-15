@@ -932,6 +932,15 @@ static void draw_launching(void) {
     SDL_Delay(200);
 }
 
+static void draw_launch_error(const char *line1, const char *line2) {
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
+    stringColor(screen, 4, SCR_H / 2 - 16, line1, 0xff6060ff);
+    stringColor(screen, 4, SCR_H / 2 - 4, line2, 0xffffffff);
+    stringColor(screen, 4, SCR_H / 2 + 12, "Press B to return", 0x607078ff);
+    SDL_Flip(screen);
+    SDL_Delay(2500);
+}
+
 /* ─────────────────────────────────────────────────────
  *  launch helpers – copy runtime files
  * ──────────────────────────────────────────────────── */
@@ -1103,7 +1112,17 @@ static void launch_game(int idx) {
         }
     }
 
-    if (main_class[0] == '\0') strcpy(main_class, "Unknown");
+    if (main_class[0] == '\0') {
+        FILE *log = fopen(PM_DIR "/runmidlet.log", "w");
+        if (log != NULL) {
+            fprintf(log, "Could not infer MIDlet main class from %s\n", jar_path);
+            fprintf(log, "The JAR is missing MIDlet-1 in META-INF/MANIFEST.MF.\n");
+            fprintf(log, "This usually means it is not a MIDP MIDlet, or it needs a .jad file.\n");
+            fclose(log);
+        }
+        draw_launch_error("No MIDlet-1 found", "Not a runnable MIDP jar");
+        return;
+    }
 
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
