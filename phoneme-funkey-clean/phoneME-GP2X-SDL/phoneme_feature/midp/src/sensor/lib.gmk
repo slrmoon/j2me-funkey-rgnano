@@ -1,0 +1,37 @@
+#
+# Minimal JSR-256 Sensor API stubs.
+#
+
+SUBSYSTEM_SENSOR = sensor
+
+SUBSYSTEMS += $(SUBSYSTEM_SENSOR)
+
+SUBSYSTEM_SENSOR_DIR = $(SUBSYSTEM_DIR)/sensor
+SUBSYSTEM_SENSOR_CLASSES_DIR = $(SUBSYSTEM_SENSOR_DIR)/classes
+
+SUBSYSTEM_SENSOR_JAVA_FILES = \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/com/sun/midp/io/j2me/sensor/Protocol.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/Channel.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/ChannelInfo.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/Condition.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/ConditionListener.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/Data.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/DataAndErrorListener.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/DataListener.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/LimitCondition.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/MeasurementRange.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/ObjectCondition.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/RangeCondition.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/SensorConnection.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/SensorInfo.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/SensorListener.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/SensorManager.java \
+    $(SUBSYSTEM_SENSOR_CLASSES_DIR)/javax/microedition/sensor/Unit.java
+
+MIDP_JAVADOC_SOURCEPATH += $(SUBSYSTEM_SENSOR_CLASSES_DIR)
+
+SUBSYSTEM_SENSOR_PACKAGES = \
+    com.sun.midp.io.j2me.sensor \
+    javax.microedition.sensor
+
+MIDP_JAVADOC_PACKAGES += $(SUBSYSTEM_SENSOR_PACKAGES)

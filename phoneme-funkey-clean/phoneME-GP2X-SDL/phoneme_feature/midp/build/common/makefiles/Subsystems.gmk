@@ -150,6 +150,13 @@ include $(SUBSYSTEM_DIR)/tool/$(SUBSYSTEM_MAKE_FILE)
 include $(SUBSYSTEM_DIR)/mmapi/$(SUBSYSTEM_MAKE_FILE)
 
 #####################################################################
+# Sensor API stubs
+# Description: Minimal JSR-256 package surface for MIDlets that probe sensors
+#####################################################################
+
+include $(SUBSYSTEM_DIR)/sensor/$(LIB_MAKE_FILE)
+
+#####################################################################
 # EXTRA
 #####################################################################
 
