@@ -62,6 +62,25 @@ copy_nonempty_file() {
     exit 1
 }
 
+require_runtime_not_stale() {
+    runmidlet=$MIDP_BIN/runMidlet
+
+    if [ ! -s "$runmidlet" ]; then
+        return
+    fi
+
+    for artifact in \
+        "$MIDP_CLASSES" \
+        "$MEHOME/build_output_funkey_s/midp/ROMImage.cpp" \
+        "$MEHOME/build_output_funkey_s/midp/obj/arm/ROMImage.o"; do
+        if [ -f "$artifact" ] && [ "$artifact" -nt "$runmidlet" ]; then
+            echo "Stale runMidlet: $artifact is newer than $runmidlet" >&2
+            echo "Run phoneme-funkey-clean/build-funkey-s.sh before packaging OPK." >&2
+            exit 1
+        fi
+    done
+}
+
 midlet_main_from_text() {
     tr -d '\r' < "$1" |
         sed -n 's/^MIDlet-1:[[:space:]]*//Ip' |
@@ -138,6 +157,7 @@ if [ ! -x "$MIDP_BIN/runMidlet" ] && [ ! -s "$RUNMIDLET_FALLBACK" ]; then
     echo "Run build-funkey-s.sh first." >&2
     exit 1
 fi
+require_runtime_not_stale
 
 if [ ! -x "$JDK_DIR/bin/javac" ]; then
     echo "Missing JDK 7 javac: $JDK_DIR/bin/javac" >&2
