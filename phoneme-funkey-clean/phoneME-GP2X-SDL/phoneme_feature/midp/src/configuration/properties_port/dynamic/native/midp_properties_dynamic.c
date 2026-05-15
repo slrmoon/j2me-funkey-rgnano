@@ -116,6 +116,11 @@ static Property * implementationProperties = NULL ;
 /** Default profile, as required by the MIDP specification */
 #define DEFAULT_PROFILE "MIDP-2.1"
 
+/** Locale property name, as defined by the MIDP specification */
+#define LOCALE_PROP_NAME "microedition.locale"
+/** Default locale used when no system.config value was loaded */
+#define DEFAULT_LOCALE "en-US"
+
 /**
  * Trims leading and trailing white space from an array of
  * C chars (8-bit) i.e C string.
@@ -407,6 +412,10 @@ initializeConfig(void) {
 
     if (getSystemProperty(ENCODING_PROP_NAME) == NULL) {
         setSystemProperty(ENCODING_PROP_NAME, DEFAULT_CHARACTER_ENCODING);
+    }
+
+    if (getSystemProperty(LOCALE_PROP_NAME) == NULL) {
+        setSystemProperty(LOCALE_PROP_NAME, DEFAULT_LOCALE);
     }
 
     return 0;

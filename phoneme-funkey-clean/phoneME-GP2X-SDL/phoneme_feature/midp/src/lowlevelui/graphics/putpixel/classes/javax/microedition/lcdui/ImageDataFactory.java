@@ -147,6 +147,7 @@ class ImageDataFactory implements AbstractImageDataFactory {
      */
     public ImageData createResourceImageData(String name) throws IOException {
         ImageData data = new ImageData();
+        InputStream stream = null;
 
         /*
          * Load native image data from cache and create
@@ -154,7 +155,18 @@ class ImageDataFactory implements AbstractImageDataFactory {
          * proceed to load and create image normally.
          */
         if (!loadCachedImage(data, name)) {
-            createImageFromStream(data, getClass().getResourceAsStream(name));
+            stream = getClass().getResourceAsStream(name);
+            try {
+                System.out.println("LCDUI image resource: name=" + name +
+                    " stream=" + (stream == null ? "<null>" : "open"));
+            } catch (Throwable ignored) {
+            }
+            createImageFromStream(data, stream);
+        } else {
+            try {
+                System.out.println("LCDUI image cache hit: name=" + name);
+            } catch (Throwable ignored) {
+            }
         }
 
         return data;

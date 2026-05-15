@@ -194,6 +194,26 @@ create_arm_toolchain_shim() {
     require_file "$ARM_TOOLCHAIN_DIR/bin/as"
 }
 
+invalidate_midp_artifacts_if_cldc_changed() {
+    cldc_classes_zip=$ARM_CLDC_DIST_DIR/lib/cldc_classes.zip
+    midp_classes_zip=$MIDP_OUTPUT_DIR/classes.zip
+
+    if [ ! -f "$cldc_classes_zip" ] || [ ! -f "$midp_classes_zip" ]; then
+        return
+    fi
+
+    if [ "$cldc_classes_zip" -nt "$midp_classes_zip" ]; then
+        echo "CLDC classes changed; invalidating MIDP classes and ROM artifacts"
+        rm -f \
+            "$midp_classes_zip" \
+            "$MIDP_OUTPUT_DIR/ROMImage.cpp" \
+            "$MIDP_OUTPUT_DIR/nativeFunctionTable.cpp" \
+            "$MIDP_OUTPUT_DIR/obj/arm/ROMImage.o" \
+            "$MIDP_OUTPUT_DIR/obj/arm/nativeFunctionTable.o" \
+            "$MIDP_OUTPUT_DIR/bin/arm/runMidlet"
+    fi
+}
+
 export MEHOME BUILD_OUTPUT_DIR JDK_DIR
 export AWK=${AWK:-awk}
 export PATH=$JDK_DIR/bin:$PATH
@@ -290,6 +310,7 @@ run_make \
 
 ARM_CLDC_DIST_DIR=$BUILD_OUTPUT_DIR/cldc/$ARM_CLDC_PLATFORM/dist
 require_file "$ARM_CLDC_DIST_DIR/include/jvmconfig.h"
+invalidate_midp_artifacts_if_cldc_changed
 
 echo "Building ARM MIDP SDL..."
 cd "$MEHOME/midp/build/linux_sdl_gcc"
