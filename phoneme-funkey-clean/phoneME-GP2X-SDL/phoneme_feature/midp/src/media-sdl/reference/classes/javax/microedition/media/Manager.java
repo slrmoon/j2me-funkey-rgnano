@@ -584,7 +584,6 @@ public final class Manager {
      */
     public static Player createPlayer(String locator) throws IOException, MediaException 
     { Player Ret = null;
-      try { System.out.println("MMAPI createPlayer locator=" + locator); } catch (Throwable ignored) {}
       if (locator == null) { throw new IllegalArgumentException(); }
       ensureAudioSubsystem();
       try { if (locator.compareTo(TONE_DEVICE_LOCATOR) == 0) Ret = new ToneSequencePlayer();
@@ -626,7 +625,6 @@ public final class Manager {
      */
     public static Player createPlayer(InputStream stream, String type) throws IOException, MediaException 
     { ABBBasicPlayer Ret;
-      try { System.out.println("MMAPI createPlayer stream=" + (stream == null ? "<null>" : "open") + " type=" + type); } catch (Throwable ignored) {}
       if (stream == null) { throw new IllegalArgumentException(); }
       if (type == null) { throw new MediaException(PL_ERR + "NULL content-type"); }
       ensureAudioSubsystem();

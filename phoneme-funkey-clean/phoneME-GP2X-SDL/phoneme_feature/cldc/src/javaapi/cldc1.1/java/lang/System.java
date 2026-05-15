@@ -236,14 +236,7 @@ public final class System {
 /* #endif */
             );
         }
-        String value = getProperty0(key);
-        if (value == null && key.equals("microedition.locale")) {
-            value = "en-US";
-        }
-        if (key.equals("microedition.locale")) {
-            out.println("CLDC System.getProperty: " + key + "=" + value);
-        }
-        return value;
+        return getProperty0(key);
     }
 
     private native static String getProperty0(String key);

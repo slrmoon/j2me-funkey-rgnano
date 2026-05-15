@@ -36,7 +36,6 @@ import java.util.Vector;
 public class ResourceInputStream extends InputStream {
     private Object fileDecoder;
     private Object savedDecoder; // used for mark/reset functionality
-    private String debugName;
 
     /**
      * Fixes the resource name to be conformant with the CLDC 1.0
@@ -114,19 +113,8 @@ public class ResourceInputStream extends InputStream {
      */
     public ResourceInputStream(String name) throws IOException {
         String fixedName = fixResourceName(name);
-        debugName = fixedName;
-        try {
-            System.out.println("CLDC ResourceInputStream open: name=" +
-                name + " fixed=" + fixedName);
-        } catch (Throwable ignored) {
-        }
         fileDecoder = open(fixedName);
         if (fileDecoder == null) {
-            try {
-                System.out.println("CLDC ResourceInputStream missing: name=" +
-                    name + " fixed=" + fixedName);
-            } catch (Throwable ignored) {
-            }
             throw new IOException();
         }
      }
@@ -143,22 +131,7 @@ public class ResourceInputStream extends InputStream {
         if (fileDecoder == null) {
             throw new IOException();
         }
-        if ("strings.idx".equals(debugName)) {
-            try {
-                System.out.println("CLDC ResourceInputStream read byte enter: name=" +
-                    debugName);
-            } catch (Throwable ignored) {
-            }
-        }
-        int value = readByte(fileDecoder);
-        if ("strings.idx".equals(debugName)) {
-            try {
-                System.out.println("CLDC ResourceInputStream read byte: name=" +
-                    debugName + " value=" + value);
-            } catch (Throwable ignored) {
-            }
-        }
-        return value;
+        return readByte(fileDecoder);
     }
 
     /**
@@ -195,24 +168,7 @@ public class ResourceInputStream extends InputStream {
                    ((off + len) > b.length) || ((off + len) < 0)) {
             throw new IndexOutOfBoundsException();
         }
-        if ("strings.idx".equals(debugName)) {
-            try {
-                System.out.println("CLDC ResourceInputStream read bytes enter: name=" +
-                    debugName + " off=" + off + " len=" + len +
-                    " bufLen=" + b.length);
-            } catch (Throwable ignored) {
-            }
-        }
-        int count = readBytes(fileDecoder, b, off, len);
-        if ("strings.idx".equals(debugName)) {
-            try {
-                System.out.println("CLDC ResourceInputStream read bytes: name=" +
-                    debugName + " off=" + off + " len=" + len +
-                    " count=" + count);
-            } catch (Throwable ignored) {
-            }
-        }
-        return count;
+        return readBytes(fileDecoder, b, off, len);
     }
 
     public void close() throws IOException {
