@@ -53,6 +53,13 @@ class DataInputStream extends InputStream implements DataInput {
      * @param  in   the input stream.
      */
     public DataInputStream(InputStream in) {
+        if (in == null) {
+            try {
+                System.out.println(
+                    "CLDC DataInputStream created with null InputStream");
+            } catch (Throwable ignored) {
+            }
+        }
         this.in = in;
     }
 
