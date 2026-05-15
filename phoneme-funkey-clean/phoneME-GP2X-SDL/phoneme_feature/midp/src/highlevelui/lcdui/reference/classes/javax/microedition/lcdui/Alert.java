@@ -297,7 +297,6 @@ public class Alert extends Screen {
                  Image alertImage, AlertType alertType) {
 
         super(title);
-        debugLog("create", title, alertText, alertType);
 
         synchronized (Display.LCDUILock) {
             this.text = alertText;
@@ -448,8 +447,6 @@ public class Alert extends Screen {
      * @see #getString
      */
     public void setString(String str) {
-        debugLog("setString", getTitle(), str, type);
-
         synchronized (Display.LCDUILock) {
             if (str == text || (str != null && str.equals(text))) {
                 return;
@@ -804,23 +801,6 @@ public class Alert extends Screen {
 // *****************************************************
 //  Private members
 // *****************************************************
-
-    private static void debugLog(String action, String title, String text,
-                                 AlertType type) {
-        try {
-            StringBuffer msg = new StringBuffer(96);
-            msg.append("LCDUI Alert ").append(action);
-            msg.append(": title=");
-            msg.append(title == null ? "<null>" : title);
-            msg.append(" type=");
-            msg.append(type == null ? "<null>" : type.toString());
-            msg.append(" text=");
-            msg.append(text == null ? "<null>" : text);
-            System.out.println(msg.toString());
-        } catch (Throwable ignored) {
-            // Debug logging must never affect MIDlet behavior.
-        }
-    }
 
     /**
      * Special CommandListener instance to handle execution of

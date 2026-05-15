@@ -262,7 +262,6 @@ class Class {
      * @return      a <code>java.io.InputStream</code> object.
      */
     public java.io.InputStream getResourceAsStream(String name) {
-        String requestedName = name;
         try {
             if (name.length() > 0 && name.charAt(0) == '/') {
                 /* Absolute format */
@@ -276,20 +275,8 @@ class Class {
                            + name;
                 }
             }
-            java.io.InputStream stream =
-                new com.sun.cldc.io.ResourceInputStream(name);
-            try {
-                System.out.println("CLDC resource open: requested=" +
-                    requestedName + " resolved=" + name);
-            } catch (Throwable ignored) {
-            }
-            return stream;
+            return new com.sun.cldc.io.ResourceInputStream(name);
         } catch (java.io.IOException x) {
-            try {
-                System.out.println("CLDC resource missing: requested=" +
-                    requestedName + " resolved=" + name + " error=" + x);
-            } catch (Throwable ignored) {
-            }
             return null;
         }
     }

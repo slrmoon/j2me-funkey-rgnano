@@ -549,24 +549,13 @@ public class RecordStore {
             MIDletStateHandler.getMidletStateHandler().getMIDletSuite();
 
         if (currentSuite == null) {
-            try {
-                System.out.println("RMS listRecordStores: no current suite");
-            } catch (Throwable ignored) {
-            }
             return null;
         }
 
         // static calls synchronize on openRecordStores
         synchronized (openRecordStores) {
-            String[] stores = RecordStoreImpl.listRecordStores(
+	    return RecordStoreImpl.listRecordStores(
                 classSecurityToken, currentSuite.getID());
-            try {
-                System.out.println("RMS listRecordStores: suite=" +
-                    currentSuite.getID() + " count=" +
-                    (stores == null ? 0 : stores.length));
-            } catch (Throwable ignored) {
-            }
-	    return stores;
 	}
     }
 
