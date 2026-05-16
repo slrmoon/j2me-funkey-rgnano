@@ -124,11 +124,30 @@ public final class DirectUtils {
         }
 
         public void drawImage(Image image, int x, int y, int anchor, int manipulation) {
+            int width;
+            int height;
+            int[] rgb;
+            int[] transformed;
+            int drawWidth;
+            int drawHeight;
+            int drawX;
+            int drawY;
+
             if (image == null) {
                 return;
             }
-            graphics.drawRegion(image, 0, 0, image.getWidth(), image.getHeight(),
-                    toLcduiTransform(manipulation), x, y, anchor);
+
+            width = image.getWidth();
+            height = image.getHeight();
+            rgb = new int[width * height];
+            image.getRGB(rgb, 0, width, 0, 0, width, height);
+            transformed = transformArgb(rgb, width, height, manipulation);
+            drawWidth = transformedWidth(width, height, manipulation);
+            drawHeight = transformedHeight(width, height, manipulation);
+            drawX = resolveAnchorX(x, anchor, drawWidth);
+            drawY = resolveAnchorY(y, anchor, drawHeight);
+            graphics.drawRGB(transformed, 0, drawWidth, drawX, drawY,
+                    drawWidth, drawHeight, true);
         }
 
         public void drawPolygon(int[] xPoints, int xOffset, int[] yPoints, int yOffset,
@@ -339,6 +358,26 @@ public final class DirectUtils {
         private int transformedHeight(int width, int height, int manipulation) {
             int rotation = rotationPart(manipulation);
             return (rotation == ROTATE_90 || rotation == ROTATE_270) ? width : height;
+        }
+
+        private int resolveAnchorX(int x, int anchor, int width) {
+            if ((anchor & Graphics.RIGHT) != 0) {
+                return x - width;
+            }
+            if ((anchor & Graphics.HCENTER) != 0) {
+                return x - width / 2;
+            }
+            return x;
+        }
+
+        private int resolveAnchorY(int y, int anchor, int height) {
+            if ((anchor & Graphics.BOTTOM) != 0) {
+                return y - height;
+            }
+            if ((anchor & Graphics.VCENTER) != 0) {
+                return y - height / 2;
+            }
+            return y;
         }
 
         private int rotationPart(int manipulation) {
