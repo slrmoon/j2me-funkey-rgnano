@@ -139,7 +139,7 @@ static const KeyProfilePreset key_profiles[] = {
       { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, K_GAMEB, K_GAMEC, K_GAMED,
         42, 35, K_SOFT2, K_SOFT1 } },
     { "nokia-s40", "NOKIA/S40",
-      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_SOFT1, K_SOFT2,
+      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_GAMEC, K_GAMED,
         42, 35, K_SOFT2, K_SOFT1 } },
     { "sony-ericsson", "SONY ERICSSON",
       { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_SOFT2, K_SOFT1,
