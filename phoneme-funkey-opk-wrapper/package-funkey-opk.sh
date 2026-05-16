@@ -32,7 +32,21 @@ APP_TITLE=${FUNKEY_APP_TITLE:-J2ME}
 APP_COMMENT=${FUNKEY_APP_COMMENT:-Java ME runtime}
 RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
-RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
+BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
+RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
+
+if [ "$BUNDLE_MIDLET" = "1" ]; then
+    RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
+else
+    APP_JAR=
+    APP_JAD=
+    if [ $# -gt 0 ] || [ -n "${FUNKEY_MIDLET_JAR:-}" ] || [ -n "${FUNKEY_MIDLET_JAD:-}" ]; then
+        echo "This build creates a launcher/runtime-only OPK and does not bundle MIDlet JARs by default." >&2
+        echo "Put games on external storage and launch them from the browser UI." >&2
+        echo "For legacy debug bundles only, set FUNKEY_BUNDLE_MIDLET=1 explicitly." >&2
+        exit 1
+    fi
+fi
 
 abs_path() {
     case "$1" in

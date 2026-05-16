@@ -58,19 +58,23 @@ FUNKEY_PHONEME_ROOT=/path/to/phoneME-GP2X-SDL
 FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
 FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
 JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
-./package-funkey-opk.sh /path/to/game.jar
+./package-funkey-opk.sh
 ```
 
 Result:
 
 - `../phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
 
-If no `JAR` is provided, the script still builds the launcher `OPK` and bundles a tiny built-in `HelloMidlet` as a fallback/test MIDlet. The main entry point remains the SDL launcher.
+The default OPK is launcher/runtime-only: it contains the browser launcher,
+phoneME runtime/JVM, libraries, appdb seed, icon, and helper scripts. It does
+not bundle a game `JAR`; put games on external storage and launch them from the
+browser UI.
 
-For a pure launcher/runtime OPK without any bundled MIDlet JAR:
+Legacy debug bundles with a built-in MIDlet are still available only when
+requested explicitly:
 
 ```bash
-FUNKEY_RUNTIME_ONLY=1 ./package-funkey-opk.sh
+FUNKEY_BUNDLE_MIDLET=1 ./package-funkey-opk.sh /path/to/game.jar
 ```
 
 ## Current launcher defaults
