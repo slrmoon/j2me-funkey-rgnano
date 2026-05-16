@@ -46,6 +46,17 @@ interface AbstractImageDataFactory {
     ImageData createOffScreenImageData(int width, int height);
 
     /**
+     * Creates a new, mutable image data for off-screen drawing, optionally
+     * keeping alpha for Nokia/DirectGraphics compatibility paths.
+     *
+     * @param width the width of the new image, in pixels
+     * @param height the height of the new image, in pixels
+     * @param hasAlpha true if the image data should keep per-pixel alpha
+     * @return the created image data
+     */
+    ImageData createOffScreenImageData(int width, int height, boolean hasAlpha);
+
+    /**
      * Creates an immutable image data from a source mutable image data.
      *
      * <p> This method is useful for placing the contents of mutable images

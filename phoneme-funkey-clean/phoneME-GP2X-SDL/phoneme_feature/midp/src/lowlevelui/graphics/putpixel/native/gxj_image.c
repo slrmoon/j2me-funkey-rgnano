@@ -803,13 +803,48 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
         int destWidthDiff = dest->width - width;
         int srcWidthDiff = src->width - width;
         int r1, g1, b1, a2, a3, r2, b2, g2;
+        int srcAlpha, dstAlpha, invAlpha, outAlpha;
+        int srcR8, srcG8, srcB8, dstR8, dstG8, dstB8;
+        int dstWeight, outR8, outG8, outB8;
 
         if (src->alphaData != NULL) {
             unsigned char *pSrcAlpha = src->alphaData + (y_src * src->width) + x_src;
+            unsigned char *pDestAlpha = (dest->alphaData != NULL) ?
+                dest->alphaData + (y_dest * dest->width) + x_dest : NULL;
 
             /* copy the source to the destination */
             for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
                 for (limit = pDest + width; pDest < limit; pDest++, pSrc++, pSrcAlpha++) {
+                    if (pDestAlpha != NULL) {
+                        srcAlpha = *pSrcAlpha;
+                        if (srcAlpha == 0xFF) {
+                            CHECK_PTR_CLIP(dest, pDest);
+                            *pDest = *pSrc;
+                            *pDestAlpha = 0xFF;
+                        } else if (srcAlpha > 0x3) {
+                            dstAlpha = *pDestAlpha;
+                            invAlpha = 255 - srcAlpha;
+                            outAlpha = srcAlpha + (dstAlpha * invAlpha + 127) / 255;
+
+                            if (outAlpha != 0) {
+                                srcR8 = (*pSrc >> 8) & 0xF8;
+                                srcG8 = (*pSrc >> 3) & 0xFC;
+                                srcB8 = (*pSrc << 3) & 0xF8;
+                                dstR8 = (*pDest >> 8) & 0xF8;
+                                dstG8 = (*pDest >> 3) & 0xFC;
+                                dstB8 = (*pDest << 3) & 0xF8;
+                                dstWeight = (dstAlpha * invAlpha + 127) / 255;
+                                outR8 = (srcR8 * srcAlpha + dstR8 * dstWeight + (outAlpha / 2)) / outAlpha;
+                                outG8 = (srcG8 * srcAlpha + dstG8 * dstWeight + (outAlpha / 2)) / outAlpha;
+                                outB8 = (srcB8 * srcAlpha + dstB8 * dstWeight + (outAlpha / 2)) / outAlpha;
+
+                                *pDest = GXJ_RGB24TORGB16((outR8 << 16) | (outG8 << 8) | outB8);
+                            }
+                            *pDestAlpha = (unsigned char)outAlpha;
+                        }
+                        pDestAlpha++;
+                        continue;
+                    }
                     if ((*pSrcAlpha) == 0xFF) {
                         CHECK_PTR_CLIP(dest, pDest);
                         *pDest = *pSrc;
@@ -837,6 +872,9 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
                 pDest += destWidthDiff;
                 pSrc += srcWidthDiff;
                 pSrcAlpha += srcWidthDiff;
+                if (pDestAlpha != NULL) {
+                    pDestAlpha += destWidthDiff;
+                }
             }
         } else {
             /* copy the source to the destination */
@@ -844,6 +882,9 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
                 for (limit = pDest + width; pDest < limit; pDest++, pSrc++) {
                     CHECK_PTR_CLIP(dest, pDest);
                     *pDest = *pSrc;
+                    if (dest->alphaData != NULL) {
+                        dest->alphaData[pDest - dest->pixelData] = 0xFF;
+                    }
                 }
 
                 pDest += destWidthDiff;

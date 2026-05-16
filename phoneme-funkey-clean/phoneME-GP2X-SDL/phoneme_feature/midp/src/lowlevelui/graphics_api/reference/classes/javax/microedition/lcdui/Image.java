@@ -298,6 +298,54 @@ public class Image {
     }
 
     /**
+     * Creates a mutable ARGB image for vendor compatibility APIs.
+     *
+     * MIDP mutable images are always opaque, but Nokia DirectUtils exposes a
+     * mutable image constructor with an ARGB fill color. Keep the behavior
+     * scoped here so normal MIDP Image.createImage(width, height) remains
+     * unchanged.
+     *
+     * @param width the width of the new image, in pixels
+     * @param height the height of the new image, in pixels
+     * @param argb the initial ARGB fill value
+     * @return the created image
+     */
+    public static Image createImage(int width, int height, int argb) {
+        Image image;
+        int[] pixels;
+        int fillArgb = argb;
+        int i;
+
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException();
+        }
+
+        if ((fillArgb & 0xff000000) == 0 && (fillArgb & 0x00ffffff) != 0) {
+            fillArgb |= 0xff000000;
+        }
+
+        image = new Image(ImageDataFactory.getImageDataFactory().
+                          createOffScreenImageData(width, height,
+                              ((fillArgb >>> 24) & 0xff) != 0xff));
+
+        if (((fillArgb >>> 24) & 0xff) == 0xff) {
+            Graphics graphics = image.getGraphics();
+            graphics.setColor(fillArgb & 0x00ffffff);
+            graphics.fillRect(0, 0, width, height);
+            graphics.setColor(0);
+        } else {
+            pixels = new int[width * height];
+            for (i = 0; i < pixels.length; i++) {
+                pixels[i] = fillArgb;
+            }
+            image.getGraphics().drawRGB(pixels, 0, width, 0, 0, width, height,
+                    true);
+        }
+
+        return image;
+    }
+
+    /**
      * Creates an immutable image from a source image.
      * If the source image is mutable, an immutable copy is created and
      * returned.  If the source image is immutable, the implementation may

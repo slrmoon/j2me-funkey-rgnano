@@ -67,6 +67,12 @@ Result:
 
 If no `JAR` is provided, the script still builds the launcher `OPK` and bundles a tiny built-in `HelloMidlet` as a fallback/test MIDlet. The main entry point remains the SDL launcher.
 
+For a pure launcher/runtime OPK without any bundled MIDlet JAR:
+
+```bash
+FUNKEY_RUNTIME_ONLY=1 ./package-funkey-opk.sh
+```
+
 ## Current launcher defaults
 
 - App title: `J2ME`

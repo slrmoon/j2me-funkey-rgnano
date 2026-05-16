@@ -121,7 +121,10 @@ gx_draw_rgb(const jshort *clip,
                 //     a, b, sbuf->width, sbuf->height);
             } else {
                 CHECK_PTR_CLIP(sbuf, &(sbuf->pixelData[idx]));
-                if (!processAlpha || ((value & 0xff000000) == 0xff000000)) {
+                if (sbuf->alphaData != NULL && processAlpha) {
+                    sbuf->pixelData[idx] = GXJ_RGB24TORGB16(value);
+                    sbuf->alphaData[idx] = (value >> 24) & 0xff;
+                } else if (!processAlpha || ((value & 0xff000000) == 0xff000000)) {
                     sbuf->pixelData[idx] = GXJ_RGB24TORGB16(value);
                 } else {
                     int alpha = (value >> 24) & 0xff;

@@ -147,9 +147,35 @@ Set `FUNKEY_MIDLET_MAIN` to specify the main class explicitly.
 
 Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
 
+## Current compatibility fixes
+
+These fixes are implemented in the runtime/launcher, so they apply to normal
+JARs launched from the SD card and do not require patching individual games.
+
+- **Soft keys** — Chameleon soft-button handling no longer eats Nokia
+  `SOFT1`/`SOFT2` key events when no UI command is active. Games such as
+  `Bomberman`, `Bounce`, and `Gothic 3` can receive `Canvas.keyPressed(-6)`
+  and `Canvas.keyPressed(-7)` for in-game menus.
+- **Nokia FullCanvas** — `com.nokia.mid.ui.FullCanvas` now enters fullscreen
+  mode on construction. This matches Nokia game expectations and prevents the
+  Chameleon command area from appearing below fullscreen games after saved
+  display settings are reapplied.
+- **Nokia DirectUtils / DirectGraphics rendering** —
+  `DirectUtils.createImage(width, height, argb)` now creates mutable images
+  with real alpha buffers when requested, keeps non-zero RGB fill colors
+  opaque, and preserves alpha through mutable-image snapshots and image-to-image
+  compositing. `DirectGraphics.drawImage` also maps Nokia manipulation flags to
+  MIDP transforms, including Nokia's counter-clockwise `ROTATE_90`/`ROTATE_270`
+  semantics plus horizontal/vertical flips. This fixes Bounce-style black
+  outlines, the large ball sprite, and transformed slope/surface tiles.
+- **Runtime-only OPK packaging** — `FUNKEY_RUNTIME_ONLY=1` builds a launcher
+  OPK without bundling any MIDlet JAR/JAD, so release packages can stay generic.
+
 ## Known issues
 
-- **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may require tweaking `PHONEME_KEY_PROFILE` and `PHONEME_ENABLE_GP2X_KEYS` env vars inside `r.sh`.
+- **Controls** — some games use vendor-specific or device-specific key codes.
+  The launcher provides selectable key profiles and per-game bindings, but a
+  few games may still need manual mapping.
 - **No 3D** — JSR 184 (M3G) is not supported. 3D J2ME games will not run.
 
 ## Debugging

@@ -97,6 +97,11 @@ final class ImageData implements AbstractImageData {
             for (int i = 0; i < pixelData.length; i++) {
                 pixelData[i] = (byte)0xFF;
             }
+            if (alphaData != null) {
+                for (int i = 0; i < alphaData.length; i++) {
+                    alphaData[i] = (byte)0xFF;
+                }
+            }
         }
     }
 
@@ -113,6 +118,24 @@ final class ImageData implements AbstractImageData {
      */
     ImageData(int width, int height, boolean isMutable,
               byte[] pixelData) {
+        this(width, height, isMutable, pixelData, null);
+    }
+
+    /**
+     * Constructs mutable or immutable <code> ImageData </code>
+     * using passed in width, height, pixel data and alpha data.
+     *
+     * @param width The width of the <code>ImageData </code> to be created.
+     * @param height The height of the <code>ImageData </code> to be created.
+     * @param isMutable true to create mutable <code>ImageData</code>,
+     *                  false to create immutable <code>ImageData</code>
+     * @param pixelData byte array that contains pixel data for the
+     *                  <code>ImageData</code>.
+     * @param alphaData byte array that contains alpha data for the
+     *                  <code>ImageData</code>.
+     */
+    ImageData(int width, int height, boolean isMutable,
+              byte[] pixelData, byte[] alphaData) {
         this.width = width;
         this.height = height;
         this.isMutable = isMutable;
@@ -123,7 +146,14 @@ final class ImageData implements AbstractImageData {
 
         this.pixelData = newPixelData;
 
-        
+        if (alphaData != null) {
+            byte[] newAlphaData = new byte[width * height];
+            System.arraycopy(alphaData, 0, newAlphaData, 0,
+                             newAlphaData.length);
+            this.alphaData = newAlphaData;
+        } else {
+            this.alphaData = null;
+        }
     }
 
     /**
@@ -206,5 +236,14 @@ final class ImageData implements AbstractImageData {
      */
     byte[] getPixelData() {
         return pixelData;
+    }
+
+    /**
+     * Gets alpha data associated with this <code> ImageData</code> instance.
+     * @return byte array that represents alpha data associated with this
+     *         <code>ImageData</code> instance.
+     */
+    byte[] getAlphaData() {
+        return alphaData;
     }
 }

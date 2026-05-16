@@ -92,6 +92,20 @@ class ImageDataFactory implements AbstractImageDataFactory {
     }
 
     /**
+     * Creates a new, mutable image for off-screen drawing, optionally with
+     * alpha storage for vendor APIs that explicitly request ARGB contents.
+     *
+     * @param width the width of the new image, in pixels
+     * @param height the height of the new image, in pixels
+     * @param hasAlpha true if the image should keep per-pixel alpha
+     * @return the created image
+     */
+    public ImageData createOffScreenImageData(int width, int height,
+                                              boolean hasAlpha) {
+        return new ImageData(width, height, true, true, hasAlpha);
+    }
+
+    /**
      * Creates an immutable <code>ImageData</code> from
      * a <code>mutableSource ImageData</code>.
      * If the source image data is mutable, an immutable copy is created and
@@ -120,10 +134,10 @@ class ImageDataFactory implements AbstractImageDataFactory {
     public ImageData createImmutableCopy(ImageData mutableSource) {
         int width  = mutableSource.getWidth();
         int height = mutableSource.getHeight();
-        int length = width * height * 2;
 
         return  new ImageData(width, height, false,
-                              mutableSource.getPixelData());
+                              mutableSource.getPixelData(),
+                              mutableSource.getAlphaData());
     }
 
     /**

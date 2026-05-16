@@ -16,12 +16,7 @@ public final class DirectUtils {
     }
 
     public static Image createImage(int width, int height, int argb) {
-        Image image = Image.createImage(width, height);
-        Graphics graphics = image.getGraphics();
-        graphics.setColor(argb & 0x00ffffff);
-        graphics.fillRect(0, 0, width, height);
-        graphics.setColor(0);
-        return image;
+        return Image.createImage(width, height, argb);
     }
 
     private static final class DirectGraphicsImpl implements DirectGraphics {
@@ -283,12 +278,25 @@ public final class DirectUtils {
         private int toLcduiTransform(int manipulation) {
             int rotation = rotationPart(manipulation);
             boolean mirror = (manipulation & FLIP_HORIZONTAL) != 0;
+            boolean flipVertical = (manipulation & FLIP_VERTICAL) != 0;
 
+            if (mirror && flipVertical && rotation == ROTATE_90) {
+                return 5;
+            }
+            if (mirror && flipVertical && rotation == ROTATE_180) {
+                return 0;
+            }
+            if (mirror && flipVertical && rotation == ROTATE_270) {
+                return 6;
+            }
+            if (mirror && flipVertical) {
+                return 3;
+            }
             if (mirror && rotation == ROTATE_90) {
                 return 7;
             }
             if (mirror && rotation == ROTATE_180) {
-                return 2;
+                return 1;
             }
             if (mirror && rotation == ROTATE_270) {
                 return 4;
@@ -296,14 +304,26 @@ public final class DirectUtils {
             if (mirror) {
                 return 2;
             }
+            if (flipVertical && rotation == ROTATE_90) {
+                return 4;
+            }
+            if (flipVertical && rotation == ROTATE_180) {
+                return 2;
+            }
+            if (flipVertical && rotation == ROTATE_270) {
+                return 7;
+            }
+            if (flipVertical) {
+                return 1;
+            }
             if (rotation == ROTATE_90) {
-                return 5;
+                return 6;
             }
             if (rotation == ROTATE_180) {
                 return 3;
             }
             if (rotation == ROTATE_270) {
-                return 6;
+                return 5;
             }
             return 0;
         }
