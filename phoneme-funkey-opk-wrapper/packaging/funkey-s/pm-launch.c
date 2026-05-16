@@ -309,6 +309,27 @@ static void draw_launching(void);
 static void handle_key_browser(SDL_KeyboardEvent *kev);
 static void handle_key_keybinds(SDL_KeyboardEvent *kev);
 
+static void resolve_java_dir(void) {
+    const char *env_java = getenv("PHONEME_JAVA_DIR");
+    if (env_java && env_java[0]) {
+        snprintf(java_dir, sizeof(java_dir), "%s", env_java);
+        return;
+    }
+    DIR *d = opendir("/mnt/java");
+    if (d) { closedir(d); return; }
+    d = opendir("/mnt");
+    if (!d) return;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_type != DT_DIR && ent->d_type != DT_UNKNOWN) continue;
+        if (strcasecmp(ent->d_name, "java") == 0) {
+            snprintf(java_dir, sizeof(java_dir), "/mnt/%s", ent->d_name);
+            break;
+        }
+    }
+    closedir(d);
+}
+
 /* ─────────────────────────────────────────────────────
  *  game scanning
  * ──────────────────────────────────────────────────── */
@@ -1400,13 +1421,8 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    /* init java_dir from env */
-    {
-        const char *env_java = getenv("PHONEME_JAVA_DIR");
-        if (env_java && env_java[0]) {
-            snprintf(java_dir, sizeof(java_dir), "%s", env_java);
-        }
-    }
+    /* case-insensitive java_dir lookup */
+    resolve_java_dir();
 
     /* init SDL */
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) {
