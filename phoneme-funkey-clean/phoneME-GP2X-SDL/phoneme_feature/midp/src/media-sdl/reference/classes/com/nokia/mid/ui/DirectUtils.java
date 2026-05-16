@@ -226,33 +226,23 @@ public final class DirectUtils {
             if (manipulation == 0) {
                 return source;
             }
-            /* The Nokia flags are close enough to MIDP sprite transforms for drawRegion,
-             * but drawRGB needs a small local transform path. */
             int dstWidth = transformedWidth(width, height, manipulation);
             int dstHeight = transformedHeight(width, height, manipulation);
             int[] dst = new int[dstWidth * dstHeight];
+            int transform = toLcduiTransform(manipulation);
             int row;
             int col;
 
             for (row = 0; row < height; row++) {
                 for (col = 0; col < width; col++) {
-                    int dx = ((manipulation & FLIP_HORIZONTAL) != 0) ? width - 1 - col : col;
-                    int dy = ((manipulation & FLIP_VERTICAL) != 0) ? height - 1 - row : row;
+                    int dx = ((transform & 2) != 0) ? width - 1 - col : col;
+                    int dy = ((transform & 1) != 0) ? height - 1 - row : row;
                     int value = source[row * width + col];
 
-                    switch (rotationPart(manipulation)) {
-                    case ROTATE_90:
-                        dst[dx * dstWidth + (dstWidth - 1 - dy)] = value;
-                        break;
-                    case ROTATE_180:
-                        dst[(dstHeight - 1 - dy) * dstWidth + (dstWidth - 1 - dx)] = value;
-                        break;
-                    case ROTATE_270:
-                        dst[(dstHeight - 1 - dx) * dstWidth + dy] = value;
-                        break;
-                    default:
+                    if ((transform & 4) != 0) {
+                        dst[dx * dstWidth + dy] = value;
+                    } else {
                         dst[dy * dstWidth + dx] = value;
-                        break;
                     }
                 }
             }
@@ -282,30 +272,22 @@ public final class DirectUtils {
 
         private int toLcduiTransform(int manipulation) {
             int rotation = rotationPart(manipulation);
-            boolean mirror = (manipulation & FLIP_HORIZONTAL) != 0;
+            int transform = 0;
 
-            if (mirror && rotation == ROTATE_90) {
-                return 7;
-            }
-            if (mirror && rotation == ROTATE_180) {
-                return 2;
-            }
-            if (mirror && rotation == ROTATE_270) {
-                return 4;
-            }
-            if (mirror) {
-                return 2;
-            }
             if (rotation == ROTATE_90) {
-                return 5;
+                transform = 5;
+            } else if (rotation == ROTATE_180) {
+                transform = 3;
+            } else if (rotation == ROTATE_270) {
+                transform = 6;
             }
-            if (rotation == ROTATE_180) {
-                return 3;
+            if ((manipulation & FLIP_HORIZONTAL) != 0) {
+                transform ^= 2;
             }
-            if (rotation == ROTATE_270) {
-                return 6;
+            if ((manipulation & FLIP_VERTICAL) != 0) {
+                transform ^= 1;
             }
-            return 0;
+            return transform;
         }
 
         private void logOnce(String name, int width, int height, int format, int manipulation) {
