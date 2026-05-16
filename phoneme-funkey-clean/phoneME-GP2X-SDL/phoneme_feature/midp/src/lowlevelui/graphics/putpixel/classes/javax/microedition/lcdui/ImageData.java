@@ -165,10 +165,11 @@ final class ImageData implements AbstractImageData {
     void fillARGB(int argb) {
         int pixel = argb & 0x00ffffff;
         byte alpha = (byte)((argb >>> 24) & 0xff);
-        byte low = (byte)((((pixel >> 5) & 0x3f) << 2)
-                | ((pixel >> 3) & 0x03));
-        byte high = (byte)((((pixel >> 19) & 0x1f) << 3)
-                | ((pixel >> 13) & 0x07));
+        int red = (pixel >> 19) & 0x1f;
+        int green = (pixel >> 10) & 0x3f;
+        int blue = (pixel >> 3) & 0x1f;
+        byte low = (byte)(((green & 0x07) << 5) | blue);
+        byte high = (byte)((red << 3) | (green >> 3));
         int i;
 
         for (i = 0; i < pixelData.length; i += 2) {
