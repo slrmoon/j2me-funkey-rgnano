@@ -24,12 +24,7 @@ public final class DirectUtils {
     }
 
     public static Image createImage(int width, int height, int argb) {
-        Image image = Image.createImage(width, height);
-        Graphics graphics = image.getGraphics();
-        graphics.setColor(argb & 0x00ffffff);
-        graphics.fillRect(0, 0, width, height);
-        graphics.setColor(0);
-        return image;
+        return Image.createARGBImage(width, height, argb);
     }
 
     private static final class DirectGraphicsImpl implements DirectGraphics {

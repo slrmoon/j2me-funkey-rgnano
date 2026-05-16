@@ -82,6 +82,10 @@ class ImageDataFactory implements AbstractImageDataFactory {
         return data;
     }
 
+    public ImageData createOffScreenImageData(int width, int height, int argb) {
+        return createOffScreenImageData(width, height);
+    }
+
     /**
      * Creates an immutable image from a source mutable image.
      *

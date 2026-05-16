@@ -45,6 +45,8 @@ interface AbstractImageDataFactory {
      */
     ImageData createOffScreenImageData(int width, int height);
 
+    ImageData createOffScreenImageData(int width, int height, int argb);
+
     /**
      * Creates an immutable image data from a source mutable image data.
      *

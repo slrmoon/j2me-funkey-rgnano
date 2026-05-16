@@ -896,7 +896,11 @@ class DisplayableLFImpl implements DisplayableLF {
         int h = 0;
         
         if (!owner.isInFullScreenMode) {
-            h = ScreenSkin.HEIGHT - SoftButtonSkin.HEIGHT;
+            h = ScreenSkin.HEIGHT;
+
+            if (!(owner instanceof Canvas)) {
+                h -= SoftButtonSkin.HEIGHT;
+            }
             
             if (owner.getTitle() != null) {
                 h -= TitleSkin.HEIGHT;

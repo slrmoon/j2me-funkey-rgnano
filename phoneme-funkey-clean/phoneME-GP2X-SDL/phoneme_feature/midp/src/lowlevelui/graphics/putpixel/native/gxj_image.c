@@ -806,6 +806,8 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
 
         if (src->alphaData != NULL) {
             unsigned char *pSrcAlpha = src->alphaData + (y_src * src->width) + x_src;
+            unsigned char *pDestAlpha = dest->alphaData == NULL
+                ? NULL : dest->alphaData + (y_dest * dest->width) + x_dest;
 
             /* copy the source to the destination */
             for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
@@ -813,6 +815,9 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
                     if ((*pSrcAlpha) == 0xFF) {
                         CHECK_PTR_CLIP(dest, pDest);
                         *pDest = *pSrc;
+                        if (pDestAlpha != NULL) {
+                            *pDestAlpha = 0xff;
+                        }
                     }
                     else if (*pSrcAlpha > 0x3) {
                         r1 = (*pSrc >> 11);
@@ -831,23 +836,42 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
                         b1 = (b1 * a3 + b2 * (31 - a3)) >> 5;
 
                         *pDest = (gxj_pixel_type)((r1 << 11) | (g1 << 5) | (b1));
+                        if (pDestAlpha != NULL) {
+                            *pDestAlpha = (unsigned char)(*pSrcAlpha
+                                + ((*pDestAlpha) * (255 - *pSrcAlpha) + 127) / 255);
+                        }
+                    }
+                    if (pDestAlpha != NULL) {
+                        pDestAlpha++;
                     }
                 }
 
                 pDest += destWidthDiff;
                 pSrc += srcWidthDiff;
                 pSrcAlpha += srcWidthDiff;
+                if (pDestAlpha != NULL) {
+                    pDestAlpha += destWidthDiff;
+                }
             }
         } else {
+            unsigned char *pDestAlpha = dest->alphaData == NULL
+                ? NULL : dest->alphaData + (y_dest * dest->width) + x_dest;
+
             /* copy the source to the destination */
             for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
                 for (limit = pDest + width; pDest < limit; pDest++, pSrc++) {
                     CHECK_PTR_CLIP(dest, pDest);
                     *pDest = *pSrc;
+                    if (pDestAlpha != NULL) {
+                        *pDestAlpha++ = 0xff;
+                    }
                 }
 
                 pDest += destWidthDiff;
                 pSrc += srcWidthDiff;
+                if (pDestAlpha != NULL) {
+                    pDestAlpha += destWidthDiff;
+                }
             }
         }
     }
