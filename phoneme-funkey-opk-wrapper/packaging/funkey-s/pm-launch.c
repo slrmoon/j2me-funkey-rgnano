@@ -269,6 +269,8 @@ static const char *display_modes[] = {
 #define MAX_GAMES   512
 typedef struct {
     char *path;
+    char label[PATH_MAX];
+    char config[PATH_MAX];
     char title[128];
 } GameEntry;
 
@@ -315,13 +317,73 @@ static void handle_key_browser(SDL_KeyboardEvent *kev);
 static void handle_key_keybinds(SDL_KeyboardEvent *kev);
 static char *trim_line(char *text);
 static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size);
+static void scan_game_dir(const char *dir_path, const char *rel_prefix);
+static const char *game_display_name(int idx);
 
 /* ─────────────────────────────────────────────────────
  *  game scanning
  * ──────────────────────────────────────────────────── */
-static void scan_games(void) {
+static void add_game(const char *full_path, const char *rel_path) {
+    int jar_len;
+    int i;
+
+    if (game_count >= MAX_GAMES) return;
+    games[game_count].path = strdup(full_path);
+    snprintf(games[game_count].label, sizeof(games[game_count].label), "%s", rel_path);
+    snprintf(games[game_count].config, sizeof(games[game_count].config), "%s", rel_path);
+    for (i = 0; games[game_count].config[i] != '\0'; i++) {
+        if (games[game_count].config[i] == '/') {
+            games[game_count].config[i] = '_';
+        }
+    }
+    games[game_count].title[0] = '\0';
+    jar_len = strlen(full_path);
+    if (jar_len >= 5) {
+        char jad_path[PATH_MAX];
+        snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, full_path);
+        read_midlet_name_from_jad(jad_path, games[game_count].title,
+                                  sizeof(games[game_count].title));
+    }
+    game_count++;
+}
+
+static void scan_game_dir(const char *dir_path, const char *rel_prefix) {
     DIR *d;
     struct dirent *ent;
+
+    d = opendir(dir_path);
+    if (!d) return;
+
+    while ((ent = readdir(d)) != NULL) {
+        const char *n = ent->d_name;
+        int len = strlen(n);
+        char full[PATH_MAX];
+        char rel[PATH_MAX];
+        struct stat st;
+
+        if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0) continue;
+        snprintf(full, sizeof(full), "%s/%s", dir_path, n);
+        if (stat(full, &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            snprintf(rel, sizeof(rel), "%s%s%s",
+                     rel_prefix, rel_prefix[0] ? "/" : "", n);
+            scan_game_dir(full, rel);
+            if (game_count >= MAX_GAMES) break;
+            continue;
+        }
+
+        if (!S_ISREG(st.st_mode) || len < 5) continue;
+        if (strcasecmp(n + len - 4, ".jar") != 0) continue;
+        snprintf(rel, sizeof(rel), "%s%s%s",
+                 rel_prefix, rel_prefix[0] ? "/" : "", n);
+        add_game(full, rel);
+        if (game_count >= MAX_GAMES) break;
+    }
+    closedir(d);
+}
+
+static void scan_games(void) {
     int i;
 
     for (i = 0; i < game_count; i++) free(games[i].path);
@@ -329,43 +391,29 @@ static void scan_games(void) {
     game_sel = 0;
     game_scroll = 0;
 
-    d = opendir(java_dir);
-    if (!d) return;
-
-    while ((ent = readdir(d)) != NULL) {
-        const char *n = ent->d_name;
-        int len = strlen(n);
-        if (len < 5) continue;
-        /* case-insensitive .jar suffix */
-        if (strcasecmp(n + len - 4, ".jar") != 0) continue;
-        if (game_count >= MAX_GAMES) break;
-
-        char full[PATH_MAX];
-        snprintf(full, sizeof(full), "%s/%s", java_dir, n);
-        games[game_count].path = strdup(full);
-        games[game_count].title[0] = '\0';
-        {
-            char jad_path[PATH_MAX];
-            int jar_len = strlen(full);
-            snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, full);
-            read_midlet_name_from_jad(jad_path, games[game_count].title,
-                                      sizeof(games[game_count].title));
-        }
-        game_count++;
-    }
-    closedir(d);
+    scan_game_dir(java_dir, "");
 
     /* simple sort */
     for (i = 0; i < game_count - 1; i++) {
         int j;
         for (j = i + 1; j < game_count; j++) {
-            if (strcasecmp(games[i].path, games[j].path) > 0) {
+            if (strcasecmp(game_display_name(i), game_display_name(j)) > 0) {
                 GameEntry tmp = games[i];
                 games[i] = games[j];
                 games[j] = tmp;
             }
         }
     }
+}
+
+static const char *game_display_name(int idx) {
+    if (idx >= 0 && idx < game_count && games[idx].title[0] != '\0') {
+        return games[idx].title;
+    }
+    if (idx >= 0 && idx < game_count) {
+        return games[idx].label;
+    }
+    return "";
 }
 
 /* ─────────────────────────────────────────────────────
@@ -897,17 +945,15 @@ static void draw_browser(void) {
 
     int i;
     for (i = game_scroll; i < game_count && y < SCR_H - 16; i++) {
-        const char *name = game_stem(games[i].path);
+        const char *name = game_display_name(i);
         if (games[i].title[0] != '\0') {
             if (i == game_sel) {
-                boxColor(screen, 0, y - 1, SCR_W - 1, y + 18, 0x003366ff);
-                stringColor(screen, 6, y, name, 0xff6060ff);
-                stringColor(screen, 6, y + 9, games[i].title, 0xffffffff);
+                boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
+                stringColor(screen, 6, y, name, 0x00ff88ff);
             } else {
-                stringColor(screen, 6, y, name, 0xff6060ff);
-                stringColor(screen, 6, y + 9, games[i].title, 0xffffffff);
+                stringColor(screen, 6, y, name, 0xffffffff);
             }
-            y += 20;
+            y += 11;
         } else {
             y = draw_item(6, y, name, i == game_sel);
         }
@@ -931,7 +977,7 @@ static void draw_keybinds(void) {
 
     int y = 6;
     char buf[128];
-    snprintf(buf, sizeof(buf), "Controls: %s", game_stem(games[game_sel].path));
+    snprintf(buf, sizeof(buf), "Controls: %s", game_display_name(game_sel));
     draw_header(buf, y);
     y += 12;
 
@@ -979,7 +1025,7 @@ static void draw_launching(void) {
     SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
 
     char buf[256];
-    snprintf(buf, sizeof(buf), "Launching %s...", game_stem(games[game_sel].path));
+    snprintf(buf, sizeof(buf), "Launching %s...", game_display_name(game_sel));
     stringColor(screen, 4, SCR_H / 2 - 5, buf, 0x00ff88ff);
 
     SDL_Flip(screen);
@@ -1309,7 +1355,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
         break;
     case SDLK_RETURN: case SDLK_SPACE: case SDLK_a: /* A = SELECT */
         if (game_count > 0) {
-            load_binds(game_stem(games[game_sel].path), games[game_sel].path);
+            load_binds(games[game_sel].config, games[game_sel].path);
             bind_sel = 0;
             bind_scroll = 0;
             state = STATE_KEYBINDS;
@@ -1317,7 +1363,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
         break;
     case SDLK_s: /* START = SOFT2 */
         if (game_count > 0) {
-            load_binds(game_stem(games[game_sel].path), games[game_sel].path);
+            load_binds(games[game_sel].config, games[game_sel].path);
             launch_game(game_sel);
             state = STATE_BROWSER;
         }
@@ -1434,13 +1480,13 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
         if (capture_mode) {
             capture_mode = 0;
         } else {
-            save_binds(game_stem(games[game_sel].path));
+            save_binds(games[game_sel].config);
             state = STATE_BROWSER;
         }
         break;
 
     case SDLK_ESCAPE: case SDLK_q:
-        save_binds(game_stem(games[game_sel].path));
+        save_binds(games[game_sel].config);
         state = STATE_BROWSER;
         break;
 
