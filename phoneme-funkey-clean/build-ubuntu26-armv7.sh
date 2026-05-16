@@ -214,6 +214,78 @@ invalidate_midp_artifacts_if_cldc_changed() {
     fi
 }
 
+invalidate_midp_artifacts_if_sources_changed() {
+    runmidlet=$MIDP_OUTPUT_DIR/bin/arm/runMidlet
+
+    if [ ! -f "$runmidlet" ]; then
+        return
+    fi
+
+    changed_source=$(
+        find \
+            "$MEHOME/midp/src" \
+            "$MEHOME/midp/build/linux_sdl_gcc" \
+            -type f \
+            \( \
+                -name '*.c' -o -name '*.h' -o -name '*.java' -o -name '*.jpp' -o \
+                -name '*.xml' -o -name '*.cfg' -o -name '*.gmk' -o -name '*.mk' -o \
+                -name 'Makefile' \
+            \) \
+            -newer "$runmidlet" \
+            -print 2>/dev/null | head -n 1
+    )
+
+    if [ -n "$changed_source" ]; then
+        echo "MIDP source changed since runMidlet: $changed_source"
+        echo "Invalidating MIDP classes, generated ROM/native tables and runMidlet"
+        rm -f \
+            "$MIDP_OUTPUT_DIR/classes.zip" \
+            "$MIDP_OUTPUT_DIR/ROMImage.cpp" \
+            "$MIDP_OUTPUT_DIR/nativeFunctionTable.cpp" \
+            "$MIDP_OUTPUT_DIR/obj/arm/ROMImage.o" \
+            "$MIDP_OUTPUT_DIR/obj/arm/nativeFunctionTable.o" \
+            "$MIDP_OUTPUT_DIR/bin/arm/runMidlet"
+    fi
+}
+
+sync_opk_stage_runtime() {
+    opk_stage=$BUILD_OUTPUT_DIR/opk/pm
+
+    if [ ! -d "$opk_stage" ]; then
+        return
+    fi
+
+    echo "Synchronizing existing OPK stage runtime artifacts"
+    mkdir -p "$opk_stage/bin"
+    cp "$MIDP_OUTPUT_DIR/bin/arm/runMidlet" "$opk_stage/bin/runMidlet"
+    cp "$MIDP_OUTPUT_DIR/bin/arm/installMidlet" "$opk_stage/bin/installMidlet"
+    cp "$MIDP_OUTPUT_DIR/bin/arm/listMidlets.sh" "$opk_stage/bin/listMidlets.sh"
+    cp "$MIDP_OUTPUT_DIR/bin/arm/preverify" "$opk_stage/bin/preverify"
+    cp "$MIDP_OUTPUT_DIR/bin/arm/j2se_test_keystore.bin" "$opk_stage/bin/" 2>/dev/null || true
+
+    rm -rf "$opk_stage/lib"
+    cp -R "$MIDP_OUTPUT_DIR/lib" "$opk_stage/lib"
+    rm -rf "$opk_stage/lib/freepats"
+
+    if [ -d "$MIDP_OUTPUT_DIR/appdb" ]; then
+        rm -rf "$opk_stage/appdb"
+        cp -R "$MIDP_OUTPUT_DIR/appdb" "$opk_stage/appdb"
+    fi
+
+    if [ -s "$ARM_CLDC_DIST_DIR/bin/cldc_vm" ]; then
+        cp "$ARM_CLDC_DIST_DIR/bin/cldc_vm" "$opk_stage/bin/cldc_vm"
+    fi
+
+    if [ -f "$opk_stage/runtime-version" ]; then
+        {
+            printf 'pm-runtime-v1\n'
+            date +%s
+            wc -c "$opk_stage/bin/runMidlet" "$opk_stage/bin/cldc_vm" \
+                "$opk_stage/lib/soundfont/default.sf2" 2>/dev/null || true
+        } > "$opk_stage/runtime-version"
+    fi
+}
+
 export MEHOME BUILD_OUTPUT_DIR JDK_DIR
 export AWK=${AWK:-awk}
 export PATH=$JDK_DIR/bin:$PATH
@@ -311,6 +383,7 @@ run_make \
 ARM_CLDC_DIST_DIR=$BUILD_OUTPUT_DIR/cldc/$ARM_CLDC_PLATFORM/dist
 require_file "$ARM_CLDC_DIST_DIR/include/jvmconfig.h"
 invalidate_midp_artifacts_if_cldc_changed
+invalidate_midp_artifacts_if_sources_changed
 
 echo "Building ARM MIDP SDL..."
 cd "$MEHOME/midp/build/linux_sdl_gcc"
@@ -325,6 +398,8 @@ run_make \
     CMDLINE_CFLAGS="$MIDP_CMDLINE_CFLAGS" \
     SDL_MIXER_EXTRA_LIBS="${SDL_MIXER_EXTRA_LIBS:-}" \
     USE_LIBFLOAT="$USE_LIBFLOAT"
+
+sync_opk_stage_runtime
 
 echo "ARM outputs:"
 find "$BUILD_OUTPUT_DIR" -type f -perm -111 -exec file {} \; | grep -E 'ARM|ELF' || true

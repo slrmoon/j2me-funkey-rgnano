@@ -88,6 +88,11 @@ static Property* internalPropertySet = NULL;
 /** Property set for system properties */
 static Property* systemPropertySet = NULL;
 
+/** Locale property name, as defined by the MIDP specification */
+#define LOCALE_PROP_NAME "microedition.locale"
+/** Default locale used when no generated system property is available */
+#define DEFAULT_LOCALE "en-US"
+
 
 /**
  * Calls out to the system to obtain a property.
@@ -357,5 +362,11 @@ setSystemProperty(const char* key , const char* value) {
  */
 const char*
 getSystemProperty(const char* key) {
-    return getProp(&systemPropertySet, key);
+    const char* value = getProp(&systemPropertySet, key);
+
+    if ((NULL == value) && (strcmp(key, LOCALE_PROP_NAME) == 0)) {
+        return DEFAULT_LOCALE;
+    }
+
+    return value;
 }
