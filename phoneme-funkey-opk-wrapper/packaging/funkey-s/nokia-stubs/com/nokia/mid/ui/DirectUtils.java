@@ -398,42 +398,23 @@ public final class DirectUtils {
         }
 
         private int[] transformArgb(int[] source, int width, int height, int manipulation) {
-            int srcWidth = width;
-            int srcHeight = height;
             int dstWidth = transformedWidth(width, height, manipulation);
             int dstHeight = transformedHeight(width, height, manipulation);
             int[] transformed = new int[dstWidth * dstHeight];
+            int transform = toLcduiTransform(manipulation);
             int row;
             int col;
 
-            for (row = 0; row < srcHeight; row++) {
-                for (col = 0; col < srcWidth; col++) {
-                    int dx = col;
-                    int dy = row;
+            for (row = 0; row < height; row++) {
+                for (col = 0; col < width; col++) {
+                    int dx = ((transform & 2) != 0) ? width - 1 - col : col;
+                    int dy = ((transform & 1) != 0) ? height - 1 - row : row;
+                    int value = source[row * width + col];
 
-                    if ((manipulation & FLIP_HORIZONTAL) != 0) {
-                        dx = srcWidth - 1 - dx;
-                    }
-                    if ((manipulation & FLIP_VERTICAL) != 0) {
-                        dy = srcHeight - 1 - dy;
-                    }
-
-                    switch (rotationPart(manipulation)) {
-                    case ROTATE_90:
-                        transformed[dx * dstWidth + (dstWidth - 1 - dy)] =
-                                source[row * srcWidth + col];
-                        break;
-                    case ROTATE_180:
-                        transformed[(dstHeight - 1 - dy) * dstWidth + (dstWidth - 1 - dx)] =
-                                source[row * srcWidth + col];
-                        break;
-                    case ROTATE_270:
-                        transformed[(dstHeight - 1 - dx) * dstWidth + dy] =
-                                source[row * srcWidth + col];
-                        break;
-                    default:
-                        transformed[dy * dstWidth + dx] = source[row * srcWidth + col];
-                        break;
+                    if ((transform & 4) != 0) {
+                        transformed[dx * dstWidth + dy] = value;
+                    } else {
+                        transformed[dy * dstWidth + dx] = value;
                     }
                 }
             }
@@ -452,15 +433,34 @@ public final class DirectUtils {
         }
 
         private int rotationPart(int manipulation) {
-            if (manipulation == ROTATE_90 || manipulation == ROTATE_180
-                    || manipulation == ROTATE_270) {
+            int rotation = manipulation & 0xff;
+            if (rotation == ROTATE_90 || rotation == ROTATE_180 || rotation == ROTATE_270) {
+                return rotation;
+            }
+            if (manipulation == ROTATE_90 || manipulation == ROTATE_180 || manipulation == ROTATE_270) {
                 return manipulation;
             }
-            if ((manipulation & 0xff) == ROTATE_90 || (manipulation & 0xff) == ROTATE_180
-                    || (manipulation & 0xff) == ROTATE_270) {
-                return manipulation & 0xff;
-            }
             return 0;
+        }
+
+        private int toLcduiTransform(int manipulation) {
+            int rotation = rotationPart(manipulation);
+            int transform = 0;
+
+            if (rotation == ROTATE_90) {
+                transform = 5;
+            } else if (rotation == ROTATE_180) {
+                transform = 3;
+            } else if (rotation == ROTATE_270) {
+                transform = 6;
+            }
+            if ((manipulation & FLIP_HORIZONTAL) != 0) {
+                transform ^= 2;
+            }
+            if ((manipulation & FLIP_VERTICAL) != 0) {
+                transform ^= 1;
+            }
+            return transform;
         }
 
         private int resolveAnchorX(int x, int anchor, int width) {
