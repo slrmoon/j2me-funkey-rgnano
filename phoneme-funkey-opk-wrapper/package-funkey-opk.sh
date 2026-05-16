@@ -311,9 +311,18 @@ else
 fi
 
 {
-    printf 'pm-runtime-v1\n'
-    date +%s
-    wc -c "$STAGE/bin/runMidlet" "$STAGE/bin/cldc_vm" "$STAGE/lib/soundfont/default.sf2" 2>/dev/null || true
+    printf 'pm-runtime-v2\n'
+    for runtime_file in \
+        bin/runMidlet \
+        bin/cldc_vm \
+        bin/installMidlet \
+        bin/listMidlets.sh \
+        bin/preverify \
+        lib/soundfont/default.sf2; do
+        if [ -f "$STAGE/$runtime_file" ]; then
+            sha256sum "$STAGE/$runtime_file" | awk -v name="$runtime_file" '{ print $1 "  " name }'
+        fi
+    done
 } > "$STAGE/runtime-version"
 
 cat > "$STAGE/r.sh" <<'EOF'
