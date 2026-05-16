@@ -311,6 +311,7 @@ static void draw_keybinds(void);
 static void draw_launching(void);
 static void handle_key_browser(SDL_KeyboardEvent *kev);
 static void handle_key_keybinds(SDL_KeyboardEvent *kev);
+static const char *game_stem(const char *path);
 
 static void resolve_java_dir(void) {
     const char *env_java = getenv("PHONEME_JAVA_DIR");
