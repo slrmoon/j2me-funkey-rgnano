@@ -32,6 +32,7 @@ APP_TITLE=${FUNKEY_APP_TITLE:-J2ME}
 APP_COMMENT=${FUNKEY_APP_COMMENT:-Java ME runtime}
 RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
+RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
 
 abs_path() {
     case "$1" in
@@ -170,10 +171,12 @@ if [ -z "$FUNKEY_CC" ] || [ ! -x "$FUNKEY_CC" ]; then
 fi
 
 rm -rf "$STAGE" "$HELLO_BUILD" "$OPK"
-mkdir -p "$STAGE/bin" "$STAGE/midlets" "$HELLO_BUILD/classes" "$HELLO_BUILD/meta"
-mkdir -p "$HELLO_BUILD/verified"
+mkdir -p "$STAGE/bin" "$HELLO_BUILD/meta"
 
-if [ -n "$APP_JAR" ]; then
+if [ "$RUNTIME_ONLY" = "1" ]; then
+    echo "Packaging runtime only: no built-in MIDlet"
+elif [ -n "$APP_JAR" ]; then
+    mkdir -p "$STAGE/midlets" "$HELLO_BUILD/classes" "$HELLO_BUILD/verified"
     APP_JAR=$(abs_path "$APP_JAR")
     if [ ! -f "$APP_JAR" ]; then
         echo "Missing MIDlet jar: $APP_JAR" >&2
@@ -204,6 +207,7 @@ if [ -n "$APP_JAR" ]; then
     fi
     inject_nokia_stubs
 else
+    mkdir -p "$STAGE/midlets" "$HELLO_BUILD/classes" "$HELLO_BUILD/verified"
     BUILTIN_SRC=$HELLO_SRC
     APP_MAIN=HelloMidlet
     "$JDK_DIR/bin/javac" \
@@ -247,16 +251,18 @@ MicroEdition-Profile: MIDP-2.0
 EOF
 fi
 
-JAR_SIZE=$(wc -c < "$STAGE/midlets/a.jar" | tr -d ' ')
-sed '/^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Uu][Rr][Ll]:/d; /^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Ss][Ii][Zz][Ee]:/d' \
-    "$STAGE/midlets/a.jad" > "$HELLO_BUILD/meta/a.jad"
-{
-    cat "$HELLO_BUILD/meta/a.jad"
-    printf 'MIDlet-Jar-URL: a.jar\n'
-    printf 'MIDlet-Jar-Size: %s\n\n' "$JAR_SIZE"
-} > "$STAGE/midlets/a.jad"
-printf '%s\n' "$APP_MAIN" > "$STAGE/midlets/main-class"
-echo "Packaging MIDlet class: $APP_MAIN"
+if [ "$RUNTIME_ONLY" != "1" ]; then
+    JAR_SIZE=$(wc -c < "$STAGE/midlets/a.jar" | tr -d ' ')
+    sed '/^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Uu][Rr][Ll]:/d; /^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Ss][Ii][Zz][Ee]:/d' \
+        "$STAGE/midlets/a.jad" > "$HELLO_BUILD/meta/a.jad"
+    {
+        cat "$HELLO_BUILD/meta/a.jad"
+        printf 'MIDlet-Jar-URL: a.jar\n'
+        printf 'MIDlet-Jar-Size: %s\n\n' "$JAR_SIZE"
+    } > "$STAGE/midlets/a.jad"
+    printf '%s\n' "$APP_MAIN" > "$STAGE/midlets/main-class"
+    echo "Packaging MIDlet class: $APP_MAIN"
+fi
 
 copy_nonempty_file "$MIDP_BIN/runMidlet" "$STAGE/bin/runMidlet" "$RUNMIDLET_FALLBACK"
 cp "$MIDP_BIN/installMidlet" "$STAGE/bin/"
@@ -386,26 +392,32 @@ if [ "$RUNTIME_CURRENT" != "1" ]; then
     cp "$OPK_DIR/bin/j2se_test_keystore.bin" "$APP_DIR/bin/j2se_test_keystore.bin" 2>/dev/null || true
 fi
 echo "copy bin ok" >> "$EARLY_LOG"
-cp "$OPK_DIR/midlets/a.jar" "$APP_DIR/midlets/a.jar" || {
-    echo "copy jar failed" >> "$EARLY_LOG"
-    exit 126
-}
-cp "$OPK_DIR/midlets/a.jad" "$APP_DIR/midlets/a.jad" || {
-    echo "copy jad failed" >> "$EARLY_LOG"
-    exit 126
-}
-cp "$OPK_DIR/midlets/main-class" "$APP_DIR/midlets/main-class" || {
-    echo "copy main class failed" >> "$EARLY_LOG"
-    exit 126
-}
-echo "write jad" >> "$EARLY_LOG"
-JAR_SIZE=$(wc -c < "$APP_DIR/midlets/a.jar" | tr -d ' ')
-sed '/^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Uu][Rr][Ll]:/d; /^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Ss][Ii][Zz][Ee]:/d' \
-    "$OPK_DIR/midlets/a.jad" > "$APP_DIR/midlets/a.jad"
-{
-    printf 'MIDlet-Jar-URL: file://%s/midlets/a.jar\n' "$APP_DIR"
-    printf 'MIDlet-Jar-Size: %s\n\n' "$JAR_SIZE"
-} >> "$APP_DIR/midlets/a.jad"
+if [ "__RUNTIME_ONLY__" != "1" ]; then
+    cp "$OPK_DIR/midlets/a.jar" "$APP_DIR/midlets/a.jar" || {
+        echo "copy jar failed" >> "$EARLY_LOG"
+        exit 126
+    }
+    cp "$OPK_DIR/midlets/a.jad" "$APP_DIR/midlets/a.jad" || {
+        echo "copy jad failed" >> "$EARLY_LOG"
+        exit 126
+    }
+    cp "$OPK_DIR/midlets/main-class" "$APP_DIR/midlets/main-class" || {
+        echo "copy main class failed" >> "$EARLY_LOG"
+        exit 126
+    }
+    echo "write jad" >> "$EARLY_LOG"
+    JAR_SIZE=$(wc -c < "$APP_DIR/midlets/a.jar" | tr -d ' ')
+    sed '/^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Uu][Rr][Ll]:/d; /^[Mm][Ii][Dd][Ll][Ee][Tt]-[Jj][Aa][Rr]-[Ss][Ii][Zz][Ee]:/d' \
+        "$OPK_DIR/midlets/a.jad" > "$APP_DIR/midlets/a.jad"
+    {
+        printf 'MIDlet-Jar-URL: file://%s/midlets/a.jar\n' "$APP_DIR"
+        printf 'MIDlet-Jar-Size: %s\n\n' "$JAR_SIZE"
+    } >> "$APP_DIR/midlets/a.jad"
+else
+    rm -rf "$APP_DIR/midlets"
+    mkdir -p "$APP_DIR/midlets"
+    echo "runtime-only OPK: no bundled MIDlet" >> "$EARLY_LOG"
+fi
 echo "chmod bin" >> "$EARLY_LOG"
 chmod +x "$APP_DIR/bin/runMidlet" "$APP_DIR/bin/installMidlet" "$APP_DIR/bin/listMidlets.sh" "$APP_DIR/bin/preverify"
 if [ "$RUNTIME_CURRENT" != "1" ]; then
@@ -445,6 +457,10 @@ if [ -x ./cldc_vm ]; then
     ./cldc_vm -version || true
 fi
 echo "Running direct classpath MIDlet"
+if [ "__RUNTIME_ONLY__" = "1" ]; then
+    echo "No bundled MIDlet in runtime-only OPK"
+    exit 0
+fi
 MIDLET_CLASS=$(cat "$APP_DIR/midlets/main-class")
 echo "MIDLET_CLASS=$MIDLET_CLASS"
 if [ -n "${RUNMIDLET_HEAP_ARG:-}" ]; then
@@ -466,6 +482,7 @@ exit "$(cat "$APP_DIR/s" 2>/dev/null || echo 1)"
 EOF
 escaped_heap_arg=$(printf '%s' "$RUNMIDLET_HEAP_ARG" | sed "s/'/'\\\\''/g")
 sed -i "s|__RUNMIDLET_HEAP_ARG__|$escaped_heap_arg|" "$STAGE/r.sh"
+sed -i "s|__RUNTIME_ONLY__|$RUNTIME_ONLY|g" "$STAGE/r.sh"
 chmod +x "$STAGE/r.sh"
 
 cat > "$STAGE/pm.funkey-s.desktop" <<EOF

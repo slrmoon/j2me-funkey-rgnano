@@ -611,13 +611,6 @@ public class SoftButtonLayer extends CLayer implements CommandListener {
      * @return true if soft2 command can be processed, false otherwise
      */
     protected boolean isSoft2Active() {
-        // when MIDPWindow is not in full screen mode, we absorb
-        // all key events reserved for the delivery of commands
-        if (!((MIDPWindow)owner).isInFullScreenMode()) {
-            return true;
-        }
-
-        // for full screen mode we should check if soft key is useful
         if (menuUP) {
             return true;
         } else if (soft2 != null) {
@@ -643,13 +636,6 @@ public class SoftButtonLayer extends CLayer implements CommandListener {
      * @return true if soft1 command can be processed, false otherwise
      */
     protected boolean isSoft1Active() {
-        // when MIDPWindow is not in full screen mode, we absorb
-        // all key events reserved for the delivery of commands
-        if (!((MIDPWindow)owner).isInFullScreenMode()) {
-            return true;
-        }
-
-        // for full screen mode we should check if soft key is useful
         if (menuUP) {
             return true;
         } else {
@@ -887,4 +873,3 @@ public class SoftButtonLayer extends CLayer implements CommandListener {
         }
     }
 }
-

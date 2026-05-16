@@ -139,19 +139,19 @@ static const KeyProfilePreset key_profiles[] = {
       { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, K_GAMEB, K_GAMEC, K_GAMED,
         42, 35, K_SOFT2, K_SOFT1 } },
     { "nokia-s40", "NOKIA/S40",
-      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_SOFT1, K_SOFT2,
+      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_GAMEC, K_GAMED,
         42, 35, K_SOFT2, K_SOFT1 } },
     { "sony-ericsson", "SONY ERICSSON",
-      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_SOFT2, K_SOFT1,
+      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_GAMEC, K_GAMED,
         K_CLEAR, 35, K_SOFT1, K_SOFT2 } },
     { "samsung", "SAMSUNG",
-      { 50, 56, 52, 54, 53, K_SELECT, K_SOFT1, K_SOFT2,
+      { 50, 56, 52, 54, 53, K_SELECT, K_GAMEC, K_GAMED,
         42, 35, K_SOFT2, K_SOFT1 } },
     { "lg", "LG",
-      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_CLEAR, K_SOFT2,
+      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_CLEAR, K_GAMED,
         42, 35, K_SOFT1, K_SOFT2 } },
     { "motorola", "MOTOROLA",
-      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, K_GAMEA, K_SOFT1, K_SOFT2,
+      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, K_GAMEA, K_GAMEC, K_GAMED,
         K_SEND, K_END, K_SOFT2, K_SOFT1 } },
     { "soft-21-22", "SOFT 21/22",
       { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_GAMEC, K_GAMED,
@@ -267,7 +267,12 @@ static const char *display_modes[] = {
 
 /* ── game list ──────────────────────────────────────── */
 #define MAX_GAMES   512
-static char  *games[MAX_GAMES];
+typedef struct {
+    char *path;
+    char title[128];
+} GameEntry;
+
+static GameEntry games[MAX_GAMES];
 static int    game_count = 0;
 static int    game_sel   = 0;        /* selected index in browser */
 static int    game_scroll = 0;       /* first visible line */
@@ -308,6 +313,8 @@ static void draw_keybinds(void);
 static void draw_launching(void);
 static void handle_key_browser(SDL_KeyboardEvent *kev);
 static void handle_key_keybinds(SDL_KeyboardEvent *kev);
+static char *trim_line(char *text);
+static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size);
 
 /* ─────────────────────────────────────────────────────
  *  game scanning
@@ -317,7 +324,7 @@ static void scan_games(void) {
     struct dirent *ent;
     int i;
 
-    for (i = 0; i < game_count; i++) free(games[i]);
+    for (i = 0; i < game_count; i++) free(games[i].path);
     game_count = 0;
     game_sel = 0;
     game_scroll = 0;
@@ -335,7 +342,15 @@ static void scan_games(void) {
 
         char full[PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", java_dir, n);
-        games[game_count] = strdup(full);
+        games[game_count].path = strdup(full);
+        games[game_count].title[0] = '\0';
+        {
+            char jad_path[PATH_MAX];
+            int jar_len = strlen(full);
+            snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, full);
+            read_midlet_name_from_jad(jad_path, games[game_count].title,
+                                      sizeof(games[game_count].title));
+        }
         game_count++;
     }
     closedir(d);
@@ -344,8 +359,8 @@ static void scan_games(void) {
     for (i = 0; i < game_count - 1; i++) {
         int j;
         for (j = i + 1; j < game_count; j++) {
-            if (strcasecmp(games[i], games[j]) > 0) {
-                char *tmp = games[i];
+            if (strcasecmp(games[i].path, games[j].path) > 0) {
+                GameEntry tmp = games[i];
                 games[i] = games[j];
                 games[j] = tmp;
             }
@@ -371,6 +386,33 @@ static char *trim_line(char *text) {
         *--end = '\0';
     }
     return text;
+}
+
+static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size) {
+    FILE *jad;
+    char line[256];
+
+    if (out_size == 0) return 0;
+    out[0] = '\0';
+    if (jad_path == NULL || jad_path[0] == '\0') return 0;
+
+    jad = fopen(jad_path, "r");
+    if (jad == NULL) return 0;
+    while (fgets(line, sizeof(line), jad) != NULL) {
+        char *colon;
+        char *value;
+        if (strncasecmp(line, "MIDlet-Name", 11) != 0) continue;
+        colon = strchr(line, ':');
+        if (colon == NULL) continue;
+        value = trim_line(colon + 1);
+        if (value[0] != '\0') {
+            snprintf(out, out_size, "%s", value);
+            fclose(jad);
+            return 1;
+        }
+    }
+    fclose(jad);
+    return 0;
 }
 
 static const char *midp_key_label(int key) {
@@ -855,8 +897,20 @@ static void draw_browser(void) {
 
     int i;
     for (i = game_scroll; i < game_count && y < SCR_H - 16; i++) {
-        const char *name = game_stem(games[i]);
-        y = draw_item(6, y, name, i == game_sel);
+        const char *name = game_stem(games[i].path);
+        if (games[i].title[0] != '\0') {
+            if (i == game_sel) {
+                boxColor(screen, 0, y - 1, SCR_W - 1, y + 18, 0x003366ff);
+                stringColor(screen, 6, y, name, 0xff6060ff);
+                stringColor(screen, 6, y + 9, games[i].title, 0xffffffff);
+            } else {
+                stringColor(screen, 6, y, name, 0xff6060ff);
+                stringColor(screen, 6, y + 9, games[i].title, 0xffffffff);
+            }
+            y += 20;
+        } else {
+            y = draw_item(6, y, name, i == game_sel);
+        }
     }
 
     /* help bar */
@@ -877,7 +931,7 @@ static void draw_keybinds(void) {
 
     int y = 6;
     char buf[128];
-    snprintf(buf, sizeof(buf), "Controls: %s", game_stem(games[game_sel]));
+    snprintf(buf, sizeof(buf), "Controls: %s", game_stem(games[game_sel].path));
     draw_header(buf, y);
     y += 12;
 
@@ -925,7 +979,7 @@ static void draw_launching(void) {
     SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
 
     char buf[256];
-    snprintf(buf, sizeof(buf), "Launching %s...", game_stem(games[game_sel]));
+    snprintf(buf, sizeof(buf), "Launching %s...", game_stem(games[game_sel].path));
     stringColor(screen, 4, SCR_H / 2 - 5, buf, 0x00ff88ff);
 
     SDL_Flip(screen);
@@ -1014,7 +1068,7 @@ static void copy_dir(const char *src_base, const char *dst_base) {
  *  launch
  * ──────────────────────────────────────────────────── */
 static void launch_game(int idx) {
-    const char *jar_path = games[idx];
+    const char *jar_path = games[idx].path;
 
     draw_launching();
 
@@ -1088,6 +1142,8 @@ static void launch_game(int idx) {
             "unzip -p \"%s\" META-INF/MANIFEST.MF 2>/dev/null > \"%s\"",
             jar_path, jad_path);
         system(extract_cmd);
+        read_midlet_name_from_jad(jad_path, games[idx].title,
+                                  sizeof(games[idx].title));
     }
 
     {
@@ -1253,7 +1309,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
         break;
     case SDLK_RETURN: case SDLK_SPACE: case SDLK_a: /* A = SELECT */
         if (game_count > 0) {
-            load_binds(game_stem(games[game_sel]), games[game_sel]);
+            load_binds(game_stem(games[game_sel].path), games[game_sel].path);
             bind_sel = 0;
             bind_scroll = 0;
             state = STATE_KEYBINDS;
@@ -1261,7 +1317,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
         break;
     case SDLK_s: /* START = SOFT2 */
         if (game_count > 0) {
-            load_binds(game_stem(games[game_sel]), games[game_sel]);
+            load_binds(game_stem(games[game_sel].path), games[game_sel].path);
             launch_game(game_sel);
             state = STATE_BROWSER;
         }
@@ -1378,13 +1434,13 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
         if (capture_mode) {
             capture_mode = 0;
         } else {
-            save_binds(game_stem(games[game_sel]));
+            save_binds(game_stem(games[game_sel].path));
             state = STATE_BROWSER;
         }
         break;
 
     case SDLK_ESCAPE: case SDLK_q:
-        save_binds(game_stem(games[game_sel]));
+        save_binds(game_stem(games[game_sel].path));
         state = STATE_BROWSER;
         break;
 
