@@ -1,5 +1,7 @@
 # phoneME FunKey J2ME Runtime
 
+> If a specific game doesn't work, reach out on Telegram: [@slr_moon](https://t.me/slr_moon)
+
 A `phoneME`-based Java ME runtime and `OPK` wrapper for `FunKey S / RG Nano`.
 
 Based on the upstream phoneME-GP2X-SDL source at:  
@@ -13,6 +15,13 @@ Based on the upstream phoneME-GP2X-SDL source at:
   <img src="IMG_0023.PNG" width="240" />
   <img src="IMG_0024.PNG" width="240" />
 </p>
+
+## Installation
+
+1. Download `pm.opk` from the [latest release](https://github.com/slrmoon/j2me-funkey-rgnano/releases/latest)
+2. Place it in the `emulators` folder on your FunKey/RG Nano SD card
+3. Create a `java` folder in the root of the SD card
+4. Put your `.jar` files into that `java/` folder
 
 This export is split into two parts:
 
