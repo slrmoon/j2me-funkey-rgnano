@@ -23,6 +23,10 @@ Based on the upstream phoneME-GP2X-SDL source at:
 3. Create a `java` folder in the root of the SD card
 4. Put your `.jar` files into that `java/` folder
 
+---
+
+## Repository structure
+
 This export is split into two parts:
 
 - `phoneme-funkey-clean`
