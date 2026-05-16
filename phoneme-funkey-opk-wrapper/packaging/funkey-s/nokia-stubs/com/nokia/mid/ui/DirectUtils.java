@@ -396,21 +396,36 @@ public final class DirectUtils {
             int dstWidth = transformedWidth(width, height, manipulation);
             int dstHeight = transformedHeight(width, height, manipulation);
             int[] transformed = new int[dstWidth * dstHeight];
-            int transform = toLcduiTransform(manipulation);
+            int rotation = rotationPart(manipulation);
             int row;
             int col;
 
             for (row = 0; row < height; row++) {
                 for (col = 0; col < width; col++) {
-                    int dx = ((transform & 2) != 0) ? width - 1 - col : col;
-                    int dy = ((transform & 1) != 0) ? height - 1 - row : row;
+                    int dx;
+                    int dy;
                     int value = source[row * width + col];
 
-                    if ((transform & 4) != 0) {
-                        transformed[dx * dstWidth + dy] = value;
+                    if (rotation == ROTATE_90) {
+                        dx = row;
+                        dy = width - 1 - col;
+                    } else if (rotation == ROTATE_180) {
+                        dx = width - 1 - col;
+                        dy = height - 1 - row;
+                    } else if (rotation == ROTATE_270) {
+                        dx = height - 1 - row;
+                        dy = col;
                     } else {
-                        transformed[dy * dstWidth + dx] = value;
+                        dx = col;
+                        dy = row;
                     }
+                    if ((manipulation & FLIP_HORIZONTAL) != 0) {
+                        dx = dstWidth - 1 - dx;
+                    }
+                    if ((manipulation & FLIP_VERTICAL) != 0) {
+                        dy = dstHeight - 1 - dy;
+                    }
+                    transformed[dy * dstWidth + dx] = value;
                 }
             }
 
