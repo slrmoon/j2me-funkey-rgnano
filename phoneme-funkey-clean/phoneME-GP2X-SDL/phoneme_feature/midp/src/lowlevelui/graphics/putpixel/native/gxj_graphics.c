@@ -26,6 +26,7 @@
 
 #include <kni.h>
 #include <midp_logging.h>
+#include <string.h>
 
 #include <gx_graphics.h>
 
@@ -238,6 +239,7 @@ void fast_pixel_set(unsigned * mem, unsigned value, int number_of_pixels)
 void fastFill_rect(unsigned short color, gxj_screen_buffer *sbuf, int x, int y, int width, int height, int cliptop, int clipbottom) {
 	int screen_horiz=sbuf->width;
 	unsigned short* raster;
+	gxj_alpha_type* alphaRaster;
 
     if (width<=0) {return;}
 	if (x > screen_horiz) { return; }
@@ -249,8 +251,13 @@ void fastFill_rect(unsigned short color, gxj_screen_buffer *sbuf, int x, int y, 
 
 
 	raster=sbuf->pixelData + y*screen_horiz+x;
+	alphaRaster = (sbuf->alphaData == NULL) ? NULL : sbuf->alphaData + y*screen_horiz+x;
 	for(;height>0;height--) {
 		fast_pixel_set((unsigned *)raster, color, width);
+		if (alphaRaster != NULL) {
+			memset(alphaRaster, 0xff, width);
+			alphaRaster+=screen_horiz;
+		}
 		raster+=screen_horiz;
 	}
 }
