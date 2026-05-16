@@ -15,8 +15,8 @@ public class FullCanvas extends GameCanvas
          public static final int KEY_RIGHT_ARROW=-4;
  
          protected FullCanvas() 
-                   { super(false); 
+                   { super(false);
+                     setFullScreenMode(true);
                      System.out.println("Created com.nokia.mid.ui.FullCanvas()");
                    }
        }
-

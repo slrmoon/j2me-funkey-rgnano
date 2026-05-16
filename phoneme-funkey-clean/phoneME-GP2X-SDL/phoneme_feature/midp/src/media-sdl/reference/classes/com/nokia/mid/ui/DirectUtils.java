@@ -16,12 +16,7 @@ public final class DirectUtils {
     }
 
     public static Image createImage(int width, int height, int argb) {
-        Image image = Image.createImage(width, height);
-        Graphics graphics = image.getGraphics();
-        graphics.setColor(argb & 0x00ffffff);
-        graphics.fillRect(0, 0, width, height);
-        graphics.setColor(0);
-        return image;
+        return Image.createARGBImage(width, height, argb);
     }
 
     private static final class DirectGraphicsImpl implements DirectGraphics {
@@ -46,6 +41,11 @@ public final class DirectUtils {
             if (pixels == null || width <= 0 || height <= 0 || scanlength <= 0) {
                 return;
             }
+            if (format != TYPE_USHORT_4444 && format != TYPE_USHORT_4444_ARGB
+                    && format != TYPE_USHORT_444_RGB && format != TYPE_USHORT_555_RGB
+                    && format != TYPE_USHORT_1555_ARGB && format != TYPE_USHORT_565_RGB) {
+                return;
+            }
             for (row = 0; row < height; row++) {
                 int src = offset + row * scanlength;
                 for (col = 0; col < width; col++) {
@@ -68,13 +68,19 @@ public final class DirectUtils {
             if (pixels == null || width <= 0 || height <= 0 || scanlength <= 0) {
                 return;
             }
+            if (format == TYPE_BYTE_1_GRAY || format == TYPE_BYTE_1_GRAY_VERTICAL) {
+                drawPackedGrayPixels(pixels, alpha, offset, scanlength, x, y,
+                        width, height, manipulation, format);
+                return;
+            }
             for (row = 0; row < height; row++) {
                 int src = offset + row * scanlength;
                 for (col = 0; col < width; col++) {
                     int value = pixels[src + col] & 0xff;
                     int a = alpha == null ? 0xff : alpha[src + col] & 0xff;
-                    int gray = expandGray(value, format);
-                    argb[out++] = (a << 24) | (gray << 16) | (gray << 8) | gray;
+                    int color = (format == TYPE_BYTE_332_RGB)
+                            ? rgb332ToArgb(value) : grayToArgb(expandGray(value, format));
+                    argb[out++] = (a << 24) | color;
                 }
             }
             drawArgb(argb, true, x, y, width, height, manipulation);
@@ -196,6 +202,25 @@ public final class DirectUtils {
                 int b = (value & 0x1f) * 255 / 31;
                 return 0xff000000 | (r << 16) | (g << 8) | b;
             }
+            if (format == TYPE_USHORT_555_RGB) {
+                int r = ((value >> 10) & 0x1f) * 255 / 31;
+                int g = ((value >> 5) & 0x1f) * 255 / 31;
+                int b = (value & 0x1f) * 255 / 31;
+                return 0xff000000 | (r << 16) | (g << 8) | b;
+            }
+            if (format == TYPE_USHORT_1555_ARGB) {
+                int a = (transparency && ((value & 0x8000) == 0)) ? 0x00 : 0xff;
+                int r = ((value >> 10) & 0x1f) * 255 / 31;
+                int g = ((value >> 5) & 0x1f) * 255 / 31;
+                int b = (value & 0x1f) * 255 / 31;
+                return (a << 24) | (r << 16) | (g << 8) | b;
+            }
+            if (format == TYPE_USHORT_444_RGB) {
+                int r = ((value >> 8) & 0x0f) * 17;
+                int g = ((value >> 4) & 0x0f) * 17;
+                int b = (value & 0x0f) * 17;
+                return 0xff000000 | (r << 16) | (g << 8) | b;
+            }
             if (format == TYPE_USHORT_4444 || format == TYPE_USHORT_4444_ARGB) {
                 int a = transparency ? ((value >> 12) & 0x0f) * 17 : 0xff;
                 int r = ((value >> 8) & 0x0f) * 17;
@@ -217,9 +242,66 @@ public final class DirectUtils {
                 return (value & 0x0f) * 17;
             }
             if (format == TYPE_BYTE_332_RGB) {
-                return value;
+                return rgb332ToArgb(value) & 0xff;
             }
             return value & 0xff;
+        }
+
+        private void drawPackedGrayPixels(byte[] pixels, byte[] alpha, int offset,
+                int scanlength, int x, int y, int width, int height,
+                int manipulation, int format) {
+            int[] argb = new int[width * height];
+            int row;
+            int col;
+            int out = 0;
+
+            if (format == TYPE_BYTE_1_GRAY) {
+                for (row = 0; row < height; row++) {
+                    int src = offset + row * scanlength;
+                    for (col = 0; col < width; col++) {
+                        argb[out++] = packedGrayToArgb(pixels, alpha, src + (col / 8),
+                                7 - (col & 7));
+                    }
+                }
+            } else {
+                for (row = 0; row < height; row++) {
+                    int bitShift = row & 7;
+                    int srcBase = ((offset / scanlength) + row) / 8 * scanlength
+                            + (offset % scanlength);
+                    for (col = 0; col < width; col++) {
+                        argb[out++] = packedGrayToArgb(pixels, alpha, srcBase + col,
+                                bitShift);
+                    }
+                }
+            }
+            drawArgb(argb, true, x, y, width, height, manipulation);
+        }
+
+        private int packedGrayToArgb(byte[] pixels, byte[] alpha, int index, int shift) {
+            int color = isBitSet(pixels[index] & 0xff, shift) ? 0x00ffffff : 0x00000000;
+            int a;
+
+            if (alpha == null) {
+                a = (color == 0) ? 0 : 0xff;
+            } else {
+                a = isBitSet(alpha[index] & 0xff, shift) ? 0xff : 0x00;
+            }
+            return (a << 24) | color;
+        }
+
+        private boolean isBitSet(int value, int shift) {
+            return ((value >> shift) & 0x01) != 0;
+        }
+
+        private int rgb332ToArgb(int value) {
+            int red = ((value >> 5) & 0x07) * 255 / 7;
+            int green = ((value >> 2) & 0x07) * 255 / 7;
+            int blue = (value & 0x03) * 255 / 3;
+            return (red << 16) | (green << 8) | blue;
+        }
+
+        private int grayToArgb(int gray) {
+            return (gray << 16) | (gray << 8) | gray;
         }
 
         private int[] transformArgb(int[] source, int width, int height, int manipulation) {

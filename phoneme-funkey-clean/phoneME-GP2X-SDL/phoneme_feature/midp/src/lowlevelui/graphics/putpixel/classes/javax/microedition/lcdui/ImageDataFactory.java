@@ -91,6 +91,12 @@ class ImageDataFactory implements AbstractImageDataFactory {
         return new ImageData(width, height, true, true, false);
     }
 
+    public ImageData createOffScreenImageData(int width, int height, int argb) {
+        ImageData imageData = new ImageData(width, height, true, false, true);
+        imageData.fillARGB(argb);
+        return imageData;
+    }
+
     /**
      * Creates an immutable <code>ImageData</code> from
      * a <code>mutableSource ImageData</code>.

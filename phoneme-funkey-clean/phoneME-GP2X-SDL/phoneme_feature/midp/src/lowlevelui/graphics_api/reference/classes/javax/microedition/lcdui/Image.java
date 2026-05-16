@@ -297,6 +297,15 @@ public class Image {
                          createOffScreenImageData(width, height));
     }
 
+    public static Image createARGBImage(int width, int height, int argb) {
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException();
+        }
+
+        return new Image(ImageDataFactory.getImageDataFactory().
+                         createOffScreenImageData(width, height, argb));
+    }
+
     /**
      * Creates an immutable image from a source image.
      * If the source image is mutable, an immutable copy is created and

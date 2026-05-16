@@ -304,6 +304,18 @@ public class Image {
         return new Image(width, height, true);
     }
 
+    public static Image createARGBImage(int width, int height, int argb) {
+        Image image = createImage(width, height);
+        int[] rgb = new int[width * height];
+        int i;
+
+        for (i = 0; i < rgb.length; i++) {
+            rgb[i] = argb;
+        }
+        image.getGraphics().drawRGB(rgb, 0, width, 0, 0, width, height, true);
+        return image;
+    }
+
     /**
      * Creates an immutable image from a source image.
      * If the source image is mutable, an immutable copy is created and

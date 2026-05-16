@@ -153,6 +153,27 @@ final class ImageData implements AbstractImageData {
         }
     }
 
+    void fillARGB(int argb) {
+        int pixel = argb & 0x00ffffff;
+        byte alpha = (byte)((argb >>> 24) & 0xff);
+        byte low = (byte)((((pixel >> 5) & 0x3f) << 2)
+                | ((pixel >> 3) & 0x03));
+        byte high = (byte)((((pixel >> 19) & 0x1f) << 3)
+                | ((pixel >> 13) & 0x07));
+        int i;
+
+        for (i = 0; i < pixelData.length; i += 2) {
+            pixelData[i] = low;
+            pixelData[i + 1] = high;
+        }
+
+        if (alphaData != null) {
+            for (i = 0; i < alphaData.length; i++) {
+                alphaData[i] = alpha;
+            }
+        }
+    }
+
     /**
      * Gets the width of the image in pixels. The value returned
      * must reflect the actual width of the image when rendered.
