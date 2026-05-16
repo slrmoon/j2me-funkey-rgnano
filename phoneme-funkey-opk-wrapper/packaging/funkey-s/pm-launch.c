@@ -268,6 +268,8 @@ static const char *display_modes[] = {
 /* ── game list ──────────────────────────────────────── */
 #define MAX_GAMES   512
 static char  *games[MAX_GAMES];
+static char  *game_names[MAX_GAMES];
+static int    game_has_jad[MAX_GAMES];
 static int    game_count = 0;
 static int    game_sel   = 0;        /* selected index in browser */
 static int    game_scroll = 0;       /* first visible line */
@@ -297,6 +299,7 @@ static SDL_Color clr_text   = {0xff, 0xff, 0xff, 0};
 static SDL_Color clr_sel    = {0x00, 0xff, 0x88, 0};
 static SDL_Color clr_dim    = {0x60, 0x70, 0x78, 0};
 static SDL_Color clr_warn   = {0xff, 0x60, 0x60, 0};
+static SDL_Color clr_nometa = {0xff, 0x40, 0x40, 0};
 
 /* ── forward decls ──────────────────────────────────── */
 static void scan_games(void);
@@ -333,12 +336,39 @@ static void resolve_java_dir(void) {
 /* ─────────────────────────────────────────────────────
  *  game scanning
  * ──────────────────────────────────────────────────── */
+static char *read_midlet_name_from_jad(const char *jar_path) {
+    int jar_len = strlen(jar_path);
+    char jad_path[PATH_MAX + 1];
+    snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, jar_path);
+    FILE *f = fopen(jad_path, "r");
+    if (!f) return NULL;
+    char line[512];
+    char *name = NULL;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncasecmp(line, "MIDlet-Name:", 12) == 0) {
+            char *val = line + 12;
+            while (*val == ' ' || *val == '\t') val++;
+            size_t len = strlen(val);
+            while (len > 0 && (val[len-1] == '\n' || val[len-1] == '\r' || val[len-1] == ' ')) {
+                val[--len] = '\0';
+            }
+            name = strdup(val);
+            break;
+        }
+    }
+    fclose(f);
+    return name;
+}
+
 static void scan_games(void) {
     DIR *d;
     struct dirent *ent;
     int i;
 
-    for (i = 0; i < game_count; i++) free(games[i]);
+    for (i = 0; i < game_count; i++) {
+        free(games[i]);
+        free(game_names[i]);
+    }
     game_count = 0;
     game_sel = 0;
     game_scroll = 0;
@@ -350,13 +380,21 @@ static void scan_games(void) {
         const char *n = ent->d_name;
         int len = strlen(n);
         if (len < 5) continue;
-        /* case-insensitive .jar suffix */
         if (strcasecmp(n + len - 4, ".jar") != 0) continue;
         if (game_count >= MAX_GAMES) break;
 
         char full[PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", java_dir, n);
         games[game_count] = strdup(full);
+
+        char *name = read_midlet_name_from_jad(full);
+        if (name) {
+            game_names[game_count] = name;
+            game_has_jad[game_count] = 1;
+        } else {
+            game_names[game_count] = strdup(game_stem(full));
+            game_has_jad[game_count] = 0;
+        }
         game_count++;
     }
     closedir(d);
@@ -365,10 +403,10 @@ static void scan_games(void) {
     for (i = 0; i < game_count - 1; i++) {
         int j;
         for (j = i + 1; j < game_count; j++) {
-            if (strcasecmp(games[i], games[j]) > 0) {
-                char *tmp = games[i];
-                games[i] = games[j];
-                games[j] = tmp;
+            if (strcasecmp(game_names[i], game_names[j]) > 0) {
+                char *tmp = games[i];      games[i] = games[j];      games[j] = tmp;
+                tmp = game_names[i];       game_names[i] = game_names[j];     game_names[j] = tmp;
+                int ti = game_has_jad[i];  game_has_jad[i] = game_has_jad[j]; game_has_jad[j] = ti;
             }
         }
     }
@@ -850,6 +888,18 @@ static int draw_item(int x, int y, const char *text, int selected) {
     return y + 11;
 }
 
+static int draw_game_item(int x, int y, const char *text, int selected, int has_meta) {
+    if (selected) {
+        boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
+        stringColor(screen, x, y, text, 0x00ff88ff);
+    } else if (has_meta) {
+        stringColor(screen, x, y, text, 0xffffffff);
+    } else {
+        stringColor(screen, x, y, text, 0xff4040ff);
+    }
+    return y + 11;
+}
+
 #define VISIBLE_ITEMS  17
 
 /* ─────────────────────────────────────────────────────
@@ -877,7 +927,7 @@ static void draw_browser(void) {
     int i;
     for (i = game_scroll; i < game_count && y < SCR_H - 16; i++) {
         const char *name = game_stem(games[i]);
-        y = draw_item(6, y, name, i == game_sel);
+        y = draw_game_item(6, y, game_names[i], i == game_sel, game_has_jad[i]);
     }
 
     /* help bar */
