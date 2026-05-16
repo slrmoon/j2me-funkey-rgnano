@@ -126,10 +126,10 @@ class ImageDataFactory implements AbstractImageDataFactory {
     public ImageData createImmutableCopy(ImageData mutableSource) {
         int width  = mutableSource.getWidth();
         int height = mutableSource.getHeight();
-        int length = width * height * 2;
 
         return  new ImageData(width, height, false,
-                              mutableSource.getPixelData());
+                              mutableSource.getPixelData(),
+                              mutableSource.getAlphaData());
     }
 
     /**

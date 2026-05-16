@@ -113,6 +113,11 @@ final class ImageData implements AbstractImageData {
      */
     ImageData(int width, int height, boolean isMutable,
               byte[] pixelData) {
+        this(width, height, isMutable, pixelData, null);
+    }
+
+    ImageData(int width, int height, boolean isMutable,
+              byte[] pixelData, byte[] alphaData) {
         this.width = width;
         this.height = height;
         this.isMutable = isMutable;
@@ -123,7 +128,11 @@ final class ImageData implements AbstractImageData {
 
         this.pixelData = newPixelData;
 
-        
+        if (alphaData != null) {
+            byte[] newAlphaData = new byte[width * height];
+            System.arraycopy(alphaData, 0, newAlphaData, 0, newAlphaData.length);
+            this.alphaData = newAlphaData;
+        }
     }
 
     /**
@@ -227,5 +236,9 @@ final class ImageData implements AbstractImageData {
      */
     byte[] getPixelData() {
         return pixelData;
+    }
+
+    byte[] getAlphaData() {
+        return alphaData;
     }
 }
