@@ -115,77 +115,79 @@ typedef struct {
 
 static const OverlayModePreset OverlayModes[] = {
     { "auto", "Auto", PRESENT_SCALE_AUTO },
-    { "fit", "Fit", PRESENT_SCALE_FIT },
-    { "fill", "Fill", PRESENT_SCALE_FILL },
-    { "crop", "Crop", PRESENT_SCALE_CROP },
+    { "fit", "Fit all", PRESENT_SCALE_FIT },
+    { "fill", "Stretch", PRESENT_SCALE_FILL },
+    { "crop", "Crop fill", PRESENT_SCALE_CROP },
     { "center", "Center", PRESENT_SCALE_CENTER },
-    { "zoom", "Zoom", PRESENT_SCALE_ZOOM }
+    { "zoom", "Manual zoom", PRESENT_SCALE_ZOOM }
 };
 static const OverlayScalePreset OverlayScales[] = {
-    { "zoom-075", "x0.75", 750 },
-    { "zoom-100", "x1.00", 1000 },
-    { "zoom-120", "x1.20", 1200 },
-    { "zoom-140", "x1.40", 1400 },
-    { "zoom-150", "x1.50", 1500 },
-    { "zoom-160", "x1.60", 1600 },
-    { "zoom-170", "x1.70", 1700 },
-    { "zoom-180", "x1.80", 1800 },
-    { "zoom-185", "x1.85", 1850 }
+    { "zoom-075", "75%", 750 },
+    { "zoom-100", "100%", 1000 },
+    { "zoom-120", "120%", 1200 },
+    { "zoom-140", "140%", 1400 },
+    { "zoom-150", "150%", 1500 },
+    { "zoom-160", "160%", 1600 },
+    { "zoom-170", "170%", 1700 },
+    { "zoom-180", "180%", 1800 },
+    { "zoom-185", "185%", 1850 }
 };
 static const OverlayScalePreset OverlayScales128x128[] = {
-    { "zoom-150", "x1.50", 1500 },
-    { "zoom-175", "x1.75", 1750 },
-    { "zoom-1875", "x1.875", 1875 },
-    { "zoom-200", "x2.00", 2000 }
+    { "zoom-150", "150%", 1500 },
+    { "zoom-175", "175%", 1750 },
+    { "zoom-1875", "188%", 1875 },
+    { "zoom-200", "200%", 2000 }
 };
 static const OverlayScalePreset OverlayScales128x160[] = {
-    { "zoom-140", "x1.40", 1400 },
-    { "zoom-150", "x1.50", 1500 },
-    { "zoom-160", "x1.60", 1600 },
-    { "zoom-170", "x1.70", 1700 }
+    { "zoom-140", "140%", 1400 },
+    { "zoom-150", "150%", 1500 },
+    { "zoom-160", "160%", 1600 },
+    { "zoom-170", "170%", 1700 }
 };
 static const OverlayScalePreset OverlayScales176x208[] = {
-    { "zoom-100", "x1.00", 1000 },
-    { "zoom-110", "x1.10", 1100 },
-    { "zoom-115", "x1.15", 1150 },
-    { "zoom-120", "x1.20", 1200 }
+    { "zoom-100", "100%", 1000 },
+    { "zoom-110", "110%", 1100 },
+    { "zoom-115", "115%", 1150 },
+    { "zoom-120", "120%", 1200 }
 };
 static const OverlayScalePreset OverlayScales176x220[] = {
-    { "zoom-100", "x1.00", 1000 },
-    { "zoom-105", "x1.05", 1050 },
-    { "zoom-109", "x1.09", 1090 },
-    { "zoom-115", "x1.15", 1150 },
-    { "zoom-120", "x1.20", 1200 }
+    { "zoom-100", "100%", 1000 },
+    { "zoom-105", "105%", 1050 },
+    { "zoom-109", "109%", 1090 },
+    { "zoom-115", "115%", 1150 },
+    { "zoom-120", "120%", 1200 }
 };
 static const OverlayScalePreset OverlayScales208x208[] = {
-    { "zoom-100", "x1.00", 1000 },
-    { "zoom-110", "x1.10", 1100 },
-    { "zoom-115", "x1.15", 1150 }
+    { "zoom-100", "100%", 1000 },
+    { "zoom-110", "110%", 1100 },
+    { "zoom-115", "115%", 1150 }
 };
 static const OverlayScalePreset OverlayScales240x320[] = {
-    { "zoom-075", "x0.75", 750 },
-    { "zoom-080", "x0.80", 800 },
-    { "zoom-085", "x0.85", 850 },
-    { "zoom-090", "x0.90", 900 },
-    { "zoom-100", "x1.00", 1000 }
+    { "zoom-070", "Safe 70%", 700 },
+    { "zoom-075", "Fit all 75%", 750 },
+    { "zoom-080", "Crop 80%", 800 },
+    { "zoom-085", "Crop 85%", 850 },
+    { "zoom-090", "Crop 90%", 900 },
+    { "zoom-100", "Full width", 1000 }
 };
 static const OverlayScalePreset OverlayScales320x240[] = {
-    { "zoom-075", "x0.75", 750 },
-    { "zoom-080", "x0.80", 800 },
-    { "zoom-085", "x0.85", 850 },
-    { "zoom-090", "x0.90", 900 },
-    { "zoom-100", "x1.00", 1000 }
+    { "zoom-070", "Safe 70%", 700 },
+    { "zoom-075", "Fit all 75%", 750 },
+    { "zoom-080", "Crop 80%", 800 },
+    { "zoom-085", "Crop 85%", 850 },
+    { "zoom-090", "Crop 90%", 900 },
+    { "zoom-100", "Full height", 1000 }
 };
 static const OverlaySourcePreset OverlaySources[] = {
     { "auto", "Auto", 0, 0, 0 },
-    { "full", "Full", 0, 0, 1 },
+    { "full", "Full buffer", 0, 0, 1 },
     { "128x128", "128x128", 128, 128, 0 },
     { "128x160", "128x160", 128, 160, 0 },
     { "176x208", "176x208", 176, 208, 0 },
     { "176x220", "176x220", 176, 220, 0 },
     { "208x208", "208x208", 208, 208, 0 },
-    { "240x320", "240x320", 240, 320, 0 },
-    { "320x240", "320x240", 320, 240, 0 }
+    { "240x320", "Tall 240x320", 240, 320, 0 },
+    { "320x240", "Wide 320x240", 320, 240, 0 }
 };
 static const OverlayPhoneKey OverlayPhoneKeys[] = {
     { "up", "PHONE UP", -1 }, { "down", "PHONE DOWN", -2 },
@@ -446,6 +448,17 @@ static int overlay_find_scale_for_source(int source, int ratio) {
     return best;
 }
 
+static int overlay_preferred_scale_ratio_for_source(int source, int fallbackRatio) {
+    if (source >= 0 && source < OVERLAY_SOURCE_COUNT) {
+        const OverlaySourcePreset *preset = &OverlaySources[source];
+        if ((preset->width == 240 && preset->height == 320) ||
+            (preset->width == 320 && preset->height == 240)) {
+            return 750;
+        }
+    }
+    return fallbackRatio;
+}
+
 static int overlay_physical_bind_index(SDLKey key) {
     switch (key) {
     case SDLK_u: case SDLK_UP: return 0;
@@ -500,6 +513,7 @@ static void overlay_set_source_index(int index) {
     PresentSourceFull = OverlaySources[index].full;
     PresentSourceWidth = OverlaySources[index].width;
     PresentSourceHeight = OverlaySources[index].height;
+    ratio = overlay_preferred_scale_ratio_for_source(OverlaySourceSel, ratio);
     OverlayScaleSel = overlay_find_scale_for_source(OverlaySourceSel, ratio);
     PresentScaleRatio = overlay_current_scale()->ratio;
     overlay_mark_display_dirty();
@@ -935,9 +949,9 @@ static void overlay_draw_main(void) {
 }
 
 static void overlay_draw_display(void) {
-    overlay_draw_row(54, "Mode", OverlayModes[OverlayModeSel].label, OverlayRow == 0);
-    overlay_draw_row(70, "Scale", overlay_current_scale()->label, OverlayRow == 1);
-    overlay_draw_row(86, "Source", OverlaySources[OverlaySourceSel].label, OverlayRow == 2);
+    overlay_draw_row(54, "Screen", OverlayModes[OverlayModeSel].label, OverlayRow == 0);
+    overlay_draw_row(70, "Zoom", overlay_current_scale()->label, OverlayRow == 1);
+    overlay_draw_row(86, "Size", OverlaySources[OverlaySourceSel].label, OverlayRow == 2);
 }
 
 static void overlay_draw_sound(void) {

@@ -180,87 +180,99 @@ typedef struct {
     int height;
 } SourcePreset;
 
+typedef struct {
+    const char *id;
+    const char *label;
+} DisplayModePreset;
+
 static const ScalePreset scale_presets[] = {
-    { "zoom-075", "x0.75", "zoom", 750 },
-    { "zoom-100", "x1.00", "zoom", 1000 },
-    { "zoom-120", "x1.20", "zoom", 1200 },
-    { "zoom-140", "x1.40", "zoom", 1400 },
-    { "zoom-150", "x1.50", "zoom", 1500 },
-    { "zoom-160", "x1.60", "zoom", 1600 },
-    { "zoom-170", "x1.70", "zoom", 1700 },
-    { "zoom-180", "x1.80", "zoom", 1800 },
-    { "zoom-185", "x1.85", "zoom", 1850 }
+    { "zoom-075", "75%", "zoom", 750 },
+    { "zoom-100", "100%", "zoom", 1000 },
+    { "zoom-120", "120%", "zoom", 1200 },
+    { "zoom-140", "140%", "zoom", 1400 },
+    { "zoom-150", "150%", "zoom", 1500 },
+    { "zoom-160", "160%", "zoom", 1600 },
+    { "zoom-170", "170%", "zoom", 1700 },
+    { "zoom-180", "180%", "zoom", 1800 },
+    { "zoom-185", "185%", "zoom", 1850 }
 };
 
 #define SCALE_COUNT  ((int)(sizeof(scale_presets) / sizeof(scale_presets[0])))
 
 static const ScalePreset scale_128x128[] = {
-    { "zoom-150", "x1.50", "zoom", 1500 },
-    { "zoom-175", "x1.75", "zoom", 1750 },
-    { "zoom-1875", "x1.875", "zoom", 1875 },
-    { "zoom-200", "x2.00", "zoom", 2000 }
+    { "zoom-150", "150%", "zoom", 1500 },
+    { "zoom-175", "175%", "zoom", 1750 },
+    { "zoom-1875", "188%", "zoom", 1875 },
+    { "zoom-200", "200%", "zoom", 2000 }
 };
 
 static const ScalePreset scale_128x160[] = {
-    { "zoom-140", "x1.40", "zoom", 1400 },
-    { "zoom-150", "x1.50", "zoom", 1500 },
-    { "zoom-160", "x1.60", "zoom", 1600 },
-    { "zoom-170", "x1.70", "zoom", 1700 }
+    { "zoom-140", "140%", "zoom", 1400 },
+    { "zoom-150", "150%", "zoom", 1500 },
+    { "zoom-160", "160%", "zoom", 1600 },
+    { "zoom-170", "170%", "zoom", 1700 }
 };
 
 static const ScalePreset scale_176x208[] = {
-    { "zoom-100", "x1.00", "zoom", 1000 },
-    { "zoom-110", "x1.10", "zoom", 1100 },
-    { "zoom-115", "x1.15", "zoom", 1150 },
-    { "zoom-120", "x1.20", "zoom", 1200 }
+    { "zoom-100", "100%", "zoom", 1000 },
+    { "zoom-110", "110%", "zoom", 1100 },
+    { "zoom-115", "115%", "zoom", 1150 },
+    { "zoom-120", "120%", "zoom", 1200 }
 };
 
 static const ScalePreset scale_176x220[] = {
-    { "zoom-100", "x1.00", "zoom", 1000 },
-    { "zoom-105", "x1.05", "zoom", 1050 },
-    { "zoom-109", "x1.09", "zoom", 1090 },
-    { "zoom-115", "x1.15", "zoom", 1150 },
-    { "zoom-120", "x1.20", "zoom", 1200 }
+    { "zoom-100", "100%", "zoom", 1000 },
+    { "zoom-105", "105%", "zoom", 1050 },
+    { "zoom-109", "109%", "zoom", 1090 },
+    { "zoom-115", "115%", "zoom", 1150 },
+    { "zoom-120", "120%", "zoom", 1200 }
 };
 
 static const ScalePreset scale_208x208[] = {
-    { "zoom-100", "x1.00", "zoom", 1000 },
-    { "zoom-110", "x1.10", "zoom", 1100 },
-    { "zoom-115", "x1.15", "zoom", 1150 }
+    { "zoom-100", "100%", "zoom", 1000 },
+    { "zoom-110", "110%", "zoom", 1100 },
+    { "zoom-115", "115%", "zoom", 1150 }
 };
 
 static const ScalePreset scale_240x320[] = {
-    { "zoom-075", "x0.75", "zoom", 750 },
-    { "zoom-080", "x0.80", "zoom", 800 },
-    { "zoom-085", "x0.85", "zoom", 850 },
-    { "zoom-090", "x0.90", "zoom", 900 },
-    { "zoom-100", "x1.00", "zoom", 1000 }
+    { "zoom-070", "Safe 70%", "zoom", 700 },
+    { "zoom-075", "Fit all 75%", "zoom", 750 },
+    { "zoom-080", "Crop 80%", "zoom", 800 },
+    { "zoom-085", "Crop 85%", "zoom", 850 },
+    { "zoom-090", "Crop 90%", "zoom", 900 },
+    { "zoom-100", "Full width", "zoom", 1000 }
 };
 
 static const ScalePreset scale_320x240[] = {
-    { "zoom-075", "x0.75", "zoom", 750 },
-    { "zoom-080", "x0.80", "zoom", 800 },
-    { "zoom-085", "x0.85", "zoom", 850 },
-    { "zoom-090", "x0.90", "zoom", 900 },
-    { "zoom-100", "x1.00", "zoom", 1000 }
+    { "zoom-070", "Safe 70%", "zoom", 700 },
+    { "zoom-075", "Fit all 75%", "zoom", 750 },
+    { "zoom-080", "Crop 80%", "zoom", 800 },
+    { "zoom-085", "Crop 85%", "zoom", 850 },
+    { "zoom-090", "Crop 90%", "zoom", 900 },
+    { "zoom-100", "Full height", "zoom", 1000 }
 };
 
 static const SourcePreset source_presets[] = {
-    { "auto", "AUTO", 0, 0 },
-    { "full", "FULL", 0, 0 },
+    { "auto", "Auto", 0, 0 },
+    { "full", "Full buffer", 0, 0 },
     { "128x128", "128x128", 128, 128 },
     { "128x160", "128x160", 128, 160 },
     { "176x208", "176x208", 176, 208 },
     { "176x220", "176x220", 176, 220 },
     { "208x208", "208x208", 208, 208 },
-    { "240x320", "240x320", 240, 320 },
-    { "320x240", "320x240", 320, 240 }
+    { "240x320", "Tall 240x320", 240, 320 },
+    { "320x240", "Wide 320x240", 320, 240 }
 };
 
 #define SOURCE_COUNT  ((int)(sizeof(source_presets) / sizeof(source_presets[0])))
 
-static const char *display_modes[] = {
-    "auto", "fit", "fill", "crop", "center", "zoom"
+static const DisplayModePreset display_modes[] = {
+    { "auto", "Auto" },
+    { "fit", "Fit all" },
+    { "fill", "Stretch" },
+    { "crop", "Crop fill" },
+    { "center", "Center" },
+    { "zoom", "Manual zoom" }
 };
 
 #define DISPLAY_MODE_COUNT ((int)(sizeof(display_modes) / sizeof(display_modes[0])))
@@ -844,6 +856,17 @@ static int find_scale_for_source(int source, int ratio) {
     return best;
 }
 
+static int preferred_scale_ratio_for_source(int source, int fallback_ratio) {
+    if (source >= 0 && source < SOURCE_COUNT) {
+        const SourcePreset *preset = &source_presets[source];
+        if ((preset->width == 240 && preset->height == 320) ||
+            (preset->width == 320 && preset->height == 240)) {
+            return 750;
+        }
+    }
+    return fallback_ratio;
+}
+
 static int find_source_preset(const char *id) {
     int i;
     if (!id) return 0;
@@ -857,7 +880,7 @@ static int find_display_mode(const char *id) {
     int i;
     if (!id) return 5;
     for (i = 0; i < DISPLAY_MODE_COUNT; i++) {
-        if (strcmp(id, display_modes[i]) == 0) return i;
+        if (strcmp(id, display_modes[i].id) == 0) return i;
     }
     return 5;
 }
@@ -951,7 +974,7 @@ static void save_binds(const char *game_name) {
 
     fprintf(f, "SCALE=%s\n", current_scale_preset()->id);
     fprintf(f, "VIEW=%s\n", source_presets[source_sel].id);
-    fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel]);
+    fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
     fprintf(f, "VOLUME=%d\n", sound_volume);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
 
@@ -1042,9 +1065,9 @@ static void draw_browser(void) {
 
     /* help bar */
     y = SCR_H - 10;
-    stringColor(screen, 2, y, "A:open/run", 0x607078ff);
-    stringColor(screen, 86, y, "START:open/keys",   0x607078ff);
-    stringColor(screen, 166, y, current_rel_dir[0] ? "B:back" : "B:refresh",
+    stringColor(screen, 2, y, "A:Run", 0x607078ff);
+    stringColor(screen, 64, y, "START:Keys", 0x607078ff);
+    stringColor(screen, 158, y, current_rel_dir[0] ? "B:Back" : "B:Refresh",
                 0x607078ff);
 
     SDL_Flip(screen);
@@ -1068,11 +1091,11 @@ static void draw_keybinds(void) {
     int i;
     for (i = bind_scroll; i < PHONE_KEY_COUNT + BIND_ROW_OFFSET && y < SCR_H - 24; i++) {
         if (i == 0) {
-            snprintf(buf, sizeof(buf), "SCALE  %s", current_scale_preset()->label);
+            snprintf(buf, sizeof(buf), "ZOOM   %s", current_scale_preset()->label);
         } else if (i == 1) {
-            snprintf(buf, sizeof(buf), "VIEW   %s", source_presets[source_sel].label);
+            snprintf(buf, sizeof(buf), "SIZE   %s", source_presets[source_sel].label);
         } else if (i == 2) {
-            snprintf(buf, sizeof(buf), "MODE   %s", display_modes[display_mode_sel]);
+            snprintf(buf, sizeof(buf), "SCREEN %s", display_modes[display_mode_sel].label);
         } else if (i == 3) {
             snprintf(buf, sizeof(buf), "PROFILE %s", key_profiles[key_profile_sel].label);
         } else {
@@ -1296,7 +1319,7 @@ static void launch_game(int idx) {
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
-    setenv("PHONEME_SCALE_MODE", display_modes[display_mode_sel], 1);
+    setenv("PHONEME_SCALE_MODE", display_modes[display_mode_sel].id, 1);
     {
         char cfg_path[PATH_MAX];
         snprintf(cfg_path, sizeof(cfg_path), BIND_DIR "/%s.cfg", games[idx].config);
@@ -1528,6 +1551,7 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             int ratio = current_scale_preset()->ratio;
             source_sel--;
             if (source_sel < 0) source_sel = SOURCE_COUNT - 1;
+            ratio = preferred_scale_ratio_for_source(source_sel, ratio);
             scale_sel = find_scale_for_source(source_sel, ratio);
         } else if (bind_sel == 2) {
             display_mode_sel--;
@@ -1548,6 +1572,7 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             int ratio = current_scale_preset()->ratio;
             source_sel++;
             if (source_sel >= SOURCE_COUNT) source_sel = 0;
+            ratio = preferred_scale_ratio_for_source(source_sel, ratio);
             scale_sel = find_scale_for_source(source_sel, ratio);
         } else if (bind_sel == 2) {
             display_mode_sel++;
@@ -1569,6 +1594,7 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             int ratio = current_scale_preset()->ratio;
             source_sel++;
             if (source_sel >= SOURCE_COUNT) source_sel = 0;
+            ratio = preferred_scale_ratio_for_source(source_sel, ratio);
             scale_sel = find_scale_for_source(source_sel, ratio);
         } else if (bind_sel == 2) {
             display_mode_sel++;
