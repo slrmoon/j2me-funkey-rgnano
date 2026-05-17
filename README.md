@@ -23,6 +23,39 @@ Based on the upstream phoneME-GP2X-SDL source at:
 3. Create a `java` folder in the root of the SD card
 4. Put your `.jar` files into that `java/` folder
 
+## Scaling setup
+
+Each game can have its own scaling mode configured via the overlay menu. Launch a game, press **Power**, go to scaling settings and choose:
+
+**Fit**  
+The entire game fits within the screen. Aspect ratio is preserved. Safest mode for most games.
+
+**Fill**  
+Game fills more of the screen, but edges may be cropped. Useful when the game is nearly square and black bars are distracting.
+
+**Stretch**  
+Game is stretched to fill the whole 240x240 screen without preserving proportions. Use only if distortion doesn't bother you.
+
+**Original**  
+Game is displayed at its native resolution. Small games will have lots of empty space; large games may not fit.
+
+### Recommendations
+
+| Native resolution | Best mode |
+|---|---|
+| 128x128, 128x160, 176x208 | **Fit**. Try **Fill** if the image is too small. |
+| 240x320, 240x400, 320x240 | **Fit** — keeps UI and text intact. For 240x320 portrait games the image shrinks to 180x240, that's normal. |
+| 240x240 | **Original** or **Fit**. There will be almost no difference. |
+| 176x220, 240x260, non-standard | Start with **Fit**. Try **Fill** if borders are too large. |
+
+### Rule of thumb
+
+If text, menus, HUD, health, ammo, buttons and bottom hints matter — use **Fit**.
+
+If the game is visually simple and you can afford to lose some edges — try **Fill**.
+
+Keep **Stretch** as a last resort, when the game feels too small or black bars annoy you more than distortion.
+
 ---
 
 ## Repository structure
