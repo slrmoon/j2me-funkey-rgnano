@@ -9,11 +9,21 @@ Based on the upstream phoneME-GP2X-SDL source at:
 
 ## Screenshots
 
+### Launcher
+
 <p float="left">
-  <img src="IMG_0018.PNG" width="240" />
-  <img src="IMG_0019.PNG" width="240" />
-  <img src="IMG_0023.PNG" width="240" />
-  <img src="IMG_0024.PNG" width="240" />
+  <img src="screenshots/IMG_0018.PNG" width="240" />
+  <img src="screenshots/IMG_0015.PNG" width="240" />
+  <img src="screenshots/IMG_0016.PNG" width="240" />
+  <img src="screenshots/IMG_0024.PNG" width="240" />
+</p>
+
+### Games
+
+<p float="left">
+  <img src="screenshots/IMG_0012.PNG" width="240" />
+  <img src="screenshots/IMG_0013.PNG" width="240" />
+  <img src="screenshots/IMG_0023.PNG" width="240" />
 </p>
 
 ## Installation
