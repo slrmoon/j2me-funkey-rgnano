@@ -1472,18 +1472,14 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_MIDIPlayer_nSetVolum
   KNI_ReturnVoid();
 }
 
-KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_MIDIPlayer_nSetLoopCount()
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_MIDIPlayer_nSetLoopCount()
 { struct NativeMIDIPlayer *NMP;
   jint id = KNI_GetParameterAsInt(1);
   jint count = KNI_GetParameterAsInt(2);
-  const char *early_loop_compat;
-  if (id == 0) KNI_ReturnInt(0);
+  if (id == 0) KNI_ReturnVoid();
   NMP = (struct NativeMIDIPlayer *)id;
   NMP->LoopCount = count;
-  early_loop_compat = getenv("PHONEME_MIDI_EARLY_LOOP_EXCEPTION");
-  if (count == -1 && early_loop_compat != NULL && strcmp(early_loop_compat, "1") == 0)
-     KNI_ReturnInt(1);
-  KNI_ReturnInt(0);
+  KNI_ReturnVoid();
 }
 
 /*****************************************************************************/
