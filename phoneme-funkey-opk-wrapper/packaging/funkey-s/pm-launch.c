@@ -25,6 +25,18 @@
 #define BIN_DIR    "/mnt/FunKey/.pm/bin"
 static char java_dir[PATH_MAX] = "/mnt/java";
 
+static int contains_case_insensitive(const char *haystack, const char *needle) {
+    size_t needle_len;
+    const char *p;
+    if (!haystack || !needle) return 0;
+    needle_len = strlen(needle);
+    if (needle_len == 0) return 1;
+    for (p = haystack; *p; p++) {
+        if (strncasecmp(p, needle, needle_len) == 0) return 1;
+    }
+    return 0;
+}
+
 /* ── MIDP key codes (from phoneME keymap_input.h) ───── */
 #define K_UP     (-1)
 #define K_DOWN   (-2)
@@ -1317,6 +1329,12 @@ static void launch_game(int idx) {
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
     setenv("PHONEME_TIMIDITY_SYNTHETIC", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
+    if (contains_case_insensitive(jar_path, "doom") &&
+            contains_case_insensitive(jar_path, "rpg")) {
+        setenv("PHONEME_MIDI_EARLY_LOOP_EXCEPTION", "1", 1);
+    } else {
+        unsetenv("PHONEME_MIDI_EARLY_LOOP_EXCEPTION");
+    }
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
     setenv("PHONEME_SCALE_MODE", display_modes[display_mode_sel].id, 1);
