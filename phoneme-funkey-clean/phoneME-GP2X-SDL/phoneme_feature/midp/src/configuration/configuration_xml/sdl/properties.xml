@@ -71,5 +71,45 @@
 		Value="2808"
 		Scope="internal"
 		Comment="Default SMS Service Center address port number."/>
+
+<!-- SYSTEM PROPERTIES -->
+<!-- Visible from System.getProperty() -->
+
+  <property Key="microedition.media.version"
+		Value="1.1"
+		Scope="system"
+		Comment="MMAPI version number."/>
+  <property Key="supports.mixing"
+		Value="true"
+		Scope="system"
+		Comment="Audio mixing support."/>
+  <property Key="supports.audio.capture"
+		Value="false"
+		Scope="system"
+		Comment="Audio capture support."/>
+  <property Key="supports.video.capture"
+		Value="false"
+		Scope="system"
+		Comment="Video capture support."/>
+  <property Key="supports.recording"
+		Value="false"
+		Scope="system"
+		Comment="Media recording support."/>
+  <property Key="audio.encodings"
+		Value="encoding=midi encoding=wav encoding=amr"
+		Scope="system"
+		Comment="Supported audio playback encodings."/>
+  <property Key="video.encodings"
+		Value=""
+		Scope="system"
+		Comment="Supported video playback encodings."/>
+  <property Key="video.snapshot.encodings"
+		Value=""
+		Scope="system"
+		Comment="Supported video snapshot encodings."/>
+  <property Key="streamable.contents"
+		Value="audio/midi audio/x-midi audio/mid audio/x-mid audio/sp-midi audio/wav audio/x-wav audio/amr audio/amr-nb audio/x-tone-seq"
+		Scope="system"
+		Comment="Streamable media content types."/>
 </properties>
 </configuration>
