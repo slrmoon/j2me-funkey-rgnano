@@ -43,7 +43,7 @@ Pick the game's native screen size. If this is wrong, Fit/Fill/Stretch will prod
 | Old Nokia / Sony Ericsson | 176×208 or 176×220 |
 | Very old phones | 128×160 |
 | Landscape | 320×240 |
-| Square | 240×240 |
+| Square | 128×128 |
 
 ### 2. Then choose scaling mode
 
