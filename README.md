@@ -29,7 +29,7 @@ Launch a game, press **Power** to open the overlay, then follow this order. You 
 
 ### 1. Set original resolution first
 
-Pick the game's native screen size. If this is wrong, Fit/Fill/Stretch will produce distorted results.
+Pick the game's native screen size. If this is wrong, Fit/Fill/Stretch will produce distorted results. **After changing the original resolution, restart the game for it to take effect.**
 
 | If the game looks... | Resolution is probably wrong |
 |---|---|
