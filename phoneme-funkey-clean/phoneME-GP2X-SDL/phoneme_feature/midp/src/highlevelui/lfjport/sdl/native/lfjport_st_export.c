@@ -1108,7 +1108,7 @@ int PhoneMEOverlayHandleSDLEvent(SDL_Event *event) {
     }
 
     if (OverlayCapture) {
-        if (key == SDLK_b || key == SDLK_q || key == SDLK_ESCAPE) {
+        if (key == SDLK_q || key == SDLK_ESCAPE) {
             OverlayCapture = 0;
             return 1;
         }

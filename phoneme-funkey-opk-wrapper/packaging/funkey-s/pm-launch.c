@@ -1042,8 +1042,8 @@ static void draw_browser(void) {
 
     /* help bar */
     y = SCR_H - 10;
-    stringColor(screen, 2, y, "START:open/run", 0x607078ff);
-    stringColor(screen, 86, y, "A:open/keys",   0x607078ff);
+    stringColor(screen, 2, y, "A:open/run", 0x607078ff);
+    stringColor(screen, 86, y, "START:open/keys",   0x607078ff);
     stringColor(screen, 166, y, current_rel_dir[0] ? "B:back" : "B:refresh",
                 0x607078ff);
 
@@ -1449,7 +1449,18 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
         game_sel += 5;
         if (game_sel >= game_count) game_sel = game_count - 1;
         break;
-    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a: /* A = SELECT */
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a: /* A = open/run */
+        if (game_count > 0) {
+            if (games[game_sel].is_dir) {
+                enter_selected_folder();
+                break;
+            }
+            load_binds(games[game_sel].config, games[game_sel].path);
+            launch_game(game_sel);
+            state = STATE_BROWSER;
+        }
+        break;
+    case SDLK_s: /* START = open/keys */
         if (game_count > 0) {
             if (games[game_sel].is_dir) {
                 enter_selected_folder();
@@ -1459,17 +1470,6 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
             bind_sel = 0;
             bind_scroll = 0;
             state = STATE_KEYBINDS;
-        }
-        break;
-    case SDLK_s: /* START = SOFT2 */
-        if (game_count > 0) {
-            if (games[game_sel].is_dir) {
-                enter_selected_folder();
-                break;
-            }
-            load_binds(games[game_sel].config, games[game_sel].path);
-            launch_game(game_sel);
-            state = STATE_BROWSER;
         }
         break;
     case SDLK_b: /* B = back/refresh */
