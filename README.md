@@ -50,7 +50,7 @@ Pick the game's native screen size. If this is wrong, Fit/Fill/Stretch will prod
 - **Fit** — game fits entirely, proportions kept. Safest mode if text, HUD, menus matter.
 - **Fill** — fills more screen, edges may crop. Try when black bars are distracting.
 - **Stretch** — forced 240×240, no proportions. Last resort only.
-- **Original** — native size, no scaling. Best for 240×240 games.
+- **Original** — native size, no scaling. Best for games close to 240×240.
 
 ---
 
