@@ -34,10 +34,6 @@ import javax.wireless.messaging.MessageConnection;
 // Classes
 import com.sun.midp.midlet.MIDletSuite;
 import com.sun.midp.midlet.Scheduler;
-import com.sun.midp.security.Permissions;
-import com.sun.midp.security.SecurityToken;
-import com.sun.midp.security.ImplicitlyTrustedClass;
-import com.sun.midp.security.SecurityInitializer;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -129,17 +125,6 @@ public abstract class ProtocolBase implements MessageConnection,
 
     /** Machine name - the parsed target address from the URL. */
     protected String host = null;
-
-    /**
-     * Inner class to request security token from SecurityInitializer.
-     * SecurityInitializer should be able to check this inner class name.
-     */
-    private static class SecurityTrusted
-        implements ImplicitlyTrustedClass {};
-
-    /** This class has a different security domain than the MIDlet suite */
-    private static SecurityToken classSecurityToken =
-        SecurityInitializer.requestToken(new SecurityTrusted());
 
     /** Message listener for async notifications. */
     volatile MessageListener m_listener = null;

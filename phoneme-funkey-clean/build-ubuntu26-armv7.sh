@@ -225,6 +225,7 @@ invalidate_midp_artifacts_if_sources_changed() {
         find \
             "$MEHOME/midp/src" \
             "$MEHOME/midp/build/linux_sdl_gcc" \
+            "$MEHOME/jsr120/src" \
             -type f \
             \( \
                 -name '*.c' -o -name '*.h' -o -name '*.java' -o -name '*.jpp' -o \
@@ -391,6 +392,8 @@ run_make \
     USE_SDL_ABB=true \
     PCSL_OUTPUT_DIR="$PCSL_OUTPUT_DIR" \
     CLDC_DIST_DIR="$ARM_CLDC_DIST_DIR" \
+    JSR_120_DIR="$MEHOME/jsr120" \
+    PROJECT_JSR_120_DIR="$MEHOME/jsr120" \
     TOOLS_DIR="$MEHOME/tools" \
     TARGET_CPU=arm \
     USE_MULTIPLE_ISOLATES="$MIDP_USE_MULTIPLE_ISOLATES" \
