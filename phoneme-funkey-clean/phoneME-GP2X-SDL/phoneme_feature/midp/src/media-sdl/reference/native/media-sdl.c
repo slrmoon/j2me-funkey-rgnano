@@ -786,8 +786,112 @@ static void ApplyTSFMIDIMessage(tsf *font, tml_message *msg)
               break;
        case TML_CONTROL_CHANGE:
               tsf_channel_midi_control(font, channel, msg->control & 0x7f, msg->control_value & 0x7f);
-              break;
+             break;
      }
+}
+
+static short ClampSample(int value)
+{ if (value > 32767) return(32767);
+  if (value < -32768) return(-32768);
+  return((short)value);
+}
+
+static void MixNoiseBurst(short *pcm, unsigned int total_samples, unsigned int start,
+                          unsigned int samples, int amplitude, unsigned int seed)
+{ unsigned int i;
+  if (pcm == NULL || start >= total_samples || samples == 0) return;
+  if (start + samples > total_samples) samples = total_samples - start;
+  for(i=0; i<samples; i++)
+     { int env;
+       int noise;
+       int value;
+       seed = seed * 1103515245u + 12345u;
+       env = (int)(((unsigned long long)(samples - i) * amplitude) / samples);
+       noise = (int)((seed >> 16) & 0xffff) - 32768;
+       value = (noise * env) / 32768;
+       pcm[(start + i) * 2] = ClampSample((int)pcm[(start + i) * 2] + value);
+       pcm[(start + i) * 2 + 1] = ClampSample((int)pcm[(start + i) * 2 + 1] + value);
+     }
+}
+
+static void MixToneBurst(short *pcm, unsigned int total_samples, unsigned int start,
+                         unsigned int samples, int note, int amplitude)
+{ double freq;
+  double phase;
+  double step;
+  unsigned int i;
+  if (pcm == NULL || start >= total_samples || samples == 0) return;
+  if (start + samples > total_samples) samples = total_samples - start;
+  freq = 440.0 * pow(2.0, ((double)note - 69.0) / 12.0);
+  step = freq / (double)SAMPLE_FREQ;
+  phase = 0.0;
+  for(i=0; i<samples; i++)
+     { int env;
+       int value;
+       env = (int)(((unsigned long long)(samples - i) * amplitude) / samples);
+       value = (phase < 0.5) ? env : -env;
+       pcm[(start + i) * 2] = ClampSample((int)pcm[(start + i) * 2] + value);
+       pcm[(start + i) * 2 + 1] = ClampSample((int)pcm[(start + i) * 2 + 1] + value);
+       phase += step;
+       if (phase >= 1.0) phase -= 1.0;
+     }
+}
+
+static void NormalizeShortMIDI(short *pcm, unsigned int samples, int target_peak)
+{ unsigned int i;
+  int peak = 0;
+  int scale;
+  if (pcm == NULL || samples == 0) return;
+  for(i=0; i<samples * 2; i++)
+     { int v = pcm[i];
+       if (v < 0) v = -v;
+       if (v > peak) peak = v;
+     }
+  if (peak <= 0 || peak >= target_peak) return;
+  scale = (target_peak * 256) / peak;
+  if (scale > 1024) scale = 1024;
+  for(i=0; i<samples * 2; i++)
+     pcm[i] = ClampSample(((int)pcm[i] * scale) / 256);
+}
+
+static void EnhanceShortMIDISFX(short *pcm, unsigned int samples, tml_message *midi,
+                                unsigned int length_ms, int total_notes)
+{ unsigned char program[16];
+  tml_message *msg;
+  int i;
+  int enhanced;
+  if (pcm == NULL || midi == NULL) return;
+  if (length_ms > 3500 || total_notes > 40) return;
+  for(i=0; i<16; i++) program[i] = 0;
+  enhanced = 0;
+  for(msg=midi; msg != NULL; msg=msg->next)
+     { int channel;
+       channel = msg->channel & 0x0f;
+       if (msg->type == TML_PROGRAM_CHANGE)
+          { program[channel] = msg->program & 0x7f;
+          }
+       else if (msg->type == TML_NOTE_ON && (msg->velocity & 0x7f) != 0)
+          { unsigned int start;
+            int amp;
+            int note;
+            start = (unsigned int)(((double)msg->time * (double)SAMPLE_FREQ) / 1000.0);
+            amp = 6000 + (msg->velocity & 0x7f) * 90;
+            note = msg->key & 0x7f;
+            if (channel == 9 || program[channel] >= 118 || program[channel] == 127)
+               { unsigned int noise_ms = 90;
+                 if (program[channel] == 127 || note == 35 || note == 37) noise_ms = 170;
+                 if (program[channel] == 122) noise_ms = 260;
+                 MixNoiseBurst(pcm, samples, start, (noise_ms * SAMPLE_FREQ) / 1000,
+                               amp, (unsigned int)(note + (channel << 8) + msg->time));
+                 enhanced = 1;
+               }
+            if (program[channel] == 127 || program[channel] == 118)
+               { MixToneBurst(pcm, samples, start, SAMPLE_FREQ / 28, 36, amp / 2);
+                 enhanced = 1;
+               }
+          }
+     }
+  if (enhanced || total_notes <= 16) NormalizeShortMIDI(pcm, samples, 24500);
 }
 
 static int RenderTSFMIDIPlayer(struct NativeMIDIPlayer *NMP)
@@ -796,6 +900,7 @@ static int RenderTSFMIDIPlayer(struct NativeMIDIPlayer *NMP)
   tml_message *msg;
   short *pcm;
   unsigned int length_ms;
+  unsigned int media_length_ms;
   unsigned int total_samples;
   unsigned int rendered;
   double msec;
@@ -813,6 +918,7 @@ static int RenderTSFMIDIPlayer(struct NativeMIDIPlayer *NMP)
        return(-3);
      }
   tml_get_info(midi, &used_channels, &used_programs, &total_notes, &first_note, &length_ms);
+  media_length_ms = length_ms;
   if (length_ms < 250) length_ms = 250;
   length_ms += 2000;
   if (length_ms > MIDI_TSF_MAX_MS) length_ms = MIDI_TSF_MAX_MS;
@@ -849,6 +955,7 @@ static int RenderTSFMIDIPlayer(struct NativeMIDIPlayer *NMP)
   NMP->MC.alen = rendered * 2 * sizeof(short);
   NMP->MC.allocated = 1;
   NMP->MC.volume = (MIX_MAX_VOLUME * NMP->VolumeLevel) / 100;
+  EnhanceShortMIDISFX(pcm, rendered, midi, media_length_ms, total_notes);
   MEDIA_TRACE("MIDI tsf rendered rawBytes=%u pcmBytes=%u notes=%d channels=%d programs=%d\n",
               NMP->RawMidiSize, NMP->MC.alen, total_notes, used_channels, used_programs);
   tsf_close(font);

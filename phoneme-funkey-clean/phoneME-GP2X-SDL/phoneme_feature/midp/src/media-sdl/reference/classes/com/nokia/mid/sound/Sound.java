@@ -7,6 +7,7 @@ import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
 import javax.microedition.media.Player;
 import javax.microedition.media.PlayerListener;
+import javax.microedition.media.control.VolumeControl;
 
 public class Sound {
     public static final int FORMAT_TONE = 1;
@@ -52,7 +53,7 @@ public class Sound {
     }
 
     public static int getConcurrentSoundCount(int type) {
-        return 1;
+        return 8;
     }
 
     public static int[] getSupportedFormats() {
@@ -110,6 +111,7 @@ public class Sound {
             }
             player = Manager.createPlayer(new ByteArrayInputStream(data), mime);
             player.addPlayerListener(playerListener);
+            applyGain();
             toneMode = false;
             state = SOUND_STOPPED;
         } catch (IOException e) {
@@ -170,6 +172,7 @@ public class Sound {
 
     public void setGain(int newGain) {
         gain = newGain;
+        applyGain();
     }
 
     public void setSoundListener(SoundListener soundListener) {
@@ -192,6 +195,16 @@ public class Sound {
         state = newState;
         if (listener != null) {
             listener.soundStateChanged(this, state);
+        }
+    }
+
+    private void applyGain() {
+        if (player == null) {
+            return;
+        }
+        VolumeControl volume = (VolumeControl)player.getControl("VolumeControl");
+        if (volume != null) {
+            volume.setLevel(gain);
         }
     }
 
