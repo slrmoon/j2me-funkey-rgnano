@@ -25,7 +25,7 @@ Based on the upstream phoneME-GP2X-SDL source at:
 
 ## Scaling setup
 
-Launch a game, press **Power** to open the overlay, then follow this order. You can also pre-configure scaling before launching — press **START** on a game in the launcher to open its settings.
+Press **START** on a game in the launcher to pre-configure scaling before launching. You can also adjust settings during gameplay — press **Power** to open the overlay menu.
 
 ### 1. Set original resolution first
 
