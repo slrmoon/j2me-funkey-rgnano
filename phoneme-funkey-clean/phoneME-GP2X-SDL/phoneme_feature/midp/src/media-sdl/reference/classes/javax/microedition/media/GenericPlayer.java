@@ -43,7 +43,6 @@ public class GenericPlayer extends ABBBasicPlayer implements Runnable, VolumeCon
     private native long nSampleGetMediaTime(int id);
     private native int nSampleCheckEOM(int id);
     private native void nSampleSetVolumeLevel(int id, int value);
-    private native void nSampleSetLoopCount(int id, int count);
 
     private String genericPlayerType;
     private Thread checkThread;
@@ -133,12 +132,6 @@ public class GenericPlayer extends ABBBasicPlayer implements Runnable, VolumeCon
         if (isSampleType() && samplePlayerId != 0) {
             nSamplePlayerClose(samplePlayerId);
             samplePlayerId = 0;
-        }
-    }
-
-    protected void doSetLoopCount(int count) {
-        if (isSampleType()) {
-            nSampleSetLoopCount(samplePlayerId, count);
         }
     }
 
