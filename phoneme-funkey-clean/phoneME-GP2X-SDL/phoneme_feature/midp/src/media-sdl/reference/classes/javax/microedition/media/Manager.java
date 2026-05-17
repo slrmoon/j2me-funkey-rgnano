@@ -521,9 +521,6 @@ public final class Manager {
         return new String[] {
             "audio/midi",
             "audio/x-midi",
-            "audio/mid",
-            "audio/x-mid",
-            "audio/sp-midi",
             "audio/wav",
             "audio/x-wav",
             "audio/amr",
@@ -648,8 +645,6 @@ public final class Manager {
     private static boolean isMidiType(String type) {
       return type.equalsIgnoreCase("audio/midi") ||
              type.equalsIgnoreCase("audio/x-midi") ||
-             type.equalsIgnoreCase("audio/mid") ||
-             type.equalsIgnoreCase("audio/x-mid") ||
              type.equalsIgnoreCase("audio/sp-midi");
     }
 
