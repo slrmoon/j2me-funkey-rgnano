@@ -43,6 +43,7 @@ public class MIDIPlayer extends ABBBasicPlayer implements Runnable, VolumeContro
          private native long nGetMediaTime(int id);
          private native int  nCheckEOM(int id);
          private native void nSetVolumeLevel(int id, int value);
+         private native void nSetLoopCount(int id, int count);
          private Thread      CheckThread;
          private int         MIDIPlayer_ID;
          private int         VolumeLevel;
@@ -111,6 +112,10 @@ public class MIDIPlayer extends ABBBasicPlayer implements Runnable, VolumeContro
          protected void doClose()
                    { nMidiPlayerClose(this.MIDIPlayer_ID);
                      this.MIDIPlayer_ID = 0;
+                   }
+
+         protected void doSetLoopCount(int count)
+                   { nSetLoopCount(this.MIDIPlayer_ID, count);
                    }
 
          protected long doSetMediaTime(long now) throws MediaException

@@ -251,6 +251,7 @@ struct NativeSamplePlayer
   int CheckEOM;
   int VolumeLevel;
   int Stopped;
+  int LoopCount;
 };
 
 static const int AmrNbFrameSizes[16] =
@@ -353,6 +354,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_GenericPlayer_nSample
        Ret->CheckEOM = 0;
        Ret->VolumeLevel = 100;
        Ret->Stopped = 1;
+       Ret->LoopCount = 1;
      }
   KNI_ReturnInt((int)Ret);
 }
@@ -420,7 +422,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_GenericPlayer_nSample
   NSP->CheckEOM = 0;
   NSP->Stopped = 0;
   Mix_Volume(NSP->Chan, MediaSDL_MixerVolume());
-  play_chan = Mix_PlayChannel(NSP->Chan, NSP->Chunk, 0);
+  play_chan = Mix_PlayChannel(NSP->Chan, NSP->Chunk, NSP->LoopCount == -1 ? -1 : 0);
   if (play_chan == -1)
      { FreeChannel(NSP->Chan);
        NSP->Chan = -1;
@@ -517,6 +519,16 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_GenericPlayer_nSampl
   KNI_ReturnVoid();
 }
 
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_GenericPlayer_nSampleSetLoopCount()
+{ struct NativeSamplePlayer *NSP;
+  jint id = KNI_GetParameterAsInt(1);
+  jint count = KNI_GetParameterAsInt(2);
+  if (id == 0) KNI_ReturnVoid();
+  NSP = (struct NativeSamplePlayer *)id;
+  NSP->LoopCount = count;
+  KNI_ReturnVoid();
+}
+
 /*****************************************************************************/
 
 #define MIDI_CHUNK_SIZE	16384
@@ -534,6 +546,7 @@ struct NativeMIDIPlayer
   int            CheckEOM;
   int            VolumeLevel;
   int            Stopped;
+  int            LoopCount;
 };
 
 long long GetTimeMillis()
@@ -1268,6 +1281,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_MIDIPlayer_nMidiPlaye
 	       Ret->RawMidi = NULL;
 	       Ret->RawMidiSize = 0;
 	       Ret->Stopped = 1;
+       Ret->LoopCount = 1;
        Ret->MediaSample = 0;
        Ret->MC.allocated = 0;
        Ret->MC.volume = MIX_MAX_VOLUME;
@@ -1357,7 +1371,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_MIDIPlayer_nMidiPlaye
        KNI_ReturnInt(-4);
      }
   Mix_Volume(NMP->Chan, MediaSDL_MixerVolume());
-  play_chan = Mix_PlayChannel(NMP->Chan, &NMP->MC, 0);
+  play_chan = Mix_PlayChannel(NMP->Chan, &NMP->MC, NMP->LoopCount == -1 ? -1 : 0);
   if (play_chan == -1)
      { FreeChannel(NMP->Chan);
        NMP->Chan = -1;
@@ -1455,6 +1469,16 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_MIDIPlayer_nSetVolum
   NMP = (struct NativeMIDIPlayer *)id;
   NMP->VolumeLevel = value;
   NMP->MC.volume = (MIX_MAX_VOLUME * value) / 100;
+  KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_MIDIPlayer_nSetLoopCount()
+{ struct NativeMIDIPlayer *NMP;
+  jint id = KNI_GetParameterAsInt(1);
+  jint count = KNI_GetParameterAsInt(2);
+  if (id == 0) KNI_ReturnVoid();
+  NMP = (struct NativeMIDIPlayer *)id;
+  NMP->LoopCount = count;
   KNI_ReturnVoid();
 }
 
