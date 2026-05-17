@@ -25,36 +25,32 @@ Based on the upstream phoneME-GP2X-SDL source at:
 
 ## Scaling setup
 
-Each game can have its own scaling mode configured via the overlay menu. Launch a game, press **Power**, go to scaling settings and choose:
+Launch a game, press **Power** to open the overlay, then follow this order:
 
-**Fit**  
-The entire game fits within the screen. Aspect ratio is preserved. Safest mode for most games.
+### 1. Set original resolution first
 
-**Fill**  
-Game fills more of the screen, but edges may be cropped. Useful when the game is nearly square and black bars are distracting.
+Pick the game's native screen size. If this is wrong, Fit/Fill/Stretch will produce distorted results.
 
-**Stretch**  
-Game is stretched to fill the whole 240x240 screen without preserving proportions. Use only if distortion doesn't bother you.
-
-**Original**  
-Game is displayed at its native resolution. Small games will have lots of empty space; large games may not fit.
-
-### Recommendations
-
-| Native resolution | Best mode |
+| If the game looks... | Resolution is probably wrong |
 |---|---|
-| 128x128, 128x160, 176x208 | **Fit**. Try **Fill** if the image is too small. |
-| 240x320, 240x400, 320x240 | **Fit** — keeps UI and text intact. For 240x320 portrait games the image shrinks to 180x240, that's normal. |
-| 240x240 | **Original** or **Fit**. There will be almost no difference. |
-| 176x220, 240x260, non-standard | Start with **Fit**. Try **Fill** if borders are too large. |
+| Stretched, cropped, too small, off-center, or UI is outside the screen | Try a different original resolution |
 
-### Rule of thumb
+**Starting points for old J2ME games:**
 
-If text, menus, HUD, health, ammo, buttons and bottom hints matter — use **Fit**.
+| Orientation | Try these first |
+|---|---|
+| Portrait | 240×320 |
+| Old Nokia / Sony Ericsson | 176×208 or 176×220 |
+| Very old phones | 128×160 |
+| Landscape | 320×240 |
+| Square | 240×240 |
 
-If the game is visually simple and you can afford to lose some edges — try **Fill**.
+### 2. Then choose scaling mode
 
-Keep **Stretch** as a last resort, when the game feels too small or black bars annoy you more than distortion.
+- **Fit** — game fits entirely, proportions kept. Safest mode if text, HUD, menus matter.
+- **Fill** — fills more screen, edges may crop. Try when black bars are distracting.
+- **Stretch** — forced 240×240, no proportions. Last resort only.
+- **Original** — native size, no scaling. Best for 240×240 games.
 
 ---
 
