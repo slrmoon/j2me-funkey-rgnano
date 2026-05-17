@@ -118,6 +118,7 @@ MODULE_JSR_120_COMMON_JAVA_FILES += \
 endif
 
 MODULE_JSR_120_SMS_JAVA_FILES = \
+    $(JSR_120_DIR)/src/protocol/sms/classes/com/sun/cldc/io/j2me/sms/Protocol.java \
     $(JSR_120_DIR)/src/protocol/share/com/sun/midp/io/j2me/ProtocolBase.java \
     $(JSR_120_DIR)/src/protocol/sms/classes/com/sun/midp/io/j2me/sms/BinaryObject.java \
     $(JSR_120_DIR)/src/protocol/sms/classes/com/sun/midp/io/j2me/sms/Protocol.java \
@@ -126,6 +127,7 @@ MODULE_JSR_120_SMS_JAVA_FILES = \
     $(JSR_120_DIR)/src/protocol/sms/classes/com/sun/midp/io/j2me/sms/TextObject.java
 
 MODULE_JSR_120_CBS_JAVA_FILES = \
+    $(JSR_120_DIR)/src/protocol/cbs/classes/com/sun/cldc/io/j2me/cbs/Protocol.java \
     $(JSR_120_DIR)/src/protocol/cbs/classes/com/sun/midp/io/j2me/cbs/Protocol.java \
     $(JSR_120_DIR)/src/protocol/cbs/classes/com/sun/midp/io/j2me/cbs/BinaryObject.java \
     $(JSR_120_DIR)/src/protocol/cbs/classes/com/sun/midp/io/j2me/cbs/TextObject.java
@@ -300,4 +302,3 @@ DOXYGEN_INPUT_LIST += \
 	$(JSR_120_DIR)/src/protocol/sms/native/share/inc/jsr120_sms_protocol.h \
 	$(JSR_120_DIR)/src/core/common/native/share/inc/jsr120_sms_pool.h
  
-

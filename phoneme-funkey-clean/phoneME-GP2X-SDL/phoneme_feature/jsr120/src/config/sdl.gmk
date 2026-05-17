@@ -1,0 +1,21 @@
+#
+# JSR 120 platform configuration for the SDL runtime.
+#
+
+POOL_IMPL_DIR = stubs
+
+vpath % $(JSR_120_DIR)/src/core/common/native/$(POOL_IMPL_DIR)
+vpath % $(JSR_120_DIR)/src/protocol/sms/native/stubs
+vpath % $(JSR_120_DIR)/src/protocol/cbs/native/stubs
+
+SUBSYSTEM_JSR_120_NATIVE_FILES += \
+        jsr120_sms_pool.c \
+        jsr120_cbs_pool.c \
+	smsProtocol_stubs.c \
+	cbsProtocol_stubs.c
+
+SUBSYSTEM_JSR_120_EXTRA_INCLUDES += \
+    -I$(JSR_120_DIR)/src/core/common/native/share/inc \
+    -I$(JSR_120_DIR)/src/protocol/sms/native/share/inc \
+    -I$(JSR_120_DIR)/src/protocol/cbs/native/share/inc \
+    -I$(JSR_120_DIR)/src/core/common/native/stubs/inc

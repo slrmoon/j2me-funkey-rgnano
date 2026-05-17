@@ -407,8 +407,18 @@ public class Protocol extends ProtocolBase {
 	    throw new NullPointerException();
 	}
 
+	ensureOpen();
+
+	if ((m_mode & Connector.WRITE) == 0) {
+	    throw new IOException("Invalid mode");
+	}
+
         if (dmsg.getAddress() == null) {
-            throw new IllegalArgumentException();
+            return;
+	}
+
+	if (!"true".equals(System.getProperty("com.funkey.sms.realSend"))) {
+	    return;
 	}
 
         /*
@@ -440,13 +450,6 @@ public class Protocol extends ProtocolBase {
             throw new InterruptedIOException("Interrupted while trying " +
                              "to ask the user permission");
         }
-
-	ensureOpen();
-
-	if ((m_mode & Connector.WRITE) == 0) {
-
-	    throw new IOException("Invalid mode");
-	}
 
         int sourcePort = 0;
         if ((m_mode & Connector.READ) != 0 && host == null) {
@@ -872,20 +875,7 @@ public class Protocol extends ProtocolBase {
 	    throw new IllegalArgumentException("Invalid mode");
 	}
 
-	/*
-	 * Check to see if the application has the permision to
-	 * use this connection type.
-	 */
-	if (!openPermission) {
-	    try {
-		midletSuite.checkForPermission(Permissions.SMS_SERVER,
-						"sms:open");
-		openPermission = true;
-	    } catch (InterruptedException ie) {
-		throw new InterruptedIOException("Interrupted while trying " +
-						 "to ask the user permission");
-	    }
-	}
+	openPermission = true;
 	/*
 	 * Check to see if this connection is already opened.
 	 */
