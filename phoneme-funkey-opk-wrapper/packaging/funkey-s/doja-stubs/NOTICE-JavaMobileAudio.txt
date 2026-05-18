@@ -1,0 +1,11 @@
+DoJa MLD/MFi audio support uses message semantics and format details checked
+against Java Mobile Audio Library.
+
+Project: Java Mobile Audio Library
+URL: https://sourceforge.net/projects/javamobileaudio/
+License: GNU General Public License version 2.0 (GPLv2)
+Author: Naohide Sano
+
+This DoJa runtime does not bundle the upstream desktop Java Sound sequencer.
+The local CLDC-compatible MLD renderer implements the relevant MFi message
+semantics directly for phoneME/FunKey runtime use.

@@ -19,10 +19,17 @@ RUNMIDLET_FALLBACK=${RUNMIDLET_FALLBACK:-$MEHOME/build_output_funkey_s/opk/phone
 CLDC_VM_FALLBACK=${CLDC_VM_FALLBACK:-}
 JDK_DIR=${JDK_DIR:-$ROOT/zulu7.24.0.1-jdk7.0.191-linux_x64}
 PACKAGE_ROOT=$MEHOME/build_output_funkey_s/opk
-STAGE=$PACKAGE_ROOT/pm
-OPK=$PACKAGE_ROOT/pm.opk
+OPK_BASENAME=${FUNKEY_OPK_BASENAME:-pm}
+STAGE_NAME=${FUNKEY_STAGE_NAME:-$OPK_BASENAME}
+LAUNCHER_BIN=${FUNKEY_LAUNCHER_BIN:-pm}
+APP_DIR=${FUNKEY_APP_DIR:-/mnt/FunKey/.pm}
+SCAN_DIR=${FUNKEY_SCAN_DIR:-/mnt/java}
+RUNTIME_LOG=${FUNKEY_RUNTIME_LOG:-$APP_DIR/runmidlet.log}
+STAGE=$PACKAGE_ROOT/$STAGE_NAME
+OPK=$PACKAGE_ROOT/$OPK_BASENAME.opk
 HELLO_SRC=$ROOT/packaging/funkey-s/HelloMidlet.java
 NOKIA_STUB_SRC=$ROOT/packaging/funkey-s/nokia-stubs
+DOJA_STUB_SRC=$ROOT/packaging/funkey-s/doja-stubs
 HELLO_BUILD=$PACKAGE_ROOT/hello-build
 FUNKEY_CC=${FUNKEY_CC:-}
 APP_JAR=${FUNKEY_MIDLET_JAR:-${1:-}}
@@ -34,6 +41,7 @@ RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
 BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
 RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
+ENABLE_DOJA_SUPPORT=${FUNKEY_ENABLE_DOJA_SUPPORT:-0}
 
 if [ "$BUNDLE_MIDLET" = "1" ]; then
     RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
@@ -157,6 +165,36 @@ inject_nokia_stubs() {
             com/nokia/mid/ui/DirectUtils.class \
             com/nokia/mid/ui/DirectUtils\$DirectGraphicsImpl.class
     )
+}
+
+build_doja_support() {
+    if [ "$ENABLE_DOJA_SUPPORT" != "1" ]; then
+        return
+    fi
+    if [ ! -d "$DOJA_STUB_SRC" ]; then
+        return
+    fi
+
+    echo "Building DoJa compatibility support"
+    mkdir -p "$HELLO_BUILD/doja-stubs/classes" "$HELLO_BUILD/doja-stubs/verified" "$STAGE/lib"
+    find "$DOJA_STUB_SRC" -name '*.java' | sort > "$HELLO_BUILD/doja-stubs/sources.list"
+    "$JDK_DIR/bin/javac" \
+        -source 1.4 -target 1.4 \
+        -bootclasspath "$MIDP_CLASSES" \
+        -classpath "$MIDP_CLASSES" \
+        -d "$HELLO_BUILD/doja-stubs/classes" \
+        @"$HELLO_BUILD/doja-stubs/sources.list"
+
+    "$PREVERIFY" \
+        -classpath "$MIDP_CLASSES:$CLDC_DIST/lib/cldc_classes.zip" \
+        -d "$HELLO_BUILD/doja-stubs/verified" \
+        "$HELLO_BUILD/doja-stubs/classes"
+
+    (
+        cd "$HELLO_BUILD/doja-stubs/verified"
+        "$JDK_DIR/bin/jar" cf "$STAGE/lib/doja-support.jar" .
+    )
+    find "$DOJA_STUB_SRC" -maxdepth 1 -name 'NOTICE-*' -exec cp {} "$STAGE/lib/" \;
 }
 
 if [ -z "$FUNKEY_CC" ] && command -v arm-funkey-linux-musleabihf-gcc >/dev/null 2>&1; then
@@ -289,6 +327,23 @@ if [ -s "$TARGET_CLDC_BIN/cldc_vm" ] || { [ -n "$CLDC_VM_FALLBACK" ] && [ -s "$C
 fi
 cp -R "$MEHOME/build_output_funkey_s/midp/lib" "$STAGE/lib"
 rm -rf "$STAGE/lib/freepats"
+if [ -n "${FUNKEY_SOUNDFONT_SRC:-}" ]; then
+    if [ ! -s "$FUNKEY_SOUNDFONT_SRC" ]; then
+        echo "Missing non-empty SoundFont: $FUNKEY_SOUNDFONT_SRC" >&2
+        exit 1
+    fi
+    mkdir -p "$STAGE/lib/soundfont"
+    cp "$FUNKEY_SOUNDFONT_SRC" "$STAGE/lib/soundfont/default.sf2"
+    if [ -n "${FUNKEY_SOUNDFONT_LICENSE:-}" ]; then
+        if [ -d "$FUNKEY_SOUNDFONT_LICENSE" ]; then
+            cp -R "$FUNKEY_SOUNDFONT_LICENSE" "$STAGE/lib/soundfont/licenses"
+        elif [ -s "$FUNKEY_SOUNDFONT_LICENSE" ]; then
+            cp "$FUNKEY_SOUNDFONT_LICENSE" "$STAGE/lib/soundfont/LICENSE.txt"
+        fi
+    fi
+    echo "Bundled SoundFont: $FUNKEY_SOUNDFONT_SRC"
+fi
+build_doja_support
 cp -R "$MEHOME/build_output_funkey_s/midp/appdb" "$STAGE/appdb"
 echo "Compiling SDL launcher (browser mode)"
 
@@ -296,15 +351,22 @@ FUNKEY_SDK_DIR=${FUNKEY_SDK_DIR:-$(dirname "$(dirname "$FUNKEY_CC")")}
 SYSROOT=$FUNKEY_SDK_DIR/arm-funkey-linux-musleabihf/sysroot
 LAUNCH_SRC=$ROOT/packaging/funkey-s/pm-launch.c
 if [ -f "$LAUNCH_SRC" ]; then
+    pm_dir_define=$(printf '%s' "$APP_DIR" | sed 's/"/\\"/g')
+    browse_dir_define=$(printf '%s' "$SCAN_DIR" | sed 's/"/\\"/g')
+    runtime_log_define=$(printf '%s' "$RUNTIME_LOG" | sed 's/"/\\"/g')
     "$FUNKEY_CC" -Os -s \
         -I"$SYSROOT/usr/include/SDL" \
+        -DPM_DIR="\"$pm_dir_define\"" \
+        -DBROWSE_DIR="\"$browse_dir_define\"" \
+        -DRUNTIME_LOG="\"$runtime_log_define\"" \
+        -DENABLE_DOJA_SUPPORT="$ENABLE_DOJA_SUPPORT" \
         "$LAUNCH_SRC" \
-        -o "$STAGE/pm" \
+        -o "$STAGE/$LAUNCHER_BIN" \
         -lSDL -lSDL_gfx -lm
-    echo "SDL launcher built: $(file "$STAGE/pm")"
+    echo "SDL launcher built: $(file "$STAGE/$LAUNCHER_BIN")"
 else
     echo "WARNING: pm-launch.c not found, falling back to stub"
-    cp "$MIDP_BIN/runMidlet" "$STAGE/pm" 2>/dev/null || {
+    cp "$MIDP_BIN/runMidlet" "$STAGE/$LAUNCHER_BIN" 2>/dev/null || {
         echo "No launcher available" >&2
         exit 1
     }
@@ -313,11 +375,13 @@ fi
 {
     printf 'pm-runtime-v2\n'
     for runtime_file in \
+        "$LAUNCHER_BIN" \
         bin/runMidlet \
         bin/cldc_vm \
         bin/installMidlet \
         bin/listMidlets.sh \
         bin/preverify \
+        lib/doja-support.jar \
         lib/soundfont/default.sf2; do
         if [ -f "$STAGE/$runtime_file" ]; then
             sha256sum "$STAGE/$runtime_file" | awk -v name="$runtime_file" '{ print $1 "  " name }'
@@ -327,7 +391,7 @@ fi
 
 cat > "$STAGE/r.sh" <<'EOF'
 #!/bin/sh
-APP_DIR=/mnt/FunKey/.pm
+APP_DIR=__APP_DIR__
 mkdir -p "$APP_DIR"
 EARLY_LOG="$APP_DIR/r-early.log"
 echo "r.sh v16 enter" > "$EARLY_LOG"
@@ -392,7 +456,7 @@ fi
 export PHONEME_KEY_PROFILE="${PHONEME_KEY_PROFILE:-game}"
 DEFAULT_RUNMIDLET_HEAP_ARG='__RUNMIDLET_HEAP_ARG__'
 RUNMIDLET_HEAP_ARG=${PHONEME_RUNMIDLET_HEAP_ARG:-$DEFAULT_RUNMIDLET_HEAP_ARG}
-LOG="$APP_DIR/l"
+LOG="$APP_DIR/runtime-wrapper.log"
 echo "copy bin begin" >> "$EARLY_LOG"
 if [ "$RUNTIME_CURRENT" != "1" ]; then
     cp "$OPK_DIR/bin/runMidlet" "$APP_DIR/bin/runMidlet" || {
@@ -466,7 +530,7 @@ stop_midlet() {
 
 trap 'stop_midlet; exit 0' INT TERM HUP
 
-echo "pm launcher v19 signal-safe"
+echo "pm launcher v24 doja-midi-audio-v7"
 echo "Starting phoneME FunKey runtime"
 date
 echo "APP_DIR=$APP_DIR"
@@ -504,29 +568,31 @@ echo "$status" > "$APP_DIR/s"
 exit "$(cat "$APP_DIR/s" 2>/dev/null || echo 1)"
 EOF
 escaped_heap_arg=$(printf '%s' "$RUNMIDLET_HEAP_ARG" | sed "s/'/'\\\\''/g")
+escaped_app_dir=$(printf '%s' "$APP_DIR" | sed 's/[\/&]/\\&/g')
 sed -i "s|__RUNMIDLET_HEAP_ARG__|$escaped_heap_arg|" "$STAGE/r.sh"
 sed -i "s|__RUNTIME_ONLY__|$RUNTIME_ONLY|g" "$STAGE/r.sh"
+sed -i "s|__APP_DIR__|$escaped_app_dir|g" "$STAGE/r.sh"
 chmod +x "$STAGE/r.sh"
 
-cat > "$STAGE/pm.funkey-s.desktop" <<EOF
+cat > "$STAGE/$LAUNCHER_BIN.funkey-s.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=$APP_TITLE
 Comment=$APP_COMMENT
-Exec=pm
-Icon=pm
+Exec=$LAUNCHER_BIN
+Icon=$LAUNCHER_BIN
 Categories=emulators
 
 EOF
 
 if [ -f "$APP_ICON_SRC" ]; then
-    cp "$APP_ICON_SRC" "$STAGE/pm.png"
+    cp "$APP_ICON_SRC" "$STAGE/$LAUNCHER_BIN.png"
 else
     printf '%s' \
         'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAVUlEQVR4nO2WQQoAIAgE8/9P' \
         'vWgQpEgtQvYhDoyrs4IkkwAAgHl1bQF4pykA5hJQAHMJqD2s8QfQnU6YAHMJqD0S' \
         'kN9A9zphAswloPb+f4DmEtAAcwmoPQAAwOlXB9+MJPz57QAAAABJRU5ErkJggg==' |
-        base64 -d > "$STAGE/pm.png"
+        base64 -d > "$STAGE/$LAUNCHER_BIN.png"
 fi
 
 mksquashfs "$STAGE" "$OPK" -all-root -noappend -no-exports -no-xattrs
