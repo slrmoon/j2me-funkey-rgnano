@@ -20,10 +20,18 @@
 #define SCR_H  240
 
 /* ── directories ────────────────────────────────────── */
-#define PM_DIR     "/mnt/FunKey/.pm"
-#define BIND_DIR   "/mnt/FunKey/.pm/keybinds"
-#define BIN_DIR    "/mnt/FunKey/.pm/bin"
-static char java_dir[PATH_MAX] = "/mnt/java";
+#ifndef PM_DIR
+#define PM_DIR "/mnt/FunKey/.pm"
+#endif
+#ifndef BROWSE_DIR
+#define BROWSE_DIR "/mnt/java"
+#endif
+#ifndef RUNTIME_LOG
+#define RUNTIME_LOG PM_DIR "/runmidlet.log"
+#endif
+#define BIND_DIR   PM_DIR "/keybinds"
+#define BIN_DIR    PM_DIR "/bin"
+static char java_dir[PATH_MAX] = BROWSE_DIR;
 
 /* ── MIDP key codes (from phoneME keymap_input.h) ───── */
 #define K_UP     (-1)
@@ -137,6 +145,9 @@ static const PhoneKeyOption phone_key_options[] = {
 static const KeyProfilePreset key_profiles[] = {
     { "universal", "UNIVERSAL",
       { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, K_GAMEB, K_GAMEC, K_GAMED,
+        42, 35, K_SOFT2, K_SOFT1 } },
+    { "doja", "DOJA/I-APPLI",
+      { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, K_SOFT1, K_CLEAR, K_SOFT2,
         42, 35, K_SOFT2, K_SOFT1 } },
     { "nokia-s40", "NOKIA/S40",
       { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SELECT, 53, K_GAMEC, K_GAMED,
@@ -284,7 +295,13 @@ typedef struct {
     char label[PATH_MAX];
     char config[PATH_MAX];
     char title[128];
+    char jam_path[PATH_MAX];
+    char sp_path[PATH_MAX];
+    char app_class[256];
+    char app_param[256];
+    char app_ver[128];
     int is_dir;
+    int is_doja;
 } GameEntry;
 
 static GameEntry games[MAX_GAMES];
@@ -331,6 +348,8 @@ static void handle_key_browser(SDL_KeyboardEvent *kev);
 static void handle_key_keybinds(SDL_KeyboardEvent *kev);
 static char *trim_line(char *text);
 static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size);
+static int read_jam_value(const char *jam_path, const char *key, char *out, size_t out_size);
+static int find_key_profile(const char *id);
 static void enter_selected_folder(void);
 static int leave_folder(void);
 static const char *game_display_name(int idx);
@@ -353,7 +372,13 @@ static void add_folder(const char *full_path, const char *name) {
     snprintf(games[game_count].label, sizeof(games[game_count].label), "%s/", name);
     games[game_count].config[0] = '\0';
     games[game_count].title[0] = '\0';
+    games[game_count].jam_path[0] = '\0';
+    games[game_count].sp_path[0] = '\0';
+    games[game_count].app_class[0] = '\0';
+    games[game_count].app_param[0] = '\0';
+    games[game_count].app_ver[0] = '\0';
     games[game_count].is_dir = 1;
+    games[game_count].is_doja = 0;
     game_count++;
 }
 
@@ -369,13 +394,35 @@ static void add_game(const char *full_path, const char *name) {
     snprintf(games[game_count].config, sizeof(games[game_count].config), "%s", rel_path);
     sanitize_config_name(games[game_count].config);
     games[game_count].title[0] = '\0';
+    games[game_count].jam_path[0] = '\0';
+    games[game_count].sp_path[0] = '\0';
+    games[game_count].app_class[0] = '\0';
+    games[game_count].app_param[0] = '\0';
+    games[game_count].app_ver[0] = '\0';
     games[game_count].is_dir = 0;
+    games[game_count].is_doja = 0;
     jar_len = strlen(full_path);
     if (jar_len >= 5) {
         char jad_path[PATH_MAX];
+        char jam_path[PATH_MAX];
         snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, full_path);
         read_midlet_name_from_jad(jad_path, games[game_count].title,
                                   sizeof(games[game_count].title));
+        snprintf(jam_path, sizeof(jam_path), "%.*s.jam", jar_len - 4, full_path);
+        if (read_jam_value(jam_path, "AppClass", games[game_count].app_class,
+                           sizeof(games[game_count].app_class))) {
+            games[game_count].is_doja = 1;
+            snprintf(games[game_count].jam_path, sizeof(games[game_count].jam_path),
+                     "%s", jam_path);
+            snprintf(games[game_count].sp_path, sizeof(games[game_count].sp_path),
+                     "%.*s.sp", jar_len - 4, full_path);
+            read_jam_value(jam_path, "AppParam", games[game_count].app_param,
+                           sizeof(games[game_count].app_param));
+            read_jam_value(jam_path, "AppVer", games[game_count].app_ver,
+                           sizeof(games[game_count].app_ver));
+            read_jam_value(jam_path, "AppName", games[game_count].title,
+                           sizeof(games[game_count].title));
+        }
     }
     game_count++;
 }
@@ -531,6 +578,34 @@ static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out
         }
     }
     fclose(jad);
+    return 0;
+}
+
+static int read_jam_value(const char *jam_path, const char *key, char *out, size_t out_size) {
+    FILE *jam;
+    char line[512];
+    size_t key_len;
+
+    if (out_size == 0) return 0;
+    out[0] = '\0';
+    if (jam_path == NULL || jam_path[0] == '\0' || key == NULL) return 0;
+
+    jam = fopen(jam_path, "r");
+    if (jam == NULL) return 0;
+    key_len = strlen(key);
+    while (fgets(line, sizeof(line), jam) != NULL) {
+        char *value;
+        char *name = trim_line(line);
+        if (strncasecmp(name, key, key_len) != 0) continue;
+        value = name + key_len;
+        while (*value == ' ' || *value == '\t') value++;
+        if (*value != '=' && *value != ':') continue;
+        value = trim_line(value + 1);
+        snprintf(out, out_size, "%s", value);
+        fclose(jam);
+        return out[0] != '\0';
+    }
+    fclose(jam);
     return 0;
 }
 
@@ -700,23 +775,23 @@ static void score_profile_text(const char *text, int len, int scores[KEY_PROFILE
 
     if (strstr(lower, "nokia") || strstr(lower, "s40") ||
         strstr(lower, "series40") || strstr(lower, "series 40")) {
-        scores[1] += 5;
+        scores[2] += 5;
     }
     if (strstr(lower, "sony") || strstr(lower, "ericsson") ||
         strstr(lower, "sonyericsson") || strstr(lower, "semc")) {
-        scores[2] += 5;
+        scores[3] += 5;
     }
     if (strstr(lower, "samsung") || strstr(lower, "sgh-") ||
         strstr(lower, "gt-")) {
-        scores[3] += 5;
+        scores[4] += 5;
     }
     if (strstr(lower, "lg-") || strstr(lower, "lge") ||
         strstr(lower, "lg/")) {
-        scores[4] += 5;
+        scores[5] += 5;
     }
     if (strstr(lower, "motorola") || strstr(lower, "mot-") ||
         strstr(lower, "v3") || strstr(lower, "razr")) {
-        scores[5] += 5;
+        scores[6] += 5;
     }
 }
 
@@ -731,6 +806,10 @@ static int suggest_key_profile_for_jar(const char *jar_path) {
 
     for (i = 0; i < KEY_PROFILE_COUNT; i++) scores[i] = 0;
     if (!jar_path || !jar_path[0]) return 0;
+
+#if ENABLE_DOJA_SUPPORT
+    return find_key_profile("doja");
+#endif
 
     score_profile_text(jar_path, strlen(jar_path), scores);
     shell_quote(jar_path, quoted, sizeof(quoted));
@@ -1193,6 +1272,27 @@ static int jar_has_entry(const char *jar_path, const char *entry) {
     return rc == 0;
 }
 
+static void prepare_doja_scratchpad(GameEntry *game, char *out, size_t out_size) {
+    struct stat st;
+    char dir[PATH_MAX];
+
+    if (out_size == 0) return;
+    out[0] = '\0';
+    if (game == NULL || !game->is_doja) return;
+
+    snprintf(dir, sizeof(dir), "%s/scratchpad", PM_DIR);
+    mkdir(dir, 0777);
+    snprintf(out, out_size, "%s/%s.sp", dir, game->config);
+
+    if (stat(out, &st) == 0) {
+        return;
+    }
+
+    if (game->sp_path[0] != '\0' && stat(game->sp_path, &st) == 0) {
+        copy_file(game->sp_path, out);
+    }
+}
+
 static void copy_dir(const char *src_base, const char *dst_base) {
     DIR *d = opendir(src_base);
     if (!d) return;
@@ -1271,10 +1371,12 @@ static void launch_game(int idx) {
         if (!runtime_current) system(cmd);
     }
 
-    /* extract MIDlet main class from JAR manifest */
+    /* extract launch class */
     char main_class[256] = {0};
     char jad_path[PATH_MAX];
-    {
+    if (games[idx].is_doja) {
+        snprintf(main_class, sizeof(main_class), "%s", "com.funkey.doja.DoJaMIDlet");
+    } else {
         int jar_len = strlen(jar_path);
         snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, jar_path);
 
@@ -1311,15 +1413,34 @@ static void launch_game(int idx) {
 
     if (main_class[0] == '\0') strcpy(main_class, "Unknown");
 
+    char doja_scratchpad_path[PATH_MAX] = {0};
+    if (games[idx].is_doja) {
+        prepare_doja_scratchpad(&games[idx], doja_scratchpad_path,
+                                sizeof(doja_scratchpad_path));
+    }
+
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
-    setenv("PHONEME_HEAP_MB", "16", 1);
+    setenv("PHONEME_HEAP_MB", games[idx].is_doja ? "32" : "16", 1);
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
     setenv("PHONEME_TIMIDITY_SYNTHETIC", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
     setenv("PHONEME_SCALE_MODE", display_modes[display_mode_sel].id, 1);
+    if (games[idx].is_doja) {
+        setenv("DOJA_APP_CLASS", games[idx].app_class, 1);
+        setenv("DOJA_APP_PARAM", games[idx].app_param, 1);
+        setenv("DOJA_APP_VER", games[idx].app_ver, 1);
+        setenv("DOJA_JAM_PATH", games[idx].jam_path, 1);
+        setenv("DOJA_SCRATCHPAD_PATH", doja_scratchpad_path, 1);
+    } else {
+        unsetenv("DOJA_APP_CLASS");
+        unsetenv("DOJA_APP_PARAM");
+        unsetenv("DOJA_APP_VER");
+        unsetenv("DOJA_JAM_PATH");
+        unsetenv("DOJA_SCRATCHPAD_PATH");
+    }
     {
         char cfg_path[PATH_MAX];
         snprintf(cfg_path, sizeof(cfg_path), BIND_DIR "/%s.cfg", games[idx].config);
@@ -1368,7 +1489,7 @@ static void launch_game(int idx) {
     pid_t pid = fork();
     if (pid == 0) {
         /* child — redirect stdout+stderr to runmidlet log */
-        int log_fd = open(PM_DIR "/runmidlet.log",
+        int log_fd = open(RUNTIME_LOG,
                           O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (log_fd >= 0) {
             dup2(log_fd, STDOUT_FILENO);
@@ -1379,6 +1500,12 @@ static void launch_game(int idx) {
             printf("pm-launch trace\n");
             printf("pm-launch jar=%s\n", jar_path);
             printf("pm-launch main=%s\n", main_class);
+            printf("pm-launch doja=%d app=%s param=%s ver=%s jam=%s\n",
+                   games[idx].is_doja, games[idx].app_class,
+                   games[idx].app_param, games[idx].app_ver,
+                   games[idx].jam_path);
+            printf("pm-launch doja scratchpad=%s\n",
+                   getenv("DOJA_SCRATCHPAD_PATH") ? getenv("DOJA_SCRATCHPAD_PATH") : "");
             printf("pm-launch PHONEME_ENABLE_AUDIO=%s\n",
                    getenv("PHONEME_ENABLE_AUDIO") ? getenv("PHONEME_ENABLE_AUDIO") : "");
             printf("pm-launch PHONEME_HEAP_MB=%s\n",
@@ -1409,8 +1536,49 @@ static void launch_game(int idx) {
 
         chdir(BIN_DIR);
         {
-            char classpath[PATH_MAX + 1];
-            snprintf(classpath, sizeof(classpath), "%s", jar_path);
+            char classpath[PATH_MAX * 2 + 64];
+            char prop_app[320];
+            char prop_param[320];
+            char prop_ver[192];
+            char prop_encoding[64];
+            char prop_scratchpad[PATH_MAX + 32];
+            if (games[idx].is_doja) {
+                snprintf(classpath, sizeof(classpath), "%s:%s/lib/doja-support.jar",
+                         jar_path, PM_DIR);
+                snprintf(prop_app, sizeof(prop_app), "-Ddoja.app.class=%s",
+                         games[idx].app_class);
+                snprintf(prop_param, sizeof(prop_param), "-Ddoja.app.param=%s",
+                         games[idx].app_param);
+                snprintf(prop_ver, sizeof(prop_ver), "-Ddoja.app.ver=%s",
+                         games[idx].app_ver);
+                snprintf(prop_encoding, sizeof(prop_encoding),
+                         "-Dmicroedition.encoding=SJIS");
+                snprintf(prop_scratchpad, sizeof(prop_scratchpad),
+                         "-Ddoja.scratchpad.path=%s", doja_scratchpad_path);
+            } else {
+                snprintf(classpath, sizeof(classpath), "%s", jar_path);
+                prop_app[0] = '\0';
+                prop_param[0] = '\0';
+                prop_ver[0] = '\0';
+                prop_encoding[0] = '\0';
+                prop_scratchpad[0] = '\0';
+            }
+        if (games[idx].is_doja) {
+        char *argv[] = {
+            "runMidlet",
+            prop_app,
+            prop_param,
+            prop_ver,
+            prop_encoding,
+            prop_scratchpad,
+            "-classpathext",
+            classpath,
+            "internal",
+            main_class,
+            NULL
+        };
+        execv(runmidlet_path, argv);
+        } else {
         char *argv[] = {
             "runMidlet",
             "-classpathext",
@@ -1420,6 +1588,7 @@ static void launch_game(int idx) {
             NULL
         };
         execv(runmidlet_path, argv);
+        }
         }
         exit(127);
     } else if (pid > 0) {

@@ -64,6 +64,8 @@ $(GENERATED_DIR)/classes/com/sun/midp/io/j2me/storage/RandomAccessStream.java: $
 #
 SUBSYSTEM_FILE_JAVA_FILES += \
     $(SUBSYSTEM_DIR)/protocol/file/reference/classes/com/sun/midp/io/j2me/storage/File.java \
+    $(SUBSYSTEM_DIR)/protocol/file/reference/classes/com/sun/cldc/io/j2me/scratchpad/Protocol.java \
+    $(SUBSYSTEM_DIR)/protocol/file/reference/classes/com/nttdocomo/util/JarInflater.java \
     $(GENERATED_DIR)/classes/com/sun/midp/io/j2me/storage/RandomAccessStream.java
 
 # Native files for the ( file ) library

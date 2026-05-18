@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+FUNKEY_OPK_BASENAME=${FUNKEY_OPK_BASENAME:-doja} \
+FUNKEY_STAGE_NAME=${FUNKEY_STAGE_NAME:-doja} \
+FUNKEY_LAUNCHER_BIN=${FUNKEY_LAUNCHER_BIN:-doja} \
+FUNKEY_APP_TITLE=${FUNKEY_APP_TITLE:-DoJa} \
+FUNKEY_APP_COMMENT=${FUNKEY_APP_COMMENT:-DoJa i-appli runtime} \
+FUNKEY_APP_DIR=${FUNKEY_APP_DIR:-/mnt/FunKey/.doja} \
+FUNKEY_SCAN_DIR=${FUNKEY_SCAN_DIR:-/mnt/doja} \
+FUNKEY_RUNTIME_LOG=${FUNKEY_RUNTIME_LOG:-/mnt/FunKey/.doja/doja-runtime.log} \
+FUNKEY_ENABLE_DOJA_SUPPORT=1 \
+"$ROOT/package-funkey-opk.sh"
