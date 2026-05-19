@@ -72,6 +72,7 @@ SUBSYSTEM_MEDIA_JAVA_FILES += \
      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/MediaException.java \
      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/Player.java \
      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/ABBBasicPlayer.java \
+     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/DoJaAudioBridge.java \
      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/GenericPlayer.java \
      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/MIDIPlayer.java \
      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/ToneSequencePlayer.java \

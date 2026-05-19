@@ -77,6 +77,7 @@ public final class MediaManager {
         private byte[] cachedMidi;
         private byte[] cachedWav;
         private Player player;
+        private DoJaAudioPlayer dojaPlayer;
         private boolean loaded;
         private int note;
         private boolean playing;
@@ -102,6 +103,7 @@ public final class MediaManager {
         }
 
         public void unuse() {
+            closeDoJaPlayer();
             closePlayer();
             cachedMidi = null;
             cachedWav = null;
@@ -120,6 +122,9 @@ public final class MediaManager {
                 return;
             }
             stopMatchingActiveSound(this);
+            if (isMld(name, data) && isDoJaStreamingEnabled() && playDoJaAudio(volume)) {
+                return;
+            }
             byte[] midi = cachedMidi;
             if (midi == null) {
                 midi = MldPcmDecoder.decodeToMidi(data);
@@ -166,7 +171,31 @@ public final class MediaManager {
         public void stop() {
             playing = false;
             unregisterActiveSound(this);
+            closeDoJaPlayer();
             closePlayer();
+        }
+
+        private boolean playDoJaAudio(int volume) {
+            try {
+                closePlayer();
+                if (dojaPlayer == null) {
+                    dojaPlayer = new DoJaAudioPlayer(data, name);
+                    dojaPlayer.realize();
+                    dojaPlayer.prefetch();
+                }
+                dojaPlayer.setVolume(volume > 100 ? 100 : volume);
+                dojaPlayer.start();
+                registerActiveSound(this);
+                return true;
+            } catch (Throwable t) {
+                System.out.println("DoJa streaming sound failed name=" + name + " error=" + t);
+                closeDoJaPlayer();
+                return false;
+            }
+        }
+
+        private static boolean isDoJaStreamingEnabled() {
+            return "true".equals(System.getProperty("doja.audio.streaming"));
         }
 
         private boolean playMidi(byte[] midi, int volume) {
@@ -224,12 +253,28 @@ public final class MediaManager {
             }
         }
 
+        private void closeDoJaPlayer() {
+            DoJaAudioPlayer old = dojaPlayer;
+            dojaPlayer = null;
+            if (old != null) {
+                try {
+                    old.stop();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    old.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+
         private static void stopMatchingActiveSound(SimpleMediaSound sound) {
             synchronized (activeSounds) {
                 for (int i = 0; i < activeSounds.length; i++) {
                     SimpleMediaSound active = activeSounds[i];
                     if (active != null && active != sound && sameSound(active.name, sound.name)) {
                         active.playing = false;
+                        active.closeDoJaPlayer();
                         active.closePlayer();
                         activeSounds[i] = null;
                     }
@@ -249,6 +294,7 @@ public final class MediaManager {
                 SimpleMediaSound old = activeSounds[0];
                 if (old != null && old != sound) {
                     old.playing = false;
+                    old.closeDoJaPlayer();
                     old.closePlayer();
                 }
                 activeSounds[0] = sound;
@@ -352,6 +398,10 @@ public final class MediaManager {
             }
         }
         return "unknown";
+    }
+
+    private static boolean isMld(String name, byte[] data) {
+        return "audio/mld".equals(guessType(name, data));
     }
 
     private static int[] extractMeloNotes(byte[] data, int fallbackNote) {

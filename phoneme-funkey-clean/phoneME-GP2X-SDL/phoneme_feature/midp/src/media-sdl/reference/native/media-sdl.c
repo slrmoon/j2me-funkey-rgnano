@@ -26,6 +26,89 @@ static int                      MediaSDL_AudioReady;
 static int                      MediaSDL_MasterVolume = 100;
 static int                      MediaSDL_AudioTrace = -1;
 
+#define DOJA_AUDIO_RATE SAMPLE_FREQ
+#define DOJA_MAX_VOICES 32
+#define DOJA_PROFILE_GENERIC_DOJA 0
+#define DOJA_PROFILE_NOKIA_S40 1
+#define DOJA_PROFILE_SONY_ERICSSON 2
+#define DOJA_PROFILE_GENERIC_GM 3
+
+#define DOJA_WAVE_SQUARE 0
+#define DOJA_WAVE_TRIANGLE 1
+#define DOJA_WAVE_SAW 2
+#define DOJA_WAVE_SOFT_SQUARE 3
+#define DOJA_WAVE_PULSE 4
+#define DOJA_WAVE_ORGAN 5
+#define DOJA_WAVE_NOISE 6
+#define DOJA_WAVE_SINE 7
+
+struct DoJaEvent
+{ unsigned int time_ms;
+  unsigned char type;
+  unsigned char channel;
+  unsigned char a;
+  unsigned char b;
+};
+
+struct DoJaVoice
+{ int active;
+  int released;
+  int channel;
+  int note;
+  int velocity;
+  int program;
+  int volume;
+  int pan;
+  int waveform;
+  int attack_ms;
+  int decay_ms;
+  int sustain;
+  int release_ms;
+  int duty;
+  int brightness;
+  unsigned int age_samples;
+  unsigned int release_samples;
+  int release_level;
+  double phase;
+  double step;
+};
+
+struct DoJaInstrument
+{ int waveform;
+  int attack_ms;
+  int decay_ms;
+  int sustain;
+  int release_ms;
+  int duty;
+  int brightness;
+  int gain;
+};
+
+struct DoJaAudioPlayer
+{ struct DoJaEvent *events;
+  int event_count;
+  int event_pos;
+  unsigned int sample_pos;
+  int active;
+  int loop_count;
+  int loops_done;
+  int section_loops_done;
+  int volume;
+  int profile;
+  int loop_event_pos;
+  unsigned int loop_sample_pos;
+  int channel_program[16];
+  int channel_volume[16];
+  int channel_pan[16];
+  int channel_pitch[16];
+  int channel_pitch_range[16];
+  int channel_modulation[16];
+  struct DoJaVoice voices[DOJA_MAX_VOICES];
+  struct DoJaAudioPlayer *next;
+};
+
+static struct DoJaAudioPlayer *DoJaAudioPlayers;
+
 #define SAMPLE_FREQ	22050
 #define SAMPLE_FORMAT_WAV 1
 #define SAMPLE_FORMAT_AMR 2
@@ -87,6 +170,426 @@ void AudioSubsystemCallback(int chan)
            MediaSDL_Channels[chan].Callback(chan);
 }
 
+static unsigned int DoJaRead32(const unsigned char *p)
+{ return ((unsigned int)p[0] << 24) | ((unsigned int)p[1] << 16) |
+         ((unsigned int)p[2] << 8) | (unsigned int)p[3];
+}
+
+static int DoJaRead16(const unsigned char *p)
+{ return ((int)p[0] << 8) | (int)p[1];
+}
+
+static double DoJaMidiFreq(int note)
+{ double freq = 440.0;
+  int diff = note - 69;
+  while (diff > 0) { freq *= 1.0594630943592953; diff--; }
+  while (diff < 0) { freq /= 1.0594630943592953; diff++; }
+  return freq;
+}
+
+static struct DoJaVoice *DoJaAllocVoice(struct DoJaAudioPlayer *p)
+{ int i;
+  for (i = 0; i < DOJA_MAX_VOICES; i++)
+     if (!p->voices[i].active) return &p->voices[i];
+  return &p->voices[0];
+}
+
+static int DoJaEnvelopeLevel(struct DoJaVoice *v);
+
+static void DoJaSelectInstrument(int profile, int program, int channel,
+                                 struct DoJaInstrument *inst)
+{ int family = program & 15;
+  inst->waveform = DOJA_WAVE_SOFT_SQUARE;
+  inst->attack_ms = 3;
+  inst->decay_ms = 70;
+  inst->sustain = 620;
+  inst->release_ms = 70;
+  inst->duty = 50;
+  inst->brightness = 70;
+  inst->gain = 72;
+
+  if (profile == DOJA_PROFILE_GENERIC_GM)
+     { if (program < 8)
+          { inst->waveform = DOJA_WAVE_SAW;
+            inst->attack_ms = 8;
+            inst->decay_ms = 90;
+            inst->sustain = 680;
+            inst->release_ms = 120;
+            inst->brightness = 55;
+          }
+       else if (program < 16)
+          { inst->waveform = DOJA_WAVE_TRIANGLE;
+            inst->attack_ms = 4;
+            inst->decay_ms = 120;
+            inst->sustain = 760;
+            inst->release_ms = 140;
+            inst->brightness = 45;
+          }
+       else if (program < 32)
+          { inst->waveform = DOJA_WAVE_ORGAN;
+            inst->attack_ms = 2;
+            inst->decay_ms = 30;
+            inst->sustain = 850;
+            inst->release_ms = 90;
+            inst->brightness = 50;
+          }
+       else
+          { inst->waveform = DOJA_WAVE_SOFT_SQUARE;
+            inst->brightness = 58;
+          }
+     }
+  else if (profile == DOJA_PROFILE_NOKIA_S40)
+     { inst->waveform = (family & 1) ? DOJA_WAVE_SQUARE : DOJA_WAVE_TRIANGLE;
+       inst->attack_ms = 1;
+       inst->decay_ms = 45;
+       inst->sustain = 560;
+       inst->release_ms = 45;
+       inst->brightness = 82;
+       inst->gain = 66;
+     }
+  else if (profile == DOJA_PROFILE_SONY_ERICSSON)
+     { inst->waveform = (family < 4) ? DOJA_WAVE_SAW :
+                        (family < 8) ? DOJA_WAVE_SOFT_SQUARE :
+                        (family < 12) ? DOJA_WAVE_TRIANGLE : DOJA_WAVE_ORGAN;
+       inst->attack_ms = 5;
+       inst->decay_ms = 80;
+       inst->sustain = 700;
+       inst->release_ms = 95;
+       inst->brightness = 62;
+       inst->gain = 70;
+     }
+  else
+     { switch (family)
+          { case 0:
+            case 1:
+               inst->waveform = DOJA_WAVE_SOFT_SQUARE;
+               inst->duty = 44;
+               inst->brightness = 58;
+               break;
+            case 2:
+            case 3:
+               inst->waveform = DOJA_WAVE_TRIANGLE;
+               inst->attack_ms = 4;
+               inst->decay_ms = 100;
+               inst->sustain = 720;
+               inst->release_ms = 120;
+               inst->brightness = 40;
+               break;
+            case 4:
+            case 5:
+               inst->waveform = DOJA_WAVE_SAW;
+               inst->attack_ms = 2;
+               inst->decay_ms = 65;
+               inst->sustain = 610;
+               inst->release_ms = 80;
+               inst->brightness = 54;
+               break;
+            case 6:
+            case 7:
+               inst->waveform = DOJA_WAVE_ORGAN;
+               inst->attack_ms = 2;
+               inst->decay_ms = 40;
+               inst->sustain = 830;
+               inst->release_ms = 70;
+               inst->brightness = 48;
+               break;
+            case 8:
+            case 9:
+               inst->waveform = DOJA_WAVE_PULSE;
+               inst->duty = 25;
+               inst->attack_ms = 1;
+               inst->decay_ms = 35;
+               inst->sustain = 500;
+               inst->release_ms = 55;
+               inst->brightness = 75;
+               break;
+            case 10:
+            case 11:
+               inst->waveform = DOJA_WAVE_SINE;
+               inst->attack_ms = 8;
+               inst->decay_ms = 110;
+               inst->sustain = 760;
+               inst->release_ms = 160;
+               inst->brightness = 35;
+               break;
+            case 12:
+            case 13:
+               inst->waveform = DOJA_WAVE_NOISE;
+               inst->attack_ms = 1;
+               inst->decay_ms = 28;
+               inst->sustain = 180;
+               inst->release_ms = 25;
+               inst->brightness = 95;
+               inst->gain = 52;
+               break;
+            default:
+               inst->waveform = DOJA_WAVE_SQUARE;
+               inst->duty = 50;
+               inst->brightness = 70;
+               break;
+          }
+     }
+
+  if (channel == 9)
+     { inst->waveform = DOJA_WAVE_NOISE;
+       inst->attack_ms = 1;
+       inst->decay_ms = 18;
+       inst->sustain = 120;
+       inst->release_ms = 25;
+       inst->brightness = 100;
+       inst->gain = 60;
+     }
+}
+
+static void DoJaNoteOff(struct DoJaAudioPlayer *p, int channel, int note)
+{ int i;
+  for (i = 0; i < DOJA_MAX_VOICES; i++)
+     if (p->voices[i].active && p->voices[i].channel == channel &&
+         p->voices[i].note == note)
+        { p->voices[i].released = 1;
+          p->voices[i].release_samples = 0;
+          p->voices[i].release_level = DoJaEnvelopeLevel(&p->voices[i]);
+        }
+}
+
+static void DoJaNoteOn(struct DoJaAudioPlayer *p, int channel, int note, int velocity)
+{ struct DoJaVoice *v;
+  struct DoJaInstrument inst;
+  if (velocity <= 0) { DoJaNoteOff(p, channel, note); return; }
+  DoJaSelectInstrument(p->profile, p->channel_program[channel & 15], channel, &inst);
+  v = DoJaAllocVoice(p);
+  v->active = 1;
+  v->released = 0;
+  v->channel = channel;
+  v->note = note;
+  v->velocity = velocity;
+  v->program = p->channel_program[channel & 15];
+  v->volume = p->channel_volume[channel & 15];
+  v->pan = p->channel_pan[channel & 15];
+  v->waveform = inst.waveform;
+  v->attack_ms = inst.attack_ms;
+  v->decay_ms = inst.decay_ms;
+  v->sustain = inst.sustain;
+  v->release_ms = inst.release_ms;
+  v->duty = inst.duty;
+  v->brightness = inst.brightness;
+  v->age_samples = 0;
+  v->release_samples = 0;
+  v->release_level = 1024;
+  v->velocity = velocity * inst.gain / 64;
+  if (v->velocity > 127) v->velocity = 127;
+  v->phase = 0.0;
+  v->step = DoJaMidiFreq(note) / (double)DOJA_AUDIO_RATE;
+}
+
+static void DoJaHandleEvent(struct DoJaAudioPlayer *p, struct DoJaEvent *e)
+{ int ch = e->channel & 15;
+  switch (e->type)
+     { case 1:
+          p->channel_program[ch] = e->a;
+          break;
+       case 2:
+          p->channel_volume[ch] = e->a;
+          break;
+       case 3:
+          p->channel_pan[ch] = e->a;
+          break;
+       case 4:
+          DoJaNoteOn(p, ch, e->a, e->b);
+          break;
+       case 5:
+          DoJaNoteOff(p, ch, e->a);
+          break;
+       case 6:
+          p->loop_event_pos = p->event_pos;
+          p->loop_sample_pos = p->sample_pos;
+          p->section_loops_done = 0;
+          break;
+       case 7:
+          if (p->loop_event_pos >= 0 && (e->a == 255 ||
+              p->section_loops_done < e->a))
+             { p->section_loops_done++;
+               p->event_pos = p->loop_event_pos;
+               p->sample_pos = p->loop_sample_pos;
+             }
+          break;
+       case 8:
+          if (p->loop_count < 0 || p->loops_done + 1 < p->loop_count)
+             { p->loops_done++;
+               p->event_pos = 0;
+               p->sample_pos = 0;
+               p->loop_event_pos = -1;
+               p->section_loops_done = 0;
+             }
+          else p->active = 0;
+          break;
+       case 9:
+          p->channel_pitch[ch] = e->a;
+          break;
+       case 10:
+          p->channel_modulation[ch] = e->a;
+          break;
+       case 11:
+          p->channel_pitch_range[ch] = e->a;
+          break;
+     }
+}
+
+static double DoJaTriangle(double phase)
+{ return phase < 0.5 ? phase * 4.0 - 1.0 : 3.0 - phase * 4.0;
+}
+
+static double DoJaSineApprox(double phase)
+{ double tri = DoJaTriangle(phase);
+  return tri * (1.35 - 0.35 * (tri < 0.0 ? -tri : tri));
+}
+
+static double DoJaWave(struct DoJaVoice *v, int sample)
+{ double phase = v->phase;
+  double tri;
+  double base;
+  int noise;
+  switch (v->waveform)
+     { case DOJA_WAVE_SQUARE:
+          base = phase < 0.5 ? 0.82 : -0.82;
+          break;
+       case DOJA_WAVE_TRIANGLE:
+          base = DoJaTriangle(phase) * 0.78;
+          break;
+       case DOJA_WAVE_SAW:
+          base = (1.0 - phase * 2.0) * 0.72;
+          break;
+       case DOJA_WAVE_SOFT_SQUARE:
+          tri = DoJaTriangle(phase);
+          base = (phase < ((double)v->duty / 100.0) ? 0.62 : -0.62) +
+                 tri * (0.18 + (double)(100 - v->brightness) / 500.0);
+          break;
+       case DOJA_WAVE_PULSE:
+          base = phase < ((double)v->duty / 100.0) ? 0.90 : -0.34;
+          break;
+       case DOJA_WAVE_ORGAN:
+          base = DoJaSineApprox(phase) * 0.62 +
+                 DoJaSineApprox(phase * 2.0 - (int)(phase * 2.0)) * 0.22 +
+                 DoJaSineApprox(phase * 3.0 - (int)(phase * 3.0)) * 0.10;
+          break;
+       case DOJA_WAVE_NOISE:
+          noise = ((sample * 1103515245 + v->program * 12345 +
+                    v->note * 31337) >> 16) & 255;
+          base = (noise - 128) / 150.0;
+          break;
+       case DOJA_WAVE_SINE:
+          base = DoJaSineApprox(phase) * 0.74;
+          break;
+       default:
+          base = phase < 0.5 ? 0.70 : -0.70;
+          break;
+     }
+  return base * (0.55 + (double)v->brightness / 220.0);
+}
+
+static int DoJaMsToSamples(int ms)
+{ if (ms <= 0) return 1;
+  return (ms * DOJA_AUDIO_RATE) / 1000 + 1;
+}
+
+static int DoJaEnvelopeLevel(struct DoJaVoice *v)
+{ int attack = DoJaMsToSamples(v->attack_ms);
+  int decay = DoJaMsToSamples(v->decay_ms);
+  int release = DoJaMsToSamples(v->release_ms);
+  int level;
+  int pos;
+  if (v->released)
+     { if ((int)v->release_samples >= release) return 0;
+       return v->release_level * (release - (int)v->release_samples) / release;
+     }
+  if ((int)v->age_samples < attack)
+     return ((int)v->age_samples * 1024) / attack;
+  if ((int)v->age_samples < attack + decay)
+     { pos = (int)v->age_samples - attack;
+       level = 1024 - ((1024 - v->sustain) * pos) / decay;
+       return level;
+     }
+  return v->sustain;
+}
+
+static int DoJaClamp16(int v)
+{ if (v > 32767) return 32767;
+  if (v < -32768) return -32768;
+  return v;
+}
+
+static void DoJaAudioPostMix(void *udata, Uint8 *stream, int len)
+{ int frames = len / 4;
+  short *out = (short *)stream;
+  int frame, i;
+  struct DoJaAudioPlayer *p;
+  struct DoJaVoice *v;
+  unsigned int time_ms;
+  int env;
+  double wave;
+  int amp;
+  int vol;
+  int pan;
+  int bend;
+  int range;
+  int mod;
+  int period;
+  double step;
+  double lfo;
+  (void)udata;
+  for (frame = 0; frame < frames; frame++)
+     { int mix_l = 0;
+       int mix_r = 0;
+       p = DoJaAudioPlayers;
+       while (p != NULL)
+          { if (p->active)
+               { time_ms = (p->sample_pos * 1000U) / DOJA_AUDIO_RATE;
+                 while (p->event_pos < p->event_count &&
+                        p->events[p->event_pos].time_ms <= time_ms)
+                    { p->event_pos++;
+                      DoJaHandleEvent(p, &p->events[p->event_pos - 1]);
+                    }
+                 for (i = 0; i < DOJA_MAX_VOICES; i++)
+                    if (p->voices[i].active)
+                       { v = &p->voices[i];
+                         env = DoJaEnvelopeLevel(v);
+                         vol = v->volume <= 0 ? 100 : v->volume;
+                         pan = v->pan <= 0 ? 64 : v->pan;
+                         if (env <= 0)
+                            { v->active = 0;
+                              continue;
+                            }
+                         wave = DoJaWave(v, (int)p->sample_pos);
+                         amp = (int)(wave * (double)(v->velocity * 34));
+                         amp = amp * env / 1024;
+                         amp = amp * vol * p->volume / 10000;
+                         mix_l += amp * (127 - pan) / 127;
+                         mix_r += amp * pan / 127;
+                         bend = p->channel_pitch[v->channel & 15] - 32;
+                         range = p->channel_pitch_range[v->channel & 15];
+                         mod = p->channel_modulation[v->channel & 15];
+                         step = v->step * (1.0 + (double)(bend * range) / 3840.0);
+                         if (mod > 0)
+                            { period = DOJA_AUDIO_RATE / 5;
+                              if (period <= 0) period = 1;
+                              lfo = DoJaTriangle((double)(p->sample_pos % period) /
+                                                  (double)period);
+                              step *= 1.0 + lfo * (double)mod / 3000.0;
+                            }
+                         v->phase += step;
+                         if (v->phase >= 1.0) v->phase -= (int)v->phase;
+                         v->age_samples++;
+                         if (v->released) v->release_samples++;
+                       }
+                 p->sample_pos++;
+               }
+            p = p->next;
+          }
+       out[frame * 2] = (short)DoJaClamp16((int)out[frame * 2] + mix_l);
+       out[frame * 2 + 1] = (short)DoJaClamp16((int)out[frame * 2 + 1] + mix_r);
+     }
+}
+
 int InitAudioSubsystem()
 { int chan;
   char *volumeText;
@@ -109,6 +612,7 @@ int InitAudioSubsystem()
        MediaSDL_Channels[chan].Data = NULL;
      }
   Mix_ChannelFinished(AudioSubsystemCallback);
+  Mix_SetPostMix(DoJaAudioPostMix, NULL);
   MediaSDL_AudioReady = 1;
   MediaSDL_SetMasterVolume(MediaSDL_MasterVolume);
   return(0);
@@ -1348,6 +1852,137 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_MIDIPlayer_nSetVolum
   NMP = (struct NativeMIDIPlayer *)id;
   NMP->VolumeLevel = value;
   NMP->MC.volume = (MIX_MAX_VOLUME * value) / 100;
+  KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_DoJaAudioBridge_nOpen()
+{ struct DoJaAudioPlayer *p = NULL;
+  unsigned char *buffer = NULL;
+  unsigned int size;
+  int count;
+  int i;
+  int ret = 0;
+  int profile = KNI_GetParameterAsInt(2);
+  unsigned char *e;
+  KNI_StartHandles(1);
+  KNI_DeclareHandle(buf);
+  KNI_GetParameterAsObject(1, buf);
+  size = KNI_GetArrayLength(buf);
+  if (size < 8) goto done;
+  buffer = (unsigned char *)malloc(size);
+  if (buffer == NULL) goto done;
+  KNI_GetRawArrayRegion(buf, 0, (jsize)size, (jbyte*)buffer);
+  if (buffer[0] != 'D' || buffer[1] != 'J' ||
+      buffer[2] != 'A' || buffer[3] != '1') goto done;
+  count = DoJaRead16(buffer + 4);
+  if (count <= 0 || 8 + count * 8 > (int)size) goto done;
+  p = (struct DoJaAudioPlayer *)malloc(sizeof(struct DoJaAudioPlayer));
+  if (p == NULL) goto done;
+  memset(p, 0, sizeof(*p));
+  p->events = (struct DoJaEvent *)malloc(sizeof(struct DoJaEvent) * count);
+  if (p->events == NULL)
+     { free(p);
+       p = NULL;
+       goto done;
+     }
+  p->event_count = count;
+  p->volume = 100;
+  if (profile < DOJA_PROFILE_GENERIC_DOJA || profile > DOJA_PROFILE_GENERIC_GM)
+     profile = DOJA_PROFILE_GENERIC_DOJA;
+  p->profile = profile;
+  p->loop_count = 1;
+  p->loop_event_pos = -1;
+  for (i = 0; i < 16; i++)
+     { p->channel_volume[i] = 100;
+       p->channel_pan[i] = 64;
+       p->channel_pitch[i] = 32;
+       p->channel_pitch_range[i] = 2;
+       p->channel_modulation[i] = 0;
+     }
+  for (i = 0; i < count; i++)
+     { e = buffer + 8 + i * 8;
+       p->events[i].time_ms = DoJaRead32(e);
+       p->events[i].type = e[4];
+       p->events[i].channel = e[5];
+       p->events[i].a = e[6];
+       p->events[i].b = e[7];
+     }
+  MediaSDL_LockAudio();
+  p->next = DoJaAudioPlayers;
+  DoJaAudioPlayers = p;
+  MediaSDL_UnlockAudio();
+  ret = (int)p;
+  MEDIA_TRACE("DoJa native audio open id=%d events=%d profile=%d\n", ret, count, profile);
+done:
+  if (buffer != NULL) free(buffer);
+  KNI_EndHandles();
+  KNI_ReturnInt(ret);
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nStart()
+{ struct DoJaAudioPlayer *p = (struct DoJaAudioPlayer *)KNI_GetParameterAsInt(1);
+  int i;
+  if (p != NULL)
+     { MediaSDL_LockAudio();
+       p->event_pos = 0;
+       p->sample_pos = 0;
+       p->loops_done = 0;
+       p->section_loops_done = 0;
+       for (i = 0; i < DOJA_MAX_VOICES; i++) p->voices[i].active = 0;
+       p->active = 1;
+       MediaSDL_UnlockAudio();
+       MEDIA_TRACE("DoJa native audio start id=%d\n", (int)p);
+     }
+  KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nStop()
+{ struct DoJaAudioPlayer *p = (struct DoJaAudioPlayer *)KNI_GetParameterAsInt(1);
+  int i;
+  if (p != NULL)
+     { MediaSDL_LockAudio();
+       p->active = 0;
+       for (i = 0; i < DOJA_MAX_VOICES; i++) p->voices[i].active = 0;
+       MediaSDL_UnlockAudio();
+       MEDIA_TRACE("DoJa native audio stop id=%d\n", (int)p);
+     }
+  KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nClose()
+{ struct DoJaAudioPlayer *p = (struct DoJaAudioPlayer *)KNI_GetParameterAsInt(1);
+  struct DoJaAudioPlayer **cur;
+  if (p != NULL)
+     { MediaSDL_LockAudio();
+       cur = &DoJaAudioPlayers;
+       while (*cur != NULL)
+          { if (*cur == p)
+               { *cur = p->next;
+                 break;
+               }
+            cur = &((*cur)->next);
+          }
+       MediaSDL_UnlockAudio();
+       MEDIA_TRACE("DoJa native audio close id=%d\n", (int)p);
+       if (p->events != NULL) free(p->events);
+       free(p);
+     }
+  KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nSetVolume()
+{ struct DoJaAudioPlayer *p = (struct DoJaAudioPlayer *)KNI_GetParameterAsInt(1);
+  int volume = KNI_GetParameterAsInt(2);
+  if (volume < 0) volume = 0;
+  if (volume > 100) volume = 100;
+  if (p != NULL) p->volume = volume;
+  KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nSetLoopCount()
+{ struct DoJaAudioPlayer *p = (struct DoJaAudioPlayer *)KNI_GetParameterAsInt(1);
+  int loop_count = KNI_GetParameterAsInt(2);
+  if (p != NULL) p->loop_count = loop_count;
   KNI_ReturnVoid();
 }
 
