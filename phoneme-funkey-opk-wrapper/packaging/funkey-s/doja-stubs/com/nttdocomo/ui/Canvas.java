@@ -45,20 +45,17 @@ public class Canvas extends Frame {
     protected void keyPressed(int keyCode) {
         super.keyPressed(keyCode);
         int dojaKey = Display.mapMIDPKeyCode(keyCode);
-        System.out.println("DoJa key pressed raw=" + keyCode + " mapped=" + dojaKey);
         processEvent(Display.KEY_PRESSED_EVENT, dojaKey);
     }
 
     protected void keyReleased(int keyCode) {
         super.keyReleased(keyCode);
         int dojaKey = Display.mapMIDPKeyCode(keyCode);
-        System.out.println("DoJa key released raw=" + keyCode + " mapped=" + dojaKey);
         processEvent(Display.KEY_RELEASED_EVENT, dojaKey);
     }
 
     protected void keyRepeated(int keyCode) {
         int dojaKey = Display.mapMIDPKeyCode(keyCode);
-        System.out.println("DoJa key repeated raw=" + keyCode + " mapped=" + dojaKey);
         processEvent(Display.KEY_PRESSED_EVENT, dojaKey);
     }
 

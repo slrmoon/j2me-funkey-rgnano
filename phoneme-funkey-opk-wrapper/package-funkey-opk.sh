@@ -185,6 +185,14 @@ build_doja_support() {
         -d "$HELLO_BUILD/doja-stubs/classes" \
         @"$HELLO_BUILD/doja-stubs/sources.list"
 
+    # Copy pre-built binary .class stubs (for obfuscated class names that
+    # are Java keywords and cannot be written as .java source files).
+    find "$DOJA_STUB_SRC" -name '*.class' | while read -r cf; do
+        rel=${cf#"$DOJA_STUB_SRC"/}
+        mkdir -p "$HELLO_BUILD/doja-stubs/classes/$(dirname "$rel")"
+        cp "$cf" "$HELLO_BUILD/doja-stubs/classes/$rel"
+    done
+
     "$PREVERIFY" \
         -classpath "$MIDP_CLASSES:$CLDC_DIST/lib/cldc_classes.zip" \
         -d "$HELLO_BUILD/doja-stubs/verified" \
