@@ -157,7 +157,9 @@ long funkey_m3g_world_get_background(long world);
 
 void funkey_m3g_camera_set_projection(long camera, int mode,
                                       float a, float b, float c, float d);
+void funkey_m3g_camera_set_generic(long camera, const float *matrix);
 int funkey_m3g_camera_get_projection(long camera, float *params);
+int funkey_m3g_camera_get_projection_matrix(long camera, float *matrix);
 
 void funkey_m3g_background_set_color(long background, unsigned int argb);
 unsigned int funkey_m3g_background_get_color(long background);

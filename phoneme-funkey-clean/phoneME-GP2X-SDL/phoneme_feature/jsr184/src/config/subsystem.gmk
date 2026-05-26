@@ -70,4 +70,8 @@ LIBS += -lz -lm
 
 # m3g_core.c textually includes the core modules and FunKey NGL backend, so
 # edits in included implementation or backend headers must rebuild the object.
-$(OBJ_DIR)/m3g_core.o: $(JSR_184_M3GCORE_EMBEDDED_FILES)
+$(OBJ_DIR)/m3g_core.o: $(JSR_184_M3GCORE_EMBEDDED_FILES) $(JSR_184_DIR)/src/config/subsystem.gmk
+
+# Upstream M3G intentionally inspects IEEE float bits through integer lvalues.
+# Keep modern GCC from optimizing that matrix/math code under strict aliasing.
+$(OBJ_DIR)/m3g_core.o: override CFLAGS += -fno-strict-aliasing

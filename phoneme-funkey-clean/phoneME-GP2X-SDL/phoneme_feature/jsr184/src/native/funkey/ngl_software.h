@@ -444,12 +444,12 @@ static NGLTexture *ngl_sw_texture(GLuint id) {
     if (id == 0) {
         return &ngl_sw.textures[0];
     }
-    for (i = 1; i < NGL_SW_MAX_TEXTURES; ++i) {
+    for (i = NGL_SW_TEXTURE_UNITS; i < NGL_SW_MAX_TEXTURES; ++i) {
         if (ngl_sw.textures[i].id == id) {
             return &ngl_sw.textures[i];
         }
     }
-    for (i = 1; i < NGL_SW_MAX_TEXTURES; ++i) {
+    for (i = NGL_SW_TEXTURE_UNITS; i < NGL_SW_MAX_TEXTURES; ++i) {
         if (ngl_sw.textures[i].id == 0) {
             ngl_sw.textures[i].id = id;
             ngl_sw.textures[i].wrap_s = GL_CLAMP_TO_EDGE;
@@ -466,6 +466,16 @@ static NGLTexture *ngl_sw_texture(GLuint id) {
 static int ngl_sw_texture_unit(GLenum texture) {
     int unit = (int)texture - (int)GL_TEXTURE0;
     return unit >= 0 && unit < NGL_SW_TEXTURE_UNITS ? unit : -1;
+}
+
+static NGLTexture *ngl_sw_bound_texture(int unit) {
+    if (unit < 0 || unit >= NGL_SW_TEXTURE_UNITS) {
+        return NULL;
+    }
+    if (ngl_sw.bound_texture[unit] == 0) {
+        return &ngl_sw.textures[unit];
+    }
+    return ngl_sw_texture(ngl_sw.bound_texture[unit]);
 }
 
 static int ngl_sw_pixel_bytes(GLenum format) {
@@ -547,6 +557,36 @@ static void ngl_sw_upload_pixels(NGLTexture *t, int xoffset, int yoffset,
     }
 }
 
+static unsigned int ngl_sw_texture_pixel(const NGLTexture *t, int x, int y) {
+    if (t->wrap_s == GL_REPEAT) {
+        x %= t->width;
+        if (x < 0) x += t->width;
+    } else {
+        if (x < 0) x = 0;
+        if (x >= t->width) x = t->width - 1;
+    }
+    if (t->wrap_t == GL_REPEAT) {
+        y %= t->height;
+        if (y < 0) y += t->height;
+    } else {
+        if (y < 0) y = 0;
+        if (y >= t->height) y = t->height - 1;
+    }
+    return t->argb[y * t->width + x];
+}
+
+static unsigned int ngl_sw_lerp_texel(unsigned int a, unsigned int b, float f) {
+    unsigned int r = (unsigned int)((float)((a >> 16) & 0xff) +
+                                    ((float)((b >> 16) & 0xff) - (float)((a >> 16) & 0xff)) * f + 0.5f);
+    unsigned int g = (unsigned int)((float)((a >> 8) & 0xff) +
+                                    ((float)((b >> 8) & 0xff) - (float)((a >> 8) & 0xff)) * f + 0.5f);
+    unsigned int bl = (unsigned int)((float)(a & 0xff) +
+                                     ((float)(b & 0xff) - (float)(a & 0xff)) * f + 0.5f);
+    unsigned int al = (unsigned int)((float)((a >> 24) & 0xff) +
+                                     ((float)((b >> 24) & 0xff) - (float)((a >> 24) & 0xff)) * f + 0.5f);
+    return ngl_sw_pack(r, g, bl, al);
+}
+
 static unsigned int ngl_sw_texel(NGLTexture *t, float s, float tt) {
     int x;
     int y;
@@ -564,6 +604,22 @@ static unsigned int ngl_sw_texel(NGLTexture *t, float s, float tt) {
     } else {
         if (tt < 0.0f) tt = 0.0f;
         if (tt > 1.0f) tt = 1.0f;
+    }
+    if (t->mag_filter == GL_LINEAR ||
+        t->min_filter == GL_LINEAR ||
+        t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+        t->min_filter == GL_LINEAR_MIPMAP_LINEAR) {
+        float fx = s * (float)t->width - 0.5f;
+        float fy = tt * (float)t->height - 0.5f;
+        int x0 = (int)floorf(fx);
+        int y0 = (int)floorf(fy);
+        unsigned int a = ngl_sw_lerp_texel(ngl_sw_texture_pixel(t, x0, y0),
+                                            ngl_sw_texture_pixel(t, x0 + 1, y0),
+                                            fx - (float)x0);
+        unsigned int b = ngl_sw_lerp_texel(ngl_sw_texture_pixel(t, x0, y0 + 1),
+                                            ngl_sw_texture_pixel(t, x0 + 1, y0 + 1),
+                                            fx - (float)x0);
+        return ngl_sw_lerp_texel(a, b, fy - (float)y0);
     }
     x = (int)(s * (float)(t->width - 1) + 0.5f);
     y = (int)(tt * (float)(t->height - 1) + 0.5f);
@@ -989,7 +1045,7 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
                 int unit;
                 for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
                     NGLTexture *tex = ngl_sw.texture_2d[unit] ?
-                                      ngl_sw_texture(ngl_sw.bound_texture[unit]) :
+                                      ngl_sw_bound_texture(unit) :
                                       NULL;
                     if (tex != NULL && tex->argb != NULL) {
                         float u = 0.0f;
@@ -1074,10 +1130,10 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         ngl_sw.trace_culled = 0;
         ngl_sw.trace_pixels = 0;
         if (ngl_sw.texture_2d[0]) {
-            t0 = ngl_sw_texture(ngl_sw.bound_texture[0]);
+            t0 = ngl_sw_bound_texture(0);
         }
         if (NGL_SW_TEXTURE_UNITS > 1 && ngl_sw.texture_2d[1]) {
-            t1 = ngl_sw_texture(ngl_sw.bound_texture[1]);
+            t1 = ngl_sw_bound_texture(1);
         }
     }
     for (i = 0; i + 2 < count; ++i) {
@@ -1412,7 +1468,7 @@ static inline void glTexParameterx(GLenum target, GLenum pname, GLfixed param) {
     NGLTexture *t;
     (void)target;
     if (unit < 0) return;
-    t = ngl_sw_texture(ngl_sw.bound_texture[unit]);
+    t = ngl_sw_bound_texture(unit);
     if (pname == GL_TEXTURE_WRAP_S) t->wrap_s = param;
     else if (pname == GL_TEXTURE_WRAP_T) t->wrap_t = param;
     else if (pname == GL_TEXTURE_MIN_FILTER) t->min_filter = param;
@@ -1432,7 +1488,7 @@ static inline void glTexEnvfv(GLenum target, GLenum pname, const GLfloat *params
 }
 static inline void glTexEnvx(GLenum target, GLenum pname, GLfixed param) { int unit = ngl_sw_texture_unit(ngl_sw.active_texture); (void)target; if (unit >= 0 && pname == GL_TEXTURE_ENV_MODE) ngl_sw.tex_env_mode[unit] = (GLenum)param; }
 static inline void glTexParameteri(GLenum target, GLenum pname, GLint param) { glTexParameterx(target, pname, param); }
-static inline void glBindTexture(GLenum target, GLuint texture) { int unit = ngl_sw_texture_unit(ngl_sw.active_texture); (void)target; if (unit >= 0) { ngl_sw.bound_texture[unit] = texture; ngl_sw_texture(texture); } }
+static inline void glBindTexture(GLenum target, GLuint texture) { int unit = ngl_sw_texture_unit(ngl_sw.active_texture); (void)target; if (unit >= 0) { ngl_sw.bound_texture[unit] = texture; ngl_sw_bound_texture(unit); } }
 static inline void glCompressedTexImage2D(GLenum target, GLint level,
                                           GLenum internalformat, GLsizei width,
                                           GLsizei height, GLint border,
@@ -1457,7 +1513,7 @@ static inline void glCompressedTexImage2D(GLenum target, GLint level,
         ngl_sw.error = GL_INVALID_OPERATION;
         return;
     }
-    t = ngl_sw_texture(ngl_sw.bound_texture[unit]);
+    t = ngl_sw_bound_texture(unit);
     free(t->argb);
     t->argb = NULL;
     t->width = width;
@@ -1495,7 +1551,7 @@ static inline void glCopyTexImage2D(GLenum target, GLint level, GLenum internalf
         ngl_sw.error = GL_INVALID_OPERATION;
         return;
     }
-    t = ngl_sw_texture(ngl_sw.bound_texture[unit]);
+    t = ngl_sw_bound_texture(unit);
     free(t->argb);
     t->argb = NULL;
     t->width = width;
@@ -1531,7 +1587,7 @@ static inline void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
         ngl_sw.error = GL_INVALID_OPERATION;
         return;
     }
-    t = ngl_sw_texture(ngl_sw.bound_texture[unit]);
+    t = ngl_sw_bound_texture(unit);
     if (t == NULL || t->argb == NULL || xoffset + width > t->width ||
         yoffset + height > t->height ||
         format == GL_PALETTE8_RGB8_OES ||
@@ -1560,7 +1616,7 @@ static inline void glTexImage2D(GLenum target, GLint level, GLint internalformat
                 unit, (int)width, (int)height, (unsigned int)format);
         --ngl_sw.trace_upload_budget;
     }
-    t = ngl_sw_texture(ngl_sw.bound_texture[unit]);
+    t = ngl_sw_bound_texture(unit);
     free(t->argb);
     t->argb = NULL;
     t->width = width;
@@ -1690,6 +1746,10 @@ static inline int nglInit(void *memory, unsigned memoryBytes, void *textureManag
     ngl_sw_identity(ngl_sw.modelview);
     ngl_sw_identity(ngl_sw.projection);
     for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+        ngl_sw.textures[unit].wrap_s = GL_CLAMP_TO_EDGE;
+        ngl_sw.textures[unit].wrap_t = GL_CLAMP_TO_EDGE;
+        ngl_sw.textures[unit].min_filter = GL_NEAREST;
+        ngl_sw.textures[unit].mag_filter = GL_NEAREST;
         ngl_sw.tex_env_mode[unit] = GL_MODULATE;
         ngl_sw.tex_env_color[unit] = 0xff000000U;
         ngl_sw_identity(ngl_sw.texture_matrix[unit]);

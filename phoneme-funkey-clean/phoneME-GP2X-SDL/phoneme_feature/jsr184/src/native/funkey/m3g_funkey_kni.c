@@ -523,15 +523,19 @@ Java_javax_microedition_m3g_Camera__1setPerspective(void) {
 
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Camera__1setGeneric(void) {
-    funkey_m3g_camera_set_projection(M3G_LONG_PARAM(1), 48, 0.0f, 0.0f,
-                                     0.0f, 0.0f);
+    float matrix[16];
+    m3g_read_matrix_param(3, matrix);
+    funkey_m3g_camera_set_generic(M3G_LONG_PARAM(1), matrix);
     KNI_ReturnVoid();
 }
 
 KNIEXPORT KNI_RETURNTYPE_INT
 Java_javax_microedition_m3g_Camera__1getProjectionAsTransform(void) {
-    float params[4];
-    KNI_ReturnInt(funkey_m3g_camera_get_projection(M3G_LONG_PARAM(1), params));
+    float matrix[16];
+    int mode = funkey_m3g_camera_get_projection_matrix(M3G_LONG_PARAM(1),
+                                                        matrix);
+    m3g_write_matrix_param(3, matrix);
+    KNI_ReturnInt(mode);
 }
 
 KNIEXPORT KNI_RETURNTYPE_INT
@@ -539,17 +543,9 @@ Java_javax_microedition_m3g_Camera__1getProjectionAsParams(void) {
     float params[4];
     int mode = funkey_m3g_camera_get_projection(M3G_LONG_PARAM(1), params);
 
-    KNI_StartHandles(1);
-    KNI_DeclareHandle(array);
-    KNI_GetParameterAsObject(3, array);
-    if (!KNI_IsNullHandle(array)) {
-        KNI_SetFloatArrayElement(array, 0, params[0]);
-        KNI_SetFloatArrayElement(array, 1, params[1]);
-        KNI_SetFloatArrayElement(array, 2, params[2]);
-        KNI_SetFloatArrayElement(array, 3, params[3]);
+    if (mode != 48) {
+        m3g_write_float_array_param(3, params, 4);
     }
-    KNI_EndHandles();
-
     KNI_ReturnInt(mode);
 }
 

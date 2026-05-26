@@ -44,6 +44,7 @@ typedef struct FunKeyM3GObject {
     long background;
     int projection_mode;
     float projection_params[4];
+    float projection_matrix[16];
     unsigned int background_color;
     long background_image;
     int image_mode_x;
@@ -266,6 +267,7 @@ funkey_m3g_alloc_handle(void) {
             g_objects[i].projection_params[1] = 1.0f;
             g_objects[i].projection_params[2] = 1.0f;
             g_objects[i].projection_params[3] = 100.0f;
+            funkey_m3g_matrix_identity(g_objects[i].projection_matrix);
             g_objects[i].image_mode_x = 32;
             g_objects[i].image_mode_y = 32;
             g_objects[i].color_clear_enabled = 1;
@@ -275,7 +277,7 @@ funkey_m3g_alloc_handle(void) {
             g_objects[i].vb_texcoord_scale_bias[0][0] = 1.0f;
             g_objects[i].vb_texcoord_scale_bias[1][0] = 1.0f;
             g_objects[i].texture_level_filter = 208;
-            g_objects[i].texture_image_filter = 209;
+            g_objects[i].texture_image_filter = 210;
             g_objects[i].texture_wrap_s = 241;
             g_objects[i].texture_wrap_t = 241;
             g_objects[i].texture_blending = 227;
@@ -1013,19 +1015,34 @@ void
 funkey_m3g_group_add_child(long group, long child) {
     FunKeyM3GObject *g = funkey_m3g_object(group);
     FunKeyM3GObject *c = funkey_m3g_object(child);
+    M3GNode core_parent = 0;
     int i;
     if (g == 0 || c == 0) {
         return;
     }
-    for (i = 0; i < g->child_count; ++i) {
-        if (g->children[i] == child) {
+    if (g->core != 0 && c->core != 0) {
+        core_parent = m3gGetParent((M3GNode) c->core);
+        if (core_parent != 0 && core_parent != (M3GNode) g->core) {
+            fprintf(stderr, "[M3G graph] repair reparent child=%ld old=%p new=%p\n",
+                    child, (void *) core_parent, (void *) g->core);
+            m3gRemoveChild((M3GGroup) core_parent, (M3GNode) c->core);
+        }
+        if (m3gGetParent((M3GNode) c->core) != (M3GNode) g->core) {
+            m3gAddChild((M3GGroup) g->core, (M3GNode) c->core);
+        }
+        if (m3gGetParent((M3GNode) c->core) != (M3GNode) g->core) {
+            fprintf(stderr, "[M3G graph] rejected add child=%ld group=%ld\n",
+                    child, group);
             return;
         }
-    }
-    if (g->core != 0 && c->core != 0) {
-        m3gAddChild((M3GGroup) g->core, (M3GNode) c->core);
     } else if (g->child_count >= FUNKEY_M3G_MAX_CHILDREN) {
         return;
+    }
+    for (i = 0; i < g->child_count; ++i) {
+        if (g->children[i] == child) {
+            c->parent = group;
+            return;
+        }
     }
     if (g->child_count < FUNKEY_M3G_MAX_CHILDREN) {
         g->children[g->child_count++] = child;
@@ -2052,6 +2069,20 @@ funkey_m3g_camera_set_projection(long camera, int mode,
     }
 }
 
+void
+funkey_m3g_camera_set_generic(long camera, const float *matrix) {
+    FunKeyM3GObject *obj = funkey_m3g_object(camera);
+    if (obj != 0 && matrix != 0) {
+        if (obj->core != 0) {
+            M3GMatrix core_matrix;
+            funkey_m3g_matrix_from_float(&core_matrix, matrix);
+            m3gSetProjectionMatrix((M3GCamera) obj->core, &core_matrix);
+        }
+        obj->projection_mode = M3G_GENERIC;
+        memcpy(obj->projection_matrix, matrix, 16 * sizeof(float));
+    }
+}
+
 int
 funkey_m3g_camera_get_projection(long camera, float *params) {
     FunKeyM3GObject *obj = funkey_m3g_object(camera);
@@ -2068,6 +2099,60 @@ funkey_m3g_camera_get_projection(long camera, float *params) {
         }
     }
     return obj->projection_mode;
+}
+
+int
+funkey_m3g_camera_get_projection_matrix(long camera, float *matrix) {
+    FunKeyM3GObject *obj = funkey_m3g_object(camera);
+    int mode;
+    if (obj == 0) {
+        if (matrix != 0) {
+            funkey_m3g_matrix_identity(matrix);
+        }
+        return M3G_PERSPECTIVE;
+    }
+    if (obj->core != 0) {
+        M3GMatrix core_matrix;
+        m3gIdentityMatrix(&core_matrix);
+        mode = m3gGetProjectionAsMatrix((M3GCamera) obj->core,
+                                        matrix != 0 ? &core_matrix : 0);
+        if (matrix != 0) {
+            m3gGetMatrixRows(&core_matrix, matrix);
+        }
+        return mode;
+    }
+    mode = obj->projection_mode;
+    if (matrix != 0) {
+        if (mode == M3G_GENERIC) {
+            memcpy(matrix, obj->projection_matrix, 16 * sizeof(float));
+        } else {
+            float height = mode == M3G_PERSPECTIVE ?
+                           tanf(obj->projection_params[0] *
+                                (float) M_PI / 360.0f) :
+                           obj->projection_params[0];
+            float aspect = obj->projection_params[1];
+            float near_plane = obj->projection_params[2];
+            float far_plane = obj->projection_params[3];
+            float range = far_plane - near_plane;
+            funkey_m3g_matrix_identity(matrix);
+            if (height != 0.0f && aspect != 0.0f && range != 0.0f) {
+                if (mode == M3G_PERSPECTIVE) {
+                    matrix[0] = 1.0f / (aspect * height);
+                    matrix[5] = 1.0f / height;
+                    matrix[10] = -(far_plane + near_plane) / range;
+                    matrix[11] = -1.0f;
+                    matrix[14] = -(2.0f * far_plane * near_plane) / range;
+                    matrix[15] = 0.0f;
+                } else {
+                    matrix[0] = 2.0f / (aspect * height);
+                    matrix[5] = 2.0f / height;
+                    matrix[10] = -2.0f / range;
+                    matrix[14] = -(far_plane + near_plane) / range;
+                }
+            }
+        }
+    }
+    return mode;
 }
 
 void
@@ -3284,11 +3369,52 @@ funkey_m3g_image_is_mutable(long image) {
     return obj != 0 ? obj->image_mutable : 0;
 }
 
+static int
+funkey_m3g_texture_create_core(FunKeyM3GObject *obj, M3GImage image) {
+    M3GInterface m3g;
+    M3GMatrix transform;
+    M3GTexture texture;
+    if (obj == 0 || obj->class_id != FUNKEY_M3G_CLASS_TEXTURE_2D ||
+            obj->core != 0 || image == 0) {
+        return obj != 0 && obj->core != 0;
+    }
+    m3g = obj->core_interface != 0 ? obj->core_interface :
+          funkey_m3g_ensure_core_interface();
+    if (m3g == 0) {
+        return 0;
+    }
+    texture = m3gCreateTexture(m3g, image);
+    if (texture == 0) {
+        return 0;
+    }
+    obj->core = (M3GObject) texture;
+    obj->core_interface = m3g;
+
+    m3gSetFiltering(texture, obj->texture_level_filter,
+                    obj->texture_image_filter);
+    m3gSetWrapping(texture, obj->texture_wrap_s, obj->texture_wrap_t);
+    m3gTextureSetBlending(texture, obj->texture_blending);
+    m3gSetBlendColor(texture, obj->texture_blend_color);
+    funkey_m3g_matrix_from_float(&transform, obj->transform);
+    m3gSetTransform((M3GTransformable) texture, &transform);
+    m3gSetOrientation((M3GTransformable) texture, obj->orientation[0],
+                      obj->orientation[1], obj->orientation[2],
+                      obj->orientation[3]);
+    m3gSetScale((M3GTransformable) texture, obj->scale[0], obj->scale[1],
+                obj->scale[2]);
+    m3gSetTranslation((M3GTransformable) texture, obj->translation[0],
+                      obj->translation[1], obj->translation[2]);
+    return 1;
+}
+
 void
 funkey_m3g_texture_set_image(long texture, long image) {
     FunKeyM3GObject *obj = funkey_m3g_object(texture);
     M3GObject image_core = funkey_m3g_core_object(image);
     if (obj != 0) {
+        if (obj->core == 0 && image_core != 0) {
+            funkey_m3g_texture_create_core(obj, (M3GImage) image_core);
+        }
         if (obj->core != 0) {
             m3gSetTextureImage((M3GTexture) obj->core,
                                (M3GImage) image_core);
@@ -3407,7 +3533,7 @@ funkey_m3g_texture_get_image_filter(long texture) {
         m3gGetFiltering((M3GTexture) obj->core, &level_filter, &image_filter);
         return image_filter;
     }
-    return obj != 0 ? obj->texture_image_filter : 209;
+    return obj != 0 ? obj->texture_image_filter : 210;
 }
 
 int
@@ -5319,17 +5445,10 @@ funkey_m3g_context_core(long context) {
 
 static void
 funkey_m3g_matrix_from_float(M3GMatrix *dst, const float *src) {
-    int i;
     m3gIdentityMatrix(dst);
-    if (src == 0) {
-        return;
+    if (src != 0) {
+        m3gSetMatrixRows(dst, src);
     }
-    for (i = 0; i < 16; ++i) {
-        dst->elem[i] = src[i];
-    }
-    dst->mask = 0;
-    dst->classified = 0;
-    dst->complete = 0;
 }
 
 void
