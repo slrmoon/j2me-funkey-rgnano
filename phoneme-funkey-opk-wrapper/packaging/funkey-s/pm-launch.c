@@ -31,6 +31,7 @@
 #endif
 #define BIND_DIR   PM_DIR "/keybinds"
 #define BIN_DIR    PM_DIR "/bin"
+#define FAVORITES_FILE PM_DIR "/favorites.txt"
 static char java_dir[PATH_MAX] = BROWSE_DIR;
 
 /* ── MIDP key codes (from phoneME keymap_input.h) ───── */
@@ -302,6 +303,8 @@ typedef struct {
     char app_ver[128];
     int is_dir;
     int is_doja;
+    int is_favorites_folder;
+    int is_favorite;
 } GameEntry;
 
 static GameEntry games[MAX_GAMES];
@@ -309,6 +312,7 @@ static int    game_count = 0;
 static int    game_sel   = 0;        /* selected index in browser */
 static int    game_scroll = 0;       /* first visible line */
 static char   current_rel_dir[PATH_MAX] = "";
+static int    browsing_favorites = 0;
 
 /* ── current key bindings (loaded / defaults) ───────── */
 static int    binds[BIND_COUNT];
@@ -353,6 +357,8 @@ static int find_key_profile(const char *id);
 static void enter_selected_folder(void);
 static int leave_folder(void);
 static const char *game_display_name(int idx);
+static int is_favorite_path(const char *path);
+static int toggle_favorite(const char *path);
 
 /* ─────────────────────────────────────────────────────
  *  game scanning
@@ -379,16 +385,35 @@ static void add_folder(const char *full_path, const char *name) {
     games[game_count].app_ver[0] = '\0';
     games[game_count].is_dir = 1;
     games[game_count].is_doja = 0;
+    games[game_count].is_favorites_folder = 0;
+    games[game_count].is_favorite = 0;
+    game_count++;
+}
+
+static void add_favorites_folder(void) {
+    if (game_count >= MAX_GAMES) return;
+    games[game_count].path = strdup("");
+    snprintf(games[game_count].label, sizeof(games[game_count].label), "* Favorites *");
+    games[game_count].config[0] = '\0';
+    games[game_count].title[0] = '\0';
+    games[game_count].is_dir = 1;
+    games[game_count].is_favorites_folder = 1;
+    games[game_count].is_favorite = 0;
     game_count++;
 }
 
 static void add_game(const char *full_path, const char *name) {
     int jar_len;
     char rel_path[PATH_MAX];
+    size_t java_dir_len = strlen(java_dir);
 
     if (game_count >= MAX_GAMES) return;
-    snprintf(rel_path, sizeof(rel_path), "%s%s%s",
-             current_rel_dir, current_rel_dir[0] ? "/" : "", name);
+    if (strncmp(full_path, java_dir, java_dir_len) == 0 &&
+        full_path[java_dir_len] == '/') {
+        snprintf(rel_path, sizeof(rel_path), "%s", full_path + java_dir_len + 1);
+    } else {
+        snprintf(rel_path, sizeof(rel_path), "%s", name);
+    }
     games[game_count].path = strdup(full_path);
     snprintf(games[game_count].label, sizeof(games[game_count].label), "%s", name);
     snprintf(games[game_count].config, sizeof(games[game_count].config), "%s", rel_path);
@@ -401,6 +426,8 @@ static void add_game(const char *full_path, const char *name) {
     games[game_count].app_ver[0] = '\0';
     games[game_count].is_dir = 0;
     games[game_count].is_doja = 0;
+    games[game_count].is_favorites_folder = 0;
+    games[game_count].is_favorite = is_favorite_path(full_path);
     jar_len = strlen(full_path);
     if (jar_len >= 5) {
         char jad_path[PATH_MAX];
@@ -468,6 +495,28 @@ static void scan_current_dir(void) {
     closedir(d);
 }
 
+static void scan_favorites(void) {
+    FILE *favorites = fopen(FAVORITES_FILE, "r");
+    char line[PATH_MAX + 2];
+
+    if (favorites == NULL) return;
+    while (fgets(line, sizeof(line), favorites) != NULL) {
+        char *path = trim_line(line);
+        const char *name;
+        int len;
+        struct stat st;
+
+        if (path[0] == '\0' || stat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        name = strrchr(path, '/');
+        name = name == NULL ? path : name + 1;
+        len = strlen(name);
+        if (len < 5 || strcasecmp(name + len - 4, ".jar") != 0) continue;
+        add_game(path, name);
+        if (game_count >= MAX_GAMES) break;
+    }
+    fclose(favorites);
+}
+
 static void scan_games(void) {
     int i;
 
@@ -476,15 +525,25 @@ static void scan_games(void) {
     game_sel = 0;
     game_scroll = 0;
 
-    scan_current_dir();
+    if (browsing_favorites) {
+        scan_favorites();
+    } else {
+        if (current_rel_dir[0] == '\0') add_favorites_folder();
+        scan_current_dir();
+    }
 
     /* simple sort */
     for (i = 0; i < game_count - 1; i++) {
         int j;
         for (j = i + 1; j < game_count; j++) {
-            int cmp = games[i].is_dir == games[j].is_dir
-                ? strcasecmp(game_display_name(i), game_display_name(j))
-                : (games[i].is_dir ? -1 : 1);
+            int cmp;
+            if (games[i].is_favorites_folder != games[j].is_favorites_folder) {
+                cmp = games[i].is_favorites_folder ? -1 : 1;
+            } else {
+                cmp = games[i].is_dir == games[j].is_dir
+                    ? strcasecmp(game_display_name(i), game_display_name(j))
+                    : (games[i].is_dir ? -1 : 1);
+            }
             if (cmp > 0) {
                 GameEntry tmp = games[i];
                 games[i] = games[j];
@@ -510,6 +569,11 @@ static const char *game_display_name(int idx) {
 static void enter_selected_folder(void) {
     char next[PATH_MAX];
     if (game_count <= 0 || !games[game_sel].is_dir) return;
+    if (games[game_sel].is_favorites_folder) {
+        browsing_favorites = 1;
+        scan_games();
+        return;
+    }
     snprintf(next, sizeof(next), "%s%s%s",
              current_rel_dir, current_rel_dir[0] ? "/" : "",
              games[game_sel].label);
@@ -523,6 +587,11 @@ static void enter_selected_folder(void) {
 
 static int leave_folder(void) {
     char *slash;
+    if (browsing_favorites) {
+        browsing_favorites = 0;
+        scan_games();
+        return 1;
+    }
     if (current_rel_dir[0] == '\0') return 0;
     slash = strrchr(current_rel_dir, '/');
     if (slash != NULL) {
@@ -552,6 +621,55 @@ static char *trim_line(char *text) {
         *--end = '\0';
     }
     return text;
+}
+
+static int is_favorite_path(const char *path) {
+    FILE *favorites = fopen(FAVORITES_FILE, "r");
+    char line[PATH_MAX + 2];
+
+    if (favorites == NULL) return 0;
+    while (fgets(line, sizeof(line), favorites) != NULL) {
+        if (strcmp(trim_line(line), path) == 0) {
+            fclose(favorites);
+            return 1;
+        }
+    }
+    fclose(favorites);
+    return 0;
+}
+
+static int toggle_favorite(const char *path) {
+    FILE *favorites;
+    FILE *updated;
+    char line[PATH_MAX + 2];
+    char tmp_path[PATH_MAX];
+    int found = 0;
+
+    mkdir(PM_DIR, 0777);
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", FAVORITES_FILE);
+    updated = fopen(tmp_path, "w");
+    if (updated == NULL) return 0;
+
+    favorites = fopen(FAVORITES_FILE, "r");
+    if (favorites != NULL) {
+        while (fgets(line, sizeof(line), favorites) != NULL) {
+            char *saved_path = trim_line(line);
+            if (saved_path[0] == '\0') continue;
+            if (strcmp(saved_path, path) == 0) {
+                found = 1;
+                continue;
+            }
+            fprintf(updated, "%s\n", saved_path);
+        }
+        fclose(favorites);
+    }
+    if (!found) fprintf(updated, "%s\n", path);
+
+    if (fclose(updated) != 0 || rename(tmp_path, FAVORITES_FILE) != 0) {
+        unlink(tmp_path);
+        return 0;
+    }
+    return 1;
 }
 
 static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size) {
@@ -1089,7 +1207,9 @@ static void draw_browser(void) {
     SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
 
     int y = 6;
-    if (current_rel_dir[0] == '\0') {
+    if (browsing_favorites) {
+        draw_header("/Favorites", y);
+    } else if (current_rel_dir[0] == '\0') {
         draw_header("phoneME Launcher", y);
     } else {
         char title[128];
@@ -1099,13 +1219,19 @@ static void draw_browser(void) {
     y += 12;
 
     if (game_count == 0) {
-        char path[PATH_MAX];
-        current_dir_path(path, sizeof(path));
-        stringColor(screen, 4, y, path, 0xff6060ff);
-        stringColor(screen, 4, y + 2, "is empty", 0xff6060ff);
-        stringColor(screen, 4, y + 12,
-                    current_rel_dir[0] ? "B:back" : "Add .jar files to play",
-                    0xffffffff);
+        if (browsing_favorites) {
+            stringColor(screen, 4, y, "No favorites yet", 0xffffffff);
+            stringColor(screen, 4, y + 12, "SELECT adds games", 0x607078ff);
+            stringColor(screen, 4, y + 24, "B:Back", 0x607078ff);
+        } else {
+            char path[PATH_MAX];
+            current_dir_path(path, sizeof(path));
+            stringColor(screen, 4, y, path, 0xff6060ff);
+            stringColor(screen, 4, y + 2, "is empty", 0xff6060ff);
+            stringColor(screen, 4, y + 12,
+                        current_rel_dir[0] ? "B:back" : "Add .jar files to play",
+                        0xffffffff);
+        }
         SDL_Flip(screen);
         return;
     }
@@ -1117,6 +1243,11 @@ static void draw_browser(void) {
     int i;
     for (i = game_scroll; i < game_count && y < SCR_H - 16; i++) {
         const char *name = game_display_name(i);
+        char marked_name[PATH_MAX + 3];
+        if (!games[i].is_dir && games[i].is_favorite) {
+            snprintf(marked_name, sizeof(marked_name), "* %s", name);
+            name = marked_name;
+        }
         if (games[i].is_dir) {
             if (i == game_sel) {
                 boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
@@ -1143,10 +1274,13 @@ static void draw_browser(void) {
     }
 
     /* help bar */
+    y = SCR_H - 21;
+    stringColor(screen, 2, y, "SELECT:Favorite", 0x607078ff);
     y = SCR_H - 10;
     stringColor(screen, 2, y, "A:Run", 0x607078ff);
     stringColor(screen, 64, y, "START:Keys", 0x607078ff);
-    stringColor(screen, 158, y, current_rel_dir[0] ? "B:Back" : "B:Refresh",
+    stringColor(screen, 158, y,
+                (browsing_favorites || current_rel_dir[0]) ? "B:Back" : "B:Refresh",
                 0x607078ff);
 
     SDL_Flip(screen);
@@ -1662,6 +1796,17 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
             bind_sel = 0;
             bind_scroll = 0;
             state = STATE_KEYBINDS;
+        }
+        break;
+    case SDLK_k: /* SELECT = add/remove favorite */
+        if (game_count > 0 && !games[game_sel].is_dir) {
+            if (toggle_favorite(games[game_sel].path)) {
+                if (browsing_favorites) {
+                    scan_games();
+                } else {
+                    games[game_sel].is_favorite = !games[game_sel].is_favorite;
+                }
+            }
         }
         break;
     case SDLK_b: /* B = back/refresh */
