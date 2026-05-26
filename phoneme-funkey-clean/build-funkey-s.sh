@@ -22,7 +22,7 @@ if [ -x "$FUNKEY_SDK_DIR/relocate-sdk.sh" ]; then
     "$FUNKEY_SDK_DIR/relocate-sdk.sh"
 fi
 
-ENV_SETUP=$(find "$FUNKEY_SDK_DIR" -maxdepth 2 -type f -name 'environment-setup*' | head -n 1)
+ENV_SETUP=$(find -L "$FUNKEY_SDK_DIR" -maxdepth 2 -type f -name 'environment-setup*' | head -n 1)
 if [ -z "$ENV_SETUP" ]; then
     echo "Could not find environment-setup in FUNKEY_SDK_DIR=$FUNKEY_SDK_DIR" >&2
     exit 1

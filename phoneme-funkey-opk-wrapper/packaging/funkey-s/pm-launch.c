@@ -309,8 +309,9 @@ static int    bind_scroll = 0;
 static int    capture_mode = 0;       /* 1 = waiting for key press to bind */
 
 /* ── state ──────────────────────────────────────────── */
-enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING };
+enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING, STATE_RESOLUTION };
 static int state = STATE_BROWSER;
+static int launching_game_idx = -1;
 
 /* ── SDL objects ────────────────────────────────────── */
 static SDL_Surface *screen = NULL;
@@ -1257,6 +1258,108 @@ static void draw_keybinds(void) {
 }
 
 /* ─────────────────────────────────────────────────────
+ *  resolution picker – first launch
+ * ──────────────────────────────────────────────────── */
+
+#define SOURCE_PRESET_COUNT (sizeof(source_presets) / sizeof(source_presets[0]))
+
+static int source_picker_sel = 0;
+static int source_picker_scroll = 0;
+
+static void draw_resolution_picker(void) {
+    int i;
+    int y = 6;
+    const int max_rows = 12;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
+
+    /* game name */
+    if (launching_game_idx >= 0 && launching_game_idx < game_count) {
+        char title[256];
+        snprintf(title, sizeof(title), "Resolution for %s",
+                 game_display_name(launching_game_idx));
+        draw_header(title, y);
+    }
+    y += 14;
+
+    /* list source presets */
+    if (source_picker_scroll < 0) source_picker_scroll = 0;
+    if (source_picker_sel < source_picker_scroll)
+        source_picker_scroll = source_picker_sel;
+    if (source_picker_sel >= source_picker_scroll + max_rows)
+        source_picker_scroll = source_picker_sel - max_rows + 1;
+
+    for (i = source_picker_scroll;
+         i < (int)SOURCE_PRESET_COUNT && i < source_picker_scroll + max_rows;
+         i++) {
+        int selected = (i == source_picker_sel);
+        char label[64];
+        snprintf(label, sizeof(label), "%s", source_presets[i].label);
+        y = draw_item(4, y, label, selected);
+    }
+    y += 4;
+
+    /* help bar */
+    y = SCR_H - 20;
+    stringColor(screen, 4, y, "A:confirm  B:cancel  U/D:choose",
+               0x607078ff);
+    y += 10;
+    stringColor(screen, 4, y, "Changing resolution requires restarting the game",
+               0xff6060ff);
+
+    SDL_Flip(screen);
+}
+
+static void handle_key_resolution(SDL_keysym *key) {
+    if (!key) return;
+
+    switch (key->sym) {
+    case SDLK_UP: case SDLK_u:
+        if (source_picker_sel > 0) source_picker_sel--;
+        break;
+    case SDLK_DOWN: case SDLK_d:
+        if (source_picker_sel < (int)SOURCE_PRESET_COUNT - 1) source_picker_sel++;
+        break;
+    case SDLK_LEFT: case SDLK_l:
+        source_picker_sel -= 6;
+        if (source_picker_sel < 0) source_picker_sel = 0;
+        break;
+    case SDLK_RIGHT: case SDLK_r:
+        source_picker_sel += 6;
+        if (source_picker_sel >= (int)SOURCE_PRESET_COUNT)
+            source_picker_sel = SOURCE_PRESET_COUNT - 1;
+        break;
+    case SDLK_b:
+        /* cancel – go back to browser */
+        launching_game_idx = -1;
+        state = STATE_BROWSER;
+        break;
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a:
+        /* confirm – save chosen resolution and launch */
+        if (launching_game_idx >= 0 && launching_game_idx < game_count) {
+            load_binds(games[launching_game_idx].config,
+                       games[launching_game_idx].path);
+            source_sel = source_picker_sel;
+            save_binds(games[launching_game_idx].config);
+            launch_game(launching_game_idx);
+            launching_game_idx = -1;
+            state = STATE_BROWSER;
+        }
+        break;
+    }
+}
+
+static int config_file_exists(const char *game_name) {
+    char path[PATH_MAX];
+    FILE *f;
+    if (!game_name) return 0;
+    snprintf(path, sizeof(path), BIND_DIR "/%s.cfg", game_name);
+    f = fopen(path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
+}
+
+/* ─────────────────────────────────────────────────────
  *  launching overlay
  * ──────────────────────────────────────────────────── */
 static void draw_launching(void) {
@@ -1612,9 +1715,18 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
                 enter_selected_folder();
                 break;
             }
-            load_binds(games[game_sel].config, games[game_sel].path);
-            launch_game(game_sel);
-            state = STATE_BROWSER;
+            if (!games[game_sel].is_favorites_folder &&
+                !config_file_exists(games[game_sel].config)) {
+                /* first launch – show resolution picker */
+                source_picker_sel = 0;
+                source_picker_scroll = 0;
+                launching_game_idx = game_sel;
+                state = STATE_RESOLUTION;
+            } else {
+                load_binds(games[game_sel].config, games[game_sel].path);
+                launch_game(game_sel);
+                state = STATE_BROWSER;
+            }
         }
         break;
     case SDLK_s: /* START = open/keys */
@@ -1811,9 +1923,10 @@ int main(int argc, char **argv) {
 
     while (running) {
         switch (state) {
-        case STATE_BROWSER:   draw_browser();   break;
-        case STATE_KEYBINDS:  draw_keybinds();  break;
-        case STATE_LAUNCHING: draw_launching(); break;
+        case STATE_BROWSER:     draw_browser();          break;
+        case STATE_KEYBINDS:    draw_keybinds();         break;
+        case STATE_LAUNCHING:   draw_launching();        break;
+        case STATE_RESOLUTION:  draw_resolution_picker(); break;
         }
 
         while (SDL_WaitEvent(&ev)) {
@@ -1827,6 +1940,9 @@ int main(int argc, char **argv) {
                     handle_key_keybinds(&ev.key);
                     break;
                 case STATE_LAUNCHING:
+                    break;
+                case STATE_RESOLUTION:
+                    handle_key_resolution(&ev.key);
                     break;
                 }
                 if (ev.type == SDL_KEYDOWN) break; /* one event per frame */
