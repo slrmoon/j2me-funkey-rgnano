@@ -89,7 +89,7 @@ static const int bind_defaults[] = {
 };
 
 #define BIND_COUNT  ((int)(sizeof(bind_defaults) / sizeof(bind_defaults[0])))
-#define BIND_ROW_OFFSET 4
+#define BIND_ROW_OFFSET 5
 
 typedef struct {
     const char *id;
@@ -317,6 +317,8 @@ static int    source_sel = 0;
 static int    display_mode_sel = 5;
 static int    sound_volume = 100;
 static int    key_profile_sel = 0;
+static int    doja_audio_streaming = 0;
+static int    doja_audio_compare = 0;
 static int    bind_sel   = 0;        /* selected row in settings */
 static int    bind_scroll = 0;
 static int    capture_mode = 0;       /* 1 = waiting for key press to bind */
@@ -986,6 +988,8 @@ static void load_binds(const char *game_name, const char *jar_path) {
     display_mode_sel = 5;
     sound_volume = 100;
     key_profile_sel = 0;
+    doja_audio_streaming = 0;
+    doja_audio_compare = 0;
 
     if (!game_name) return;
 
@@ -1029,6 +1033,21 @@ static void load_binds(const char *game_name, const char *jar_path) {
             apply_key_profile(key_profile_sel);
             continue;
         }
+        if (strcmp(key, "DOJA_AUDIO") == 0 || strcmp(key, "DOJA_AUDIO_STREAMING") == 0) {
+            doja_audio_streaming =
+                strcmp(value, "stream") == 0 ||
+                strcmp(value, "streaming") == 0 ||
+                strcmp(value, "true") == 0 ||
+                strcmp(value, "1") == 0;
+            continue;
+        }
+        if (strcmp(key, "DOJA_AUDIO_COMPARE") == 0) {
+            doja_audio_compare =
+                strcmp(value, "true") == 0 ||
+                strcmp(value, "1") == 0 ||
+                strcmp(value, "yes") == 0;
+            continue;
+        }
         for (i = 0; i < BIND_COUNT; i++) {
             if (strcmp(key, bind_names[i]) == 0) {
                 binds[i] = val;
@@ -1056,6 +1075,8 @@ static void save_binds(const char *game_name) {
     fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
     fprintf(f, "VOLUME=%d\n", sound_volume);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
+    fprintf(f, "DOJA_AUDIO=%s\n", doja_audio_streaming ? "stream" : "legacy");
+    fprintf(f, "DOJA_AUDIO_COMPARE=%d\n", doja_audio_compare);
 
     for (i = 0; i < BIND_COUNT; i++)
         fprintf(f, "%s=%d\n", bind_names[i], binds[i]);
@@ -1177,6 +1198,9 @@ static void draw_keybinds(void) {
             snprintf(buf, sizeof(buf), "SCREEN %s", display_modes[display_mode_sel].label);
         } else if (i == 3) {
             snprintf(buf, sizeof(buf), "PROFILE %s", key_profiles[key_profile_sel].label);
+        } else if (i == 4) {
+            snprintf(buf, sizeof(buf), "DOJA AUDIO %s",
+                     doja_audio_streaming ? "Stream" : "Legacy");
         } else {
             int phone_index = i - BIND_ROW_OFFSET;
             char assigned[64];
@@ -1434,12 +1458,18 @@ static void launch_game(int idx) {
         setenv("DOJA_APP_VER", games[idx].app_ver, 1);
         setenv("DOJA_JAM_PATH", games[idx].jam_path, 1);
         setenv("DOJA_SCRATCHPAD_PATH", doja_scratchpad_path, 1);
+        setenv("DOJA_AUDIO_STREAMING", doja_audio_streaming ? "1" : "0", 1);
+        setenv("DOJA_AUDIO_COMPARE", doja_audio_compare ? "1" : "0", 1);
+        setenv("DOJA_AUDIO_PROFILE", "generic_doja", 1);
     } else {
         unsetenv("DOJA_APP_CLASS");
         unsetenv("DOJA_APP_PARAM");
         unsetenv("DOJA_APP_VER");
         unsetenv("DOJA_JAM_PATH");
         unsetenv("DOJA_SCRATCHPAD_PATH");
+        unsetenv("DOJA_AUDIO_STREAMING");
+        unsetenv("DOJA_AUDIO_COMPARE");
+        unsetenv("DOJA_AUDIO_PROFILE");
     }
     {
         char cfg_path[PATH_MAX];
@@ -1521,6 +1551,11 @@ static void launch_game(int idx) {
             printf("pm-launch sound volume=%s config=%s\n",
                    getenv("PHONEME_SOUND_VOLUME") ? getenv("PHONEME_SOUND_VOLUME") : "",
                    getenv("PHONEME_CONFIG_PATH") ? getenv("PHONEME_CONFIG_PATH") : "");
+            printf("pm-launch doja audio streaming=%s profile=%s\n",
+                   getenv("DOJA_AUDIO_STREAMING") ? getenv("DOJA_AUDIO_STREAMING") : "",
+                   getenv("DOJA_AUDIO_PROFILE") ? getenv("DOJA_AUDIO_PROFILE") : "");
+            printf("pm-launch doja audio compare=%s\n",
+                   getenv("DOJA_AUDIO_COMPARE") ? getenv("DOJA_AUDIO_COMPARE") : "");
             printf("pm-launch key profile=%s\n", key_profiles[key_profile_sel].id);
             for (i = 0; i < BIND_COUNT; i++) {
                 printf("pm-launch key %s %s=%s\n",
@@ -1542,6 +1577,20 @@ static void launch_game(int idx) {
             char prop_ver[192];
             char prop_encoding[64];
             char prop_scratchpad[PATH_MAX + 32];
+            char prop_audio_streaming[64];
+            char prop_audio_profile[96];
+            char prop_audio_debug[64];
+            char prop_audio_compare[64];
+            int doja_streaming =
+                getenv("DOJA_AUDIO_STREAMING") != NULL &&
+                strcmp(getenv("DOJA_AUDIO_STREAMING"), "0") != 0;
+            int doja_audio_debug =
+                getenv("DOJA_AUDIO_DEBUG") != NULL &&
+                strcmp(getenv("DOJA_AUDIO_DEBUG"), "0") != 0;
+            int doja_audio_compare =
+                getenv("DOJA_AUDIO_COMPARE") != NULL &&
+                strcmp(getenv("DOJA_AUDIO_COMPARE"), "0") != 0;
+            const char *doja_audio_profile = getenv("DOJA_AUDIO_PROFILE");
             if (games[idx].is_doja) {
                 snprintf(classpath, sizeof(classpath), "%s:%s/lib/doja-support.jar",
                          jar_path, PM_DIR);
@@ -1555,6 +1604,19 @@ static void launch_game(int idx) {
                          "-Dmicroedition.encoding=SJIS");
                 snprintf(prop_scratchpad, sizeof(prop_scratchpad),
                          "-Ddoja.scratchpad.path=%s", doja_scratchpad_path);
+                snprintf(prop_audio_streaming, sizeof(prop_audio_streaming),
+                         "-Ddoja.audio.streaming=%s",
+                         doja_streaming ? "true" : "false");
+                snprintf(prop_audio_profile, sizeof(prop_audio_profile),
+                         "-Ddoja.audio.profile=%s",
+                         (doja_audio_profile != NULL && doja_audio_profile[0] != '\0') ?
+                         doja_audio_profile : "generic_doja");
+                snprintf(prop_audio_debug, sizeof(prop_audio_debug),
+                         "-Ddoja.audio.debug=%s",
+                         doja_audio_debug ? "true" : "false");
+                snprintf(prop_audio_compare, sizeof(prop_audio_compare),
+                         "-Ddoja.audio.compare=%s",
+                         doja_audio_compare ? "true" : "false");
             } else {
                 snprintf(classpath, sizeof(classpath), "%s", jar_path);
                 prop_app[0] = '\0';
@@ -1562,6 +1624,10 @@ static void launch_game(int idx) {
                 prop_ver[0] = '\0';
                 prop_encoding[0] = '\0';
                 prop_scratchpad[0] = '\0';
+                prop_audio_streaming[0] = '\0';
+                prop_audio_profile[0] = '\0';
+                prop_audio_debug[0] = '\0';
+                prop_audio_compare[0] = '\0';
             }
         if (games[idx].is_doja) {
         char *argv[] = {
@@ -1571,6 +1637,10 @@ static void launch_game(int idx) {
             prop_ver,
             prop_encoding,
             prop_scratchpad,
+            prop_audio_streaming,
+            prop_audio_profile,
+            prop_audio_debug,
+            prop_audio_compare,
             "-classpathext",
             classpath,
             "internal",
@@ -1729,6 +1799,8 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             key_profile_sel--;
             if (key_profile_sel < 0) key_profile_sel = KEY_PROFILE_COUNT - 1;
             apply_key_profile(key_profile_sel);
+        } else if (bind_sel == 4) {
+            doja_audio_streaming = !doja_audio_streaming;
         }
         break;
     case SDLK_RIGHT: case SDLK_r:
@@ -1750,6 +1822,8 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             key_profile_sel++;
             if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
             apply_key_profile(key_profile_sel);
+        } else if (bind_sel == 4) {
+            doja_audio_streaming = !doja_audio_streaming;
         }
         break;
 
@@ -1772,6 +1846,8 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             key_profile_sel++;
             if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
             apply_key_profile(key_profile_sel);
+        } else if (bind_sel == 4) {
+            doja_audio_streaming = !doja_audio_streaming;
         } else {
             capture_mode = 1;
         }

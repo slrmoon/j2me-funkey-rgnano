@@ -1,0 +1,10 @@
+AppName = Šç•¶ŽšƒAƒvƒŠ
+PackageURL = http://www.nob13.com/game/iappli/Kaomoji/Kaomoji.jar
+AppClass = Kaomoji
+LastModified = Sun, 27 Mar 2005 10:56:03
+UseNetwork = http
+UseBrowser = launch
+LaunchApp = yes
+GetUtn = terminalid,userid
+SPsize = 5120
+AppSize = 20448

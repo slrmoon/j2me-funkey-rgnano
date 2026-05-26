@@ -1,0 +1,18 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+    <head>
+        <title>Sourceforge Allura : 404 : Page Not Found </title>
+        <meta Http-Equiv="Cache-Control" Content="no-cache">
+        <meta Http-Equiv="Pragma" Content="no-cache">
+        <meta Http-Equiv="Expires" Content="0">
+    </head>
+    <body>
+        <center>
+            <img src="https://a.fsdn.com/allura/images/sf.png" width="95" height="20">
+            <h1> Error 404 </h1>
+	    <p>
+                We could not find the page you requested.
+            </p>
+        </center>
+    </body>
+</html>

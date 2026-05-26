@@ -28,6 +28,7 @@ static int                      MediaSDL_AudioTrace = -1;
 
 #define DOJA_AUDIO_RATE SAMPLE_FREQ
 #define DOJA_MAX_VOICES 32
+#define DOJA_TSF_CACHE_SAMPLES 256
 #define DOJA_PROFILE_GENERIC_DOJA 0
 #define DOJA_PROFILE_NOKIA_S40 1
 #define DOJA_PROFILE_SONY_ERICSSON 2
@@ -98,16 +99,35 @@ struct DoJaAudioPlayer
   int loop_event_pos;
   unsigned int loop_sample_pos;
   int channel_program[16];
+  int channel_bank[16];
   int channel_volume[16];
+  int channel_expression[16];
   int channel_pan[16];
   int channel_pitch[16];
   int channel_pitch_range[16];
   int channel_modulation[16];
+  int handled_events;
+  int note_on_count;
+  int note_off_count;
+  int mix_peak;
+  int voice_peak;
+  int debug_reported;
+  tsf *font;
+  int eq_dc_l;
+  int eq_dc_r;
+  int eq_mid_fast_l;
+  int eq_mid_fast_r;
+  int eq_mid_slow_l;
+  int eq_mid_slow_r;
+  short tsf_cache[DOJA_TSF_CACHE_SAMPLES * 2];
+  int tsf_cache_pos;
+  int tsf_cache_len;
   struct DoJaVoice voices[DOJA_MAX_VOICES];
   struct DoJaAudioPlayer *next;
 };
 
 static struct DoJaAudioPlayer *DoJaAudioPlayers;
+static tsf *DoJaSharedSoundFont;
 
 #define SAMPLE_FREQ	22050
 #define SAMPLE_FORMAT_WAV 1
@@ -117,6 +137,9 @@ static struct DoJaAudioPlayer *DoJaAudioPlayers;
 #define AMRNB_OUTPUT_SAMPLES_PER_FRAME 441
 
 long long GetTimeMillis();
+static tsf *LoadMIDISoundFont(void);
+static tsf *DoJaLoadSoundFontCopy(void);
+static int DoJaClamp16(int v);
 
 static int MediaSDL_AudioTraceEnabled()
 {
@@ -128,6 +151,23 @@ static int MediaSDL_AudioTraceEnabled()
 
 #define MEDIA_TRACE(...) \
   do { if (MediaSDL_AudioTraceEnabled()) printf(__VA_ARGS__); } while (0)
+
+static void MediaSDL_LogBackend(const char *backend, const char *path)
+{
+  printf("AUDIO_BACKEND %s path=%s\n", backend, path);
+}
+
+static int DoJaAudioDebugEnabled()
+{ static int enabled = -1;
+  if (enabled < 0)
+     { const char *value = getenv("DOJA_AUDIO_DEBUG");
+       enabled = value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+     }
+  return enabled;
+}
+
+#define DOJA_AUDIO_DEBUG(...) \
+  do { if (DoJaAudioDebugEnabled()) printf(__VA_ARGS__); } while (0)
 
 static void MediaSDL_LockAudio()
 {
@@ -382,23 +422,194 @@ static void DoJaNoteOn(struct DoJaAudioPlayer *p, int channel, int note, int vel
   v->step = DoJaMidiFreq(note) / (double)DOJA_AUDIO_RATE;
 }
 
+static int DoJaPitchWheelValue(int value)
+{ int bend = 8192 + (value - 32) * 256;
+  if (bend < 0) return 0;
+  if (bend > 16383) return 16383;
+  return bend;
+}
+
+static void DoJaTSFInvalidate(struct DoJaAudioPlayer *p);
+
+static int DoJaTSFDrumBank(int channel, int bank, int program)
+{ if ((channel & 15) == 9) return 1;
+  if ((channel & 15) == 15 && bank == 2 && program == 0) return 1;
+  return 0;
+}
+
+static int DoJaTSFMapProgram(int bank, int program)
+{ (void)bank;
+  program &= 0x7f;
+  return program;
+}
+
+static void TSFBackendProgramBank(tsf *font, int channel, int program, int bank)
+{ int mapped_program;
+  int drum;
+  if (font == NULL) return;
+  channel &= 15;
+  mapped_program = DoJaTSFMapProgram(bank, program);
+  drum = DoJaTSFDrumBank(channel, bank, program);
+  tsf_channel_set_presetnumber(font, channel, mapped_program & 0x7f, drum);
+  if (drum)
+     tsf_channel_set_bank_preset(font, channel, 128, mapped_program & 0x7f);
+}
+
+static void TSFBackendProgram(tsf *font, int channel, int program)
+{ TSFBackendProgramBank(font, channel, program, 0);
+}
+
+static void TSFBackendControl(tsf *font, int channel, int control, int value)
+{ if (font == NULL) return;
+  tsf_channel_midi_control(font, channel & 15, control & 0x7f, value & 0x7f);
+}
+
+static void TSFBackendNoteOn(tsf *font, int channel, int note, int velocity)
+{ if (font == NULL) return;
+  tsf_channel_note_on(font, channel & 15, note & 0x7f,
+                      (float)(velocity & 0x7f) / 127.0f);
+}
+
+static void TSFBackendNoteOff(tsf *font, int channel, int note)
+{ if (font == NULL) return;
+  tsf_channel_note_off(font, channel & 15, note & 0x7f);
+}
+
+static void TSFBackendPitch(tsf *font, int channel, int pitch)
+{ if (font == NULL) return;
+  tsf_channel_set_pitchwheel(font, channel & 15, pitch);
+}
+
+static void TSFBackendPitchRange(tsf *font, int channel, int range)
+{ if (font == NULL) return;
+  tsf_channel_set_pitchrange(font, channel & 15, (float)range);
+}
+
+static void DoJaTSFReset(struct DoJaAudioPlayer *p)
+{ int i;
+  DoJaTSFInvalidate(p);
+  p->eq_dc_l = 0;
+  p->eq_dc_r = 0;
+  p->eq_mid_fast_l = 0;
+  p->eq_mid_fast_r = 0;
+  p->eq_mid_slow_l = 0;
+  p->eq_mid_slow_r = 0;
+  if (p->font == NULL) return;
+  tsf_reset(p->font);
+  tsf_set_output(p->font, TSF_STEREO_INTERLEAVED, SAMPLE_FREQ, -12.0f);
+  tsf_set_max_voices(p->font, 96);
+  for (i = 0; i < 16; i++)
+     { TSFBackendProgramBank(p->font, i, p->channel_program[i], p->channel_bank[i]);
+       TSFBackendControl(p->font, i, 7, p->channel_volume[i]);
+       TSFBackendControl(p->font, i, 10, p->channel_pan[i]);
+       TSFBackendControl(p->font, i, 11, p->channel_expression[i]);
+       TSFBackendControl(p->font, i, 1, p->channel_modulation[i]);
+       TSFBackendPitchRange(p->font, i, p->channel_pitch_range[i]);
+       TSFBackendPitch(p->font, i, DoJaPitchWheelValue(p->channel_pitch[i]));
+     }
+}
+
+static void DoJaTSFProgram(struct DoJaAudioPlayer *p, int channel, int program, int bank)
+{ int mapped_program;
+  int drum;
+  unsigned int time_ms;
+  if (p->font == NULL) return;
+  TSFBackendProgramBank(p->font, channel, program, bank);
+  mapped_program = DoJaTSFMapProgram(bank, program);
+  drum = DoJaTSFDrumBank(channel, bank, program);
+  time_ms = (p->sample_pos * 1000U) / (unsigned int)DOJA_AUDIO_RATE;
+  printf("DOJA_MAP id=%d time_ms=%u ch=%d bank=%d prog=%d tsf_bank=%d tsf_prog=%d drum=%d\n",
+         (int)p, time_ms, channel & 15, bank & 0x7f, program & 0x7f,
+         drum ? 128 : 0, mapped_program & 0x7f, drum);
+}
+
+static void DoJaTSFInvalidate(struct DoJaAudioPlayer *p)
+{ p->tsf_cache_pos = 0;
+  p->tsf_cache_len = 0;
+}
+
+static int DoJaPhoneShapeSample(struct DoJaAudioPlayer *p, int sample, int right)
+{ int *dcp = right ? &p->eq_dc_r : &p->eq_dc_l;
+  int *fastp = right ? &p->eq_mid_fast_r : &p->eq_mid_fast_l;
+  int *slowp = right ? &p->eq_mid_slow_r : &p->eq_mid_slow_l;
+  int hp;
+  int low_mid;
+  int shaped;
+  if (p->profile == DOJA_PROFILE_GENERIC_GM) return sample;
+  *dcp += (sample - *dcp) / 48;
+  hp = sample - *dcp;
+  *fastp += (hp - *fastp) / 8;
+  *slowp += (hp - *slowp) / 32;
+  low_mid = *fastp - *slowp;
+  shaped = (hp * 9 + low_mid * 8) / 10;
+  return DoJaClamp16(shaped);
+}
+
+static int DoJaTSFRenderBlockSize(struct DoJaAudioPlayer *p)
+{ int block = DOJA_TSF_CACHE_SAMPLES;
+  if (p->event_pos < p->event_count)
+     { unsigned int next_sample =
+          (p->events[p->event_pos].time_ms * (unsigned int)DOJA_AUDIO_RATE + 999U) / 1000U;
+       if (next_sample > p->sample_pos &&
+           next_sample - p->sample_pos < (unsigned int)block)
+          block = (int)(next_sample - p->sample_pos);
+     }
+  return block < 1 ? 1 : block;
+}
+
+static void DoJaTSFFillCache(struct DoJaAudioPlayer *p)
+{ int block;
+  if (p->font == NULL) return;
+  block = DoJaTSFRenderBlockSize(p);
+  tsf_render_short(p->font, p->tsf_cache, block, 0);
+  p->tsf_cache_pos = 0;
+  p->tsf_cache_len = block;
+}
+
+static tsf *DoJaLoadSoundFontCopy(void)
+{ if (DoJaSharedSoundFont == NULL)
+     { DoJaSharedSoundFont = LoadMIDISoundFont();
+       if (DoJaSharedSoundFont != NULL)
+          { tsf_set_output(DoJaSharedSoundFont, TSF_STEREO_INTERLEAVED,
+                           SAMPLE_FREQ, -12.0f);
+            tsf_set_max_voices(DoJaSharedSoundFont, 96);
+          }
+     }
+  if (DoJaSharedSoundFont == NULL) return NULL;
+  return tsf_copy(DoJaSharedSoundFont);
+}
+
 static void DoJaHandleEvent(struct DoJaAudioPlayer *p, struct DoJaEvent *e)
 { int ch = e->channel & 15;
+  p->handled_events++;
+  DoJaTSFInvalidate(p);
   switch (e->type)
      { case 1:
           p->channel_program[ch] = e->a;
+          p->channel_bank[ch] = e->b;
+          DoJaTSFProgram(p, ch, e->a, e->b);
           break;
        case 2:
           p->channel_volume[ch] = e->a;
+          TSFBackendControl(p->font, ch, 7, e->a);
           break;
        case 3:
           p->channel_pan[ch] = e->a;
+          TSFBackendControl(p->font, ch, 10, e->a);
           break;
        case 4:
-          DoJaNoteOn(p, ch, e->a, e->b);
+          p->note_on_count++;
+          if (p->font != NULL)
+             TSFBackendNoteOn(p->font, ch, e->a, e->b);
+          else
+             DoJaNoteOn(p, ch, e->a, e->b);
           break;
        case 5:
-          DoJaNoteOff(p, ch, e->a);
+          p->note_off_count++;
+          if (p->font != NULL)
+             TSFBackendNoteOff(p->font, ch, e->a);
+          else
+             DoJaNoteOff(p, ch, e->a);
           break;
        case 6:
           p->loop_event_pos = p->event_pos;
@@ -420,17 +631,32 @@ static void DoJaHandleEvent(struct DoJaAudioPlayer *p, struct DoJaEvent *e)
                p->sample_pos = 0;
                p->loop_event_pos = -1;
                p->section_loops_done = 0;
+               DoJaTSFReset(p);
              }
-          else p->active = 0;
+          else
+             { p->active = 0;
+               DOJA_AUDIO_DEBUG("DoJa native end id=%d samples=%u events=%d/%d noteOn=%d noteOff=%d peak=%d voicePeak=%d loops=%d\n",
+                                (int)p, p->sample_pos, p->handled_events,
+                                p->event_count, p->note_on_count,
+                                p->note_off_count, p->mix_peak,
+                                p->voice_peak, p->loops_done);
+             }
           break;
        case 9:
           p->channel_pitch[ch] = e->a;
+          TSFBackendPitch(p->font, ch, DoJaPitchWheelValue(e->a));
           break;
        case 10:
           p->channel_modulation[ch] = e->a;
+          TSFBackendControl(p->font, ch, 1, e->a * 2);
           break;
        case 11:
           p->channel_pitch_range[ch] = e->a;
+          TSFBackendPitchRange(p->font, ch, e->a);
+          break;
+       case 12:
+          p->channel_expression[ch] = e->a;
+          TSFBackendControl(p->font, ch, 11, e->a);
           break;
      }
 }
@@ -543,45 +769,84 @@ static void DoJaAudioPostMix(void *udata, Uint8 *stream, int len)
        p = DoJaAudioPlayers;
        while (p != NULL)
           { if (p->active)
-               { time_ms = (p->sample_pos * 1000U) / DOJA_AUDIO_RATE;
+               { int active_voice_count = 0;
+                 time_ms = (p->sample_pos * 1000U) / DOJA_AUDIO_RATE;
                  while (p->event_pos < p->event_count &&
                         p->events[p->event_pos].time_ms <= time_ms)
                     { p->event_pos++;
                       DoJaHandleEvent(p, &p->events[p->event_pos - 1]);
                     }
-                 for (i = 0; i < DOJA_MAX_VOICES; i++)
-                    if (p->voices[i].active)
-                       { v = &p->voices[i];
-                         env = DoJaEnvelopeLevel(v);
-                         vol = v->volume <= 0 ? 100 : v->volume;
-                         pan = v->pan <= 0 ? 64 : v->pan;
-                         if (env <= 0)
-                            { v->active = 0;
-                              continue;
+                 if (!p->active)
+                    { p = p->next;
+                      continue;
+                    }
+                 if (p->font != NULL)
+                    { if (p->tsf_cache_pos >= p->tsf_cache_len)
+                         DoJaTSFFillCache(p);
+                      amp = DoJaPhoneShapeSample(p,
+                              (int)p->tsf_cache[p->tsf_cache_pos * 2], 0);
+                      mix_l += (amp * p->volume) / 100;
+                      if (amp < 0) amp = -amp;
+                      if (amp > p->mix_peak) p->mix_peak = amp;
+                      amp = DoJaPhoneShapeSample(p,
+                              (int)p->tsf_cache[p->tsf_cache_pos * 2 + 1], 1);
+                      mix_r += (amp * p->volume) / 100;
+                      if (amp < 0) amp = -amp;
+                      if (amp > p->mix_peak) p->mix_peak = amp;
+                      p->tsf_cache_pos++;
+                      active_voice_count = tsf_active_voice_count(p->font);
+                    }
+                 else
+                    { for (i = 0; i < DOJA_MAX_VOICES; i++)
+                         if (p->voices[i].active)
+                            { v = &p->voices[i];
+                              env = DoJaEnvelopeLevel(v);
+                              vol = v->volume <= 0 ? 100 : v->volume;
+                              pan = v->pan <= 0 ? 64 : v->pan;
+                              if (env <= 0 && v->released)
+                                 { v->active = 0;
+                                   continue;
+                                 }
+                              wave = DoJaWave(v, (int)p->sample_pos);
+                              amp = (int)(wave * (double)(v->velocity * 34));
+                              amp = amp * env / 1024;
+                              amp = amp * vol * p->channel_expression[v->channel & 15] *
+                                    p->volume / 1270000;
+                              if (amp < 0)
+                                 { if (-amp > p->mix_peak) p->mix_peak = -amp; }
+                              else if (amp > p->mix_peak) p->mix_peak = amp;
+                              active_voice_count++;
+                              mix_l += amp * (127 - pan) / 127;
+                              mix_r += amp * pan / 127;
+                              bend = p->channel_pitch[v->channel & 15] - 32;
+                              range = p->channel_pitch_range[v->channel & 15];
+                              mod = p->channel_modulation[v->channel & 15];
+                              step = v->step * (1.0 + (double)(bend * range) / 3840.0);
+                              if (mod > 0)
+                                 { period = DOJA_AUDIO_RATE / 5;
+                                   if (period <= 0) period = 1;
+                                   lfo = DoJaTriangle((double)(p->sample_pos % period) /
+                                                       (double)period);
+                                   step *= 1.0 + lfo * (double)mod / 3000.0;
+                                 }
+                              v->phase += step;
+                              if (v->phase >= 1.0) v->phase -= (int)v->phase;
+                              v->age_samples++;
+                              if (v->released) v->release_samples++;
                             }
-                         wave = DoJaWave(v, (int)p->sample_pos);
-                         amp = (int)(wave * (double)(v->velocity * 34));
-                         amp = amp * env / 1024;
-                         amp = amp * vol * p->volume / 10000;
-                         mix_l += amp * (127 - pan) / 127;
-                         mix_r += amp * pan / 127;
-                         bend = p->channel_pitch[v->channel & 15] - 32;
-                         range = p->channel_pitch_range[v->channel & 15];
-                         mod = p->channel_modulation[v->channel & 15];
-                         step = v->step * (1.0 + (double)(bend * range) / 3840.0);
-                         if (mod > 0)
-                            { period = DOJA_AUDIO_RATE / 5;
-                              if (period <= 0) period = 1;
-                              lfo = DoJaTriangle((double)(p->sample_pos % period) /
-                                                  (double)period);
-                              step *= 1.0 + lfo * (double)mod / 3000.0;
-                            }
-                         v->phase += step;
-                         if (v->phase >= 1.0) v->phase -= (int)v->phase;
-                         v->age_samples++;
-                         if (v->released) v->release_samples++;
-                       }
+                    }
+                 if (active_voice_count > p->voice_peak)
+                    p->voice_peak = active_voice_count;
                  p->sample_pos++;
+                 if (!p->debug_reported && p->sample_pos >= DOJA_AUDIO_RATE)
+                    { p->debug_reported = 1;
+                      DOJA_AUDIO_DEBUG("DoJa native firstsec id=%d events=%d/%d eventPos=%d noteOn=%d noteOff=%d peak=%d voicePeak=%d activeVoices=%d volume=%d\n",
+                                       (int)p, p->handled_events, p->event_count,
+                                       p->event_pos, p->note_on_count,
+                                       p->note_off_count, p->mix_peak,
+                                       p->voice_peak, active_voice_count,
+                                       p->volume);
+                    }
                }
             p = p->next;
           }
@@ -692,24 +957,49 @@ struct NativeTonePlayer *CreateToneChunk(int Note, int Volume)
 { struct NativeTonePlayer *Ret;
   short Value, *Buf;
   unsigned int i, m;
+  unsigned int samples;
+  tsf *font;
+  int used_tsf = 0;
   if ((Note<0)||(Note>127)) return(NULL);
   Ret = (struct NativeTonePlayer *)malloc(sizeof(struct NativeTonePlayer));
   if (Ret == NULL) return(NULL);
   Ret->MC.allocated = 0;
   Ret->MC.volume = MIX_MAX_VOLUME;
-  Ret->MC.alen = SAMPLE_FREQ / MidiNotes[Note];
-  Ret->MC.abuf = malloc(Ret->MC.alen * 2);
+  Ret->Chan = -1;
+  samples = SAMPLE_FREQ / MidiNotes[Note];
+  if (samples < 64) samples = 64;
+  Ret->MC.alen = samples * 2 * sizeof(short);
+  Ret->MC.abuf = malloc(Ret->MC.alen);
   if (Ret->MC.abuf == NULL)
      { free(Ret);
        return(NULL);
      }
-  Value = (Volume * 32767) / 100;
-  m = (Ret->MC.alen >> 1);
-  Buf = (short *)Ret->MC.abuf;
-  for(i=0; i<Ret->MC.alen; i++)
-     Buf[i] = (i<m) ? Value : -Value;
-  Ret->MC.alen <<= 1;
-  Ret->Chan = -1;
+  font = DoJaLoadSoundFontCopy();
+  if (font != NULL)
+     { tsf_set_output(font, TSF_STEREO_INTERLEAVED, SAMPLE_FREQ, -12.0f);
+       tsf_set_max_voices(font, 16);
+       TSFBackendProgram(font, 0, 80);
+       TSFBackendControl(font, 0, 7, 110);
+       TSFBackendNoteOn(font, 0, Note, Volume < 0 ? 0 : Volume > 127 ? 127 : Volume);
+       tsf_render_short(font, (short *)Ret->MC.abuf, (int)samples, 0);
+       TSFBackendNoteOff(font, 0, Note);
+       tsf_close(font);
+       used_tsf = 1;
+     }
+  if (!used_tsf)
+     { Value = (Volume * 32767) / 100;
+       m = samples;
+       Buf = (short *)Ret->MC.abuf;
+       for(i=0; i<samples * 2; i += 2)
+          { short s = ((i >> 1) < (m >> 1)) ? Value : -Value;
+            Buf[i] = s;
+            Buf[i + 1] = s;
+          }
+       MediaSDL_LogBackend("UNSUPPORTED", "ToneChunk oscillator fallback");
+     }
+  else
+     { MediaSDL_LogBackend("TSF_STREAM_EVENTS", "ToneChunk");
+     }
   return(Ret);
 }
 
@@ -891,6 +1181,10 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_GenericPlayer_nSample
                 if (NSP->Chunk == NULL) ret = -3;
               }
        }
+  if (ret == 0)
+     MediaSDL_LogBackend("PCM_DIRECT", Format == SAMPLE_FORMAT_AMR ? "AMR SamplePlayer" : "PCM SamplePlayer");
+  else
+     MediaSDL_LogBackend("UNSUPPORTED", "SamplePlayer decode");
   KNI_EndHandles();
   KNI_ReturnInt(ret);
 }
@@ -1231,6 +1525,7 @@ static int RenderSimpleMIDIPlayer(struct NativeMIDIPlayer *NMP)
   NMP->MC.alen = max_sample * 2 * sizeof(short);
   NMP->MC.allocated = 1;
   NMP->MC.volume = (MIX_MAX_VOLUME * NMP->VolumeLevel) / 100;
+  MediaSDL_LogBackend("UNSUPPORTED", "MIDI simple oscillator fallback");
   MEDIA_TRACE("MIDI simple rendered rawBytes=%u pcmBytes=%u\n", size, NMP->MC.alen);
   return(0);
 }
@@ -1277,19 +1572,19 @@ static void ApplyTSFMIDIMessage(tsf *font, tml_message *msg)
   channel = msg->channel & 0x0f;
   switch(msg->type)
      { case TML_PROGRAM_CHANGE:
-              tsf_channel_set_presetnumber(font, channel, msg->program & 0x7f, channel == 9);
+              TSFBackendProgram(font, channel, msg->program);
               break;
        case TML_NOTE_ON:
-              tsf_channel_note_on(font, channel, msg->key & 0x7f, (float)(msg->velocity & 0x7f) / 127.0f);
+              TSFBackendNoteOn(font, channel, msg->key, msg->velocity);
               break;
        case TML_NOTE_OFF:
-              tsf_channel_note_off(font, channel, msg->key & 0x7f);
+              TSFBackendNoteOff(font, channel, msg->key);
               break;
        case TML_PITCH_BEND:
-              tsf_channel_set_pitchwheel(font, channel, msg->pitch_bend);
+              TSFBackendPitch(font, channel, msg->pitch_bend);
               break;
        case TML_CONTROL_CHANGE:
-              tsf_channel_midi_control(font, channel, msg->control & 0x7f, msg->control_value & 0x7f);
+              TSFBackendControl(font, channel, msg->control, msg->control_value);
               break;
      }
 }
@@ -1330,8 +1625,7 @@ static int RenderTSFMIDIPlayer(struct NativeMIDIPlayer *NMP)
   tsf_set_output(font, TSF_STEREO_INTERLEAVED, SAMPLE_FREQ, -12.0f);
   tsf_set_max_voices(font, 64);
   for (i=0; i<16; i++)
-     tsf_channel_set_presetnumber(font, i, 0, i == 9);
-  tsf_channel_set_bank_preset(font, 9, 128, 0);
+     TSFBackendProgram(font, i, 0);
   msg = midi;
   msec = 0.0;
   rendered = 0;
@@ -1353,6 +1647,7 @@ static int RenderTSFMIDIPlayer(struct NativeMIDIPlayer *NMP)
   NMP->MC.alen = rendered * 2 * sizeof(short);
   NMP->MC.allocated = 1;
   NMP->MC.volume = (MIX_MAX_VOLUME * NMP->VolumeLevel) / 100;
+  MediaSDL_LogBackend("TSF_MIDI", "MIDIPlayer");
   MEDIA_TRACE("MIDI tsf rendered rawBytes=%u pcmBytes=%u notes=%d channels=%d programs=%d\n",
               NMP->RawMidiSize, NMP->MC.alen, total_notes, used_channels, used_programs);
   tsf_close(font);
@@ -1482,8 +1777,8 @@ static int RenderNokiaTonePlayer(struct NativeMIDIPlayer *NMP)
   if (font != NULL)
      { tsf_set_output(font, TSF_STEREO_INTERLEAVED, SAMPLE_FREQ, -12.0f);
        tsf_set_max_voices(font, 16);
-       tsf_channel_set_presetnumber(font, 0, 39, 0);
-       tsf_channel_midi_control(font, 0, 7, 110);
+       TSFBackendProgram(font, 0, 39);
+       TSFBackendControl(font, 0, 7, 110);
        used_tsf = 1;
      }
   if (EnsureSimpleMIDICapacity(&pcm, &capacity, SAMPLE_FREQ) != 0)
@@ -1521,10 +1816,10 @@ static int RenderNokiaTonePlayer(struct NativeMIDIPlayer *NMP)
                            else if (style == 2) play_samples = samples / 2;
                            if (play_samples == 0) play_samples = samples;
                            if (font != NULL)
-                              { tsf_channel_note_on(font, 0, midi_note & 0x7f, (float)volume / 127.0f);
+                              { TSFBackendNoteOn(font, 0, midi_note, volume);
                                 if (RenderToneSamples(font, &pcm, &capacity, &sample_pos, play_samples) != 0)
                                    ok = 0;
-                                tsf_channel_note_off(font, 0, midi_note & 0x7f);
+                                TSFBackendNoteOff(font, 0, midi_note);
                                 if (ok && samples > play_samples)
                                    { if (RenderToneSamples(font, &pcm, &capacity, &sample_pos,
                                                            samples - play_samples) != 0)
@@ -1584,6 +1879,8 @@ static int RenderNokiaTonePlayer(struct NativeMIDIPlayer *NMP)
   NMP->MC.alen = max_sample * 2 * sizeof(short);
   NMP->MC.allocated = 1;
   NMP->MC.volume = (MIX_MAX_VOLUME * NMP->VolumeLevel) / 100;
+  MediaSDL_LogBackend(used_tsf ? "TSF_MIDI" : "UNSUPPORTED",
+                      used_tsf ? "NokiaTone" : "NokiaTone simple fallback");
   MEDIA_TRACE("Nokia tone rendered rawBytes=%u pcmBytes=%u notes=%u synth=%s\n",
               size, NMP->MC.alen, notes, used_tsf ? "tsf" : "simple");
   if (font != NULL) tsf_close(font);
@@ -1602,6 +1899,7 @@ static int RenderMIDIPlayer(struct NativeMIDIPlayer *NMP)
   if (RenderTSFMIDIPlayer(NMP) == 0) return(0);
   if (RenderNokiaTonePlayer(NMP) == 0) return(0);
   if (RenderSimpleMIDIPlayer(NMP) == 0) return(0);
+  MediaSDL_LogBackend("UNSUPPORTED", "MIDI Timidity fallback");
   if (NMP->Song == NULL)
      { if (NMP->RawMidi == NULL || NMP->RawMidiSize == 0) return(-1);
        RW = SDL_RWFromMem(NMP->RawMidi, NMP->RawMidiSize);
@@ -1864,6 +2162,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_DoJaAudioBridge_nOpen
   int ret = 0;
   int profile = KNI_GetParameterAsInt(2);
   unsigned char *e;
+  int initStatus;
   KNI_StartHandles(1);
   KNI_DeclareHandle(buf);
   KNI_GetParameterAsObject(1, buf);
@@ -1876,6 +2175,11 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_DoJaAudioBridge_nOpen
       buffer[2] != 'A' || buffer[3] != '1') goto done;
   count = DoJaRead16(buffer + 4);
   if (count <= 0 || 8 + count * 8 > (int)size) goto done;
+  initStatus = InitAudioSubsystem();
+  if (initStatus != 0)
+     { MEDIA_TRACE("DoJa native audio init failed status=%d\n", initStatus);
+       goto done;
+     }
   p = (struct DoJaAudioPlayer *)malloc(sizeof(struct DoJaAudioPlayer));
   if (p == NULL) goto done;
   memset(p, 0, sizeof(*p));
@@ -1893,7 +2197,9 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_DoJaAudioBridge_nOpen
   p->loop_count = 1;
   p->loop_event_pos = -1;
   for (i = 0; i < 16; i++)
-     { p->channel_volume[i] = 100;
+     { p->channel_volume[i] = 127;
+       p->channel_bank[i] = 0;
+       p->channel_expression[i] = 127;
        p->channel_pan[i] = 64;
        p->channel_pitch[i] = 32;
        p->channel_pitch_range[i] = 2;
@@ -1907,11 +2213,25 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_DoJaAudioBridge_nOpen
        p->events[i].a = e[6];
        p->events[i].b = e[7];
      }
+  p->font = DoJaLoadSoundFontCopy();
+  if (p->font != NULL)
+     { DoJaTSFReset(p);
+       MediaSDL_LogBackend("TSF_STREAM_EVENTS", "DoJaAudioBridge");
+       DOJA_AUDIO_DEBUG("DoJa native stream tsf enabled id=%d\n", (int)p);
+     }
+  else
+     { MediaSDL_LogBackend("UNSUPPORTED", "DoJaAudioBridge oscillator fallback");
+       DOJA_AUDIO_DEBUG("DoJa native stream tsf unavailable, using oscillator fallback id=%d\n", (int)p);
+     }
   MediaSDL_LockAudio();
   p->next = DoJaAudioPlayers;
   DoJaAudioPlayers = p;
   MediaSDL_UnlockAudio();
   ret = (int)p;
+  DOJA_AUDIO_DEBUG("DoJa native open id=%d events=%d firstMs=%u lastMs=%u profile=%d audioReady=%d\n",
+                   ret, count, p->events[0].time_ms,
+                   p->events[count - 1].time_ms, profile,
+                   MediaSDL_AudioReady);
   MEDIA_TRACE("DoJa native audio open id=%d events=%d profile=%d\n", ret, count, profile);
 done:
   if (buffer != NULL) free(buffer);
@@ -1923,14 +2243,24 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nSta
 { struct DoJaAudioPlayer *p = (struct DoJaAudioPlayer *)KNI_GetParameterAsInt(1);
   int i;
   if (p != NULL)
-     { MediaSDL_LockAudio();
+     { DoJaTSFReset(p);
+       MediaSDL_LockAudio();
        p->event_pos = 0;
        p->sample_pos = 0;
        p->loops_done = 0;
        p->section_loops_done = 0;
+       p->handled_events = 0;
+       p->note_on_count = 0;
+       p->note_off_count = 0;
+       p->mix_peak = 0;
+       p->voice_peak = 0;
+       p->debug_reported = 0;
        for (i = 0; i < DOJA_MAX_VOICES; i++) p->voices[i].active = 0;
        p->active = 1;
        MediaSDL_UnlockAudio();
+       DOJA_AUDIO_DEBUG("DoJa native start id=%d events=%d loopCount=%d volume=%d profile=%d\n",
+                        (int)p, p->event_count, p->loop_count, p->volume,
+                        p->profile);
        MEDIA_TRACE("DoJa native audio start id=%d\n", (int)p);
      }
   KNI_ReturnVoid();
@@ -1944,6 +2274,11 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nSto
        p->active = 0;
        for (i = 0; i < DOJA_MAX_VOICES; i++) p->voices[i].active = 0;
        MediaSDL_UnlockAudio();
+       DoJaTSFReset(p);
+       DOJA_AUDIO_DEBUG("DoJa native stop id=%d samples=%u events=%d/%d noteOn=%d noteOff=%d peak=%d voicePeak=%d\n",
+                        (int)p, p->sample_pos, p->handled_events,
+                        p->event_count, p->note_on_count, p->note_off_count,
+                        p->mix_peak, p->voice_peak);
        MEDIA_TRACE("DoJa native audio stop id=%d\n", (int)p);
      }
   KNI_ReturnVoid();
@@ -1963,8 +2298,13 @@ KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_DoJaAudioBridge_nClo
             cur = &((*cur)->next);
           }
        MediaSDL_UnlockAudio();
+       DOJA_AUDIO_DEBUG("DoJa native close id=%d samples=%u events=%d/%d noteOn=%d noteOff=%d peak=%d voicePeak=%d active=%d\n",
+                        (int)p, p->sample_pos, p->handled_events,
+                        p->event_count, p->note_on_count, p->note_off_count,
+                        p->mix_peak, p->voice_peak, p->active);
        MEDIA_TRACE("DoJa native audio close id=%d\n", (int)p);
        if (p->events != NULL) free(p->events);
+       if (p->font != NULL) tsf_close(p->font);
        free(p);
      }
   KNI_ReturnVoid();

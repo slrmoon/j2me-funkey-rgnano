@@ -1,0 +1,16 @@
+PackageURL = http://appli.docomomarket.ne.jp/detail/BUY002_A2_001?uid=NULLGWDOCOMO&guid=on&cid=10000003993&urlRandomValue=jYzolpnUL6G3fgQUjjRN
+TrustedAPID = 10000003993
+AppSize = 136705
+AppName = Û¯¸ÏÝ Êß½ÞÙÊÞÄÙ
+AppVer = 1.00.00
+AppParam = 100000
+DrawArea = 240x240
+AppClass = app.AppMain
+SPsize = 614400
+UseBrowser = launch
+UseNetwork = http
+LastModified = Mon, 27 Jun 2011 15:38:38
+CPName = CAPCOM
+DeniedMultiApp = all
+LaunchByBrowser = launch
+AppIcon = app_ico_s.gif,app_ico_M.gif

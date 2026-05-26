@@ -16,6 +16,10 @@ final class MldEventStream {
     private static final int EVENT_LOOP_START = 6;
     private static final int EVENT_LOOP_END = 7;
     private static final int EVENT_END = 8;
+    private static final int EVENT_PITCH = 9;
+    private static final int EVENT_MODULATION = 10;
+    private static final int EVENT_PITCH_RANGE = 11;
+    private static final int EVENT_EXPRESSION = 12;
 
     private MldEventStream() {
     }
@@ -34,7 +38,8 @@ final class MldEventStream {
         int tracks = 0;
         int notes = 0;
         int maxTime = 0;
-        for (int pos = 8; pos + 8 <= mld.length; pos++) {
+        boolean[] drumChannels = new boolean[16];
+        for (int pos = 8; pos + 8 <= mld.length && tracks < 4; pos++) {
             if (!hasTag(mld, pos, "trac")) {
                 continue;
             }
@@ -43,7 +48,8 @@ final class MldEventStream {
             if (len <= 0 || start + len > mld.length) {
                 continue;
             }
-            TrackResult result = parseTrack(mld, start, len, noteLength, tracks, events, dump);
+            TrackResult result = parseTrack(mld, start, len, noteLength, tracks,
+                    drumChannels, events, dump);
             notes += result.notes;
             if (result.maxTimeMs > maxTime) {
                 maxTime = result.maxTimeMs;
@@ -77,24 +83,26 @@ final class MldEventStream {
             }
         }
         byte[] stream = out.toByteArray();
-        System.out.println("DoJa MLD event stream tracks=" + tracks
-                + " notes=" + notes + " events=" + events.size
-                + " bytes=" + stream.length);
+        if (isDebugEnabled()) {
+            System.out.println("DoJa MLD event stream tracks=" + tracks
+                    + " notes=" + notes + " events=" + events.size
+                    + " bytes=" + stream.length);
+        }
         return stream;
     }
 
     private static TrackResult parseTrack(byte[] data, int start, int len, int noteLength,
-            int trackIndex, EventList events, boolean dump) {
+            int trackIndex, boolean[] drumChannels, EventList events, boolean dump) {
         int pos = start;
         int end = start + len;
         int timeMs = 0;
         int maxTimeMs = 0;
         int notes = 0;
-        TrackState state = new TrackState();
+        TrackState state = new TrackState(drumChannels);
         while (pos + 2 <= end) {
             int delta = data[pos++] & 255;
             int status = data[pos++] & 255;
-            timeMs += ticksToMs(delta, state.timeBase, state.tempo);
+            timeMs += ticksToMs(delta, state.tempo);
             if (status == 0x3f || status == 0x7f || status == 0xbf || status == 0xff) {
                 if (pos >= end) {
                     break;
@@ -129,18 +137,20 @@ final class MldEventStream {
             } else if (shift == 3) {
                 note -= 12;
             }
-            int midi = note + 45;
+            int voice = (status >> 6) & 3;
+            int pseudoChannel = (trackIndex * 4 + voice) & 15;
+            int midi = note + (state.drumChannels[pseudoChannel] ? 35 : 45);
             if (midi < 0) {
                 midi = 0;
             } else if (midi > 127) {
                 midi = 127;
             }
-            int channel = (trackIndex * 4 + ((status >> 6) & 3)) & 15;
+            int channel = eventChannel(state, trackIndex, voice);
             int vel = velocity * 2;
             if (vel > 127) {
                 vel = 127;
             }
-            int offMs = timeMs + ticksToMs(gate, state.timeBase, state.tempo);
+            int offMs = timeMs + ticksToMs(gate, state.tempo);
             if (offMs <= timeMs) {
                 offMs = timeMs + 1;
             }
@@ -197,25 +207,34 @@ final class MldEventStream {
         if (data1 == 0xb0) {
             state.masterVolume = data2 > 127 ? 127 : data2;
             for (int i = 0; i < 4; i++) {
-                int channel = (trackIndex * 4 + i) & 15;
+                int channel = eventChannel(state, trackIndex, i);
                 events.add(timeMs, EVENT_VOLUME, channel,
                         state.volume[i] * state.masterVolume / 63, 0);
+            }
+            return;
+        }
+        if (data1 == 0xba) {
+            int pseudoChannel = (data2 & 0x78) >> 3;
+            if (pseudoChannel >= 0 && pseudoChannel < state.drumChannels.length) {
+                state.drumChannels[pseudoChannel] = (data2 & 0x07) == 1;
+                if (state.drumChannels[pseudoChannel]) {
+                    events.add(timeMs, EVENT_PROGRAM, 9, 0, 0);
+                }
             }
             return;
         }
 
         int voice = (data2 & 0xc0) >> 6;
         int value = data2 & 0x3f;
-        int channel = (trackIndex * 4 + voice) & 15;
+        int channel = eventChannel(state, trackIndex, voice);
         switch (data1) {
         case 0xe0:
             state.program[voice] = (state.program[voice] & 0x40) | value;
-            events.add(timeMs, EVENT_PROGRAM, channel, state.program[voice] & 0x7f, 0);
+            events.add(timeMs, EVENT_PROGRAM, channel, state.program[voice], state.bank[voice]);
             break;
         case 0xe1:
             state.bank[voice] = value;
             state.program[voice] = ((value & 1) << 6) | (state.program[voice] & 0x3f);
-            events.add(timeMs, EVENT_PROGRAM, channel, state.program[voice] & 0x7f, 0);
             break;
         case 0xe2:
             state.volume[voice] = value;
@@ -224,6 +243,23 @@ final class MldEventStream {
         case 0xe3:
             state.pan[voice] = value;
             events.add(timeMs, EVENT_PAN, channel, value * 2, 0);
+            break;
+        case 0xe4:
+            state.pitch[voice] = value;
+            events.add(timeMs, EVENT_PITCH, channel, value, 0);
+            break;
+        case 0xe6:
+            state.expression[voice] = (value & 0x20) != 0 ? value - 64 : value;
+            events.add(timeMs, EVENT_EXPRESSION, channel,
+                    clamp(64 + state.expression[voice] * 2), 0);
+            break;
+        case 0xe7:
+            state.pitchRange[voice] = value;
+            events.add(timeMs, EVENT_PITCH_RANGE, channel, value, 0);
+            break;
+        case 0xea:
+            state.modulation[voice] = value;
+            events.add(timeMs, EVENT_MODULATION, channel, value, 0);
             break;
         default:
             break;
@@ -246,23 +282,48 @@ final class MldEventStream {
             name = "loop_start";
         } else if (e.type == EVENT_LOOP_END) {
             name = "loop_end count=" + e.a;
+        } else if (e.type == EVENT_PITCH) {
+            name = "pitch=" + e.a;
+        } else if (e.type == EVENT_MODULATION) {
+            name = "modulation=" + e.a;
+        } else if (e.type == EVENT_PITCH_RANGE) {
+            name = "pitch_range=" + e.a;
+        } else if (e.type == EVENT_EXPRESSION) {
+            name = "expression=" + e.a;
         } else {
             name = "end";
         }
         System.out.println("DoJa MLD event time=" + e.timeMs + " ch=" + e.channel + " " + name);
     }
 
-    private static int ticksToMs(int ticks, int timeBase, int tempo) {
-        if (ticks <= 0) {
+    private static int eventChannel(TrackState state, int trackIndex, int voice) {
+        int pseudo = (trackIndex * 4 + (voice & 3)) & 15;
+        if (state.drumChannels[pseudo]) {
+            return 9;
+        }
+        return pseudo == 9 ? 15 : pseudo;
+    }
+
+    private static int clamp(int value) {
+        if (value < 0) {
             return 0;
         }
-        if (timeBase <= 0) {
-            timeBase = 48;
+        return value > 127 ? 127 : value;
+    }
+
+    private static boolean isDebugEnabled() {
+        return "true".equals(System.getProperty("doja.audio.debug"))
+                || System.getProperty("doja.audio.dump") != null;
+    }
+
+    private static int ticksToMs(int ticks, int tempo) {
+        if (ticks <= 0) {
+            return 0;
         }
         if (tempo < 20) {
             tempo = 20;
         }
-        int ms = (int) (ticks * 60000L / ((long) timeBase * (long) tempo));
+        int ms = (int) (ticks * 60000L / (48L * (long) tempo));
         return ms < 1 ? 1 : ms;
     }
 
@@ -316,6 +377,15 @@ final class MldEventStream {
         int[] bank = new int[4];
         int[] volume = { 63, 63, 63, 63 };
         int[] pan = { 32, 32, 32, 32 };
+        int[] pitch = { 32, 32, 32, 32 };
+        int[] pitchRange = { 2, 2, 2, 2 };
+        int[] modulation = { 0, 0, 0, 0 };
+        int[] expression = { 64, 64, 64, 64 };
+        boolean[] drumChannels;
+
+        TrackState(boolean[] drums) {
+            drumChannels = drums;
+        }
     }
 
     private static final class TrackResult {
@@ -371,7 +441,31 @@ final class MldEventStream {
             if (a.timeMs != b.timeMs) {
                 return a.timeMs - b.timeMs;
             }
-            return a.type - b.type;
+            return priority(a.type) - priority(b.type);
+        }
+
+        private int priority(int type) {
+            switch (type) {
+            case EVENT_PROGRAM:
+            case EVENT_VOLUME:
+            case EVENT_PAN:
+            case EVENT_PITCH:
+            case EVENT_MODULATION:
+            case EVENT_PITCH_RANGE:
+            case EVENT_EXPRESSION:
+                return 1;
+            case EVENT_NOTE_OFF:
+                return 2;
+            case EVENT_NOTE_ON:
+                return 3;
+            case EVENT_LOOP_START:
+            case EVENT_LOOP_END:
+                return 4;
+            case EVENT_END:
+                return 5;
+            default:
+                return 6;
+            }
         }
     }
 }

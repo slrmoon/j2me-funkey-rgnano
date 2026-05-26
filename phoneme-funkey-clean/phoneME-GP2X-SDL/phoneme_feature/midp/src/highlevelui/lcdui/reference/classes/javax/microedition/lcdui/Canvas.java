@@ -632,7 +632,7 @@ public abstract class Canvas extends Displayable {
         int n = KeyConverter.getGameAction(keyCode);
 
         if (n == -1) {
-            throw new IllegalArgumentException();
+            return 0;
         }
 
         return n;

@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="Shift_JIS"?>
+<html lang="ja">
+
+<head>
+<link rev="MADE" href="mailto:vavivavi@yahoo.co.jp" />
+<link rel="INDEX" href="orverview.html" />
+<meta http-equiv="Content-Type" content="text/html; charset=shift_jis" />
+<meta http-equiv="Content-Style-Type" content="text/css" />
+<title>Mobile Audio API</title>
+<!--
+ * Copyright (c) 2002 by Naohide Sano, All rights reserved.
+ *
+ * Written by Naohide Sano
+ *
+ * @author	<a href="mailto:vavivavi@yahoo.co.jp">Naohide Sano</a> (nsano)
+ *
+ * @version	0.00	020626	nsano	initial version
+-->
+</head>
+
+<body>
+
+���̃h�L�������g�͒��������C�u������ API �d�l�ł��B
+
+<h2>����</h2>
+<ul>
+<li>{@link javax.sound.midi.spi} �Ƃ��Ď�������Ă��邽�ߓ��Ƀv���O������
+�ӎ����邱�ƂȂ� MFi �t�@�C���� midi �t�@�C���Ƃ��Ď�舵���\�ł��B</li>
+<li>MFi �o�[�W���� 5 �܂ł̌`�����T�|�[�g���Ă��܂��B</li>
+<li>MFi ���� SMF �̑��ݕϊ����\�ł��B</li>
+<li>�@��ˑ��f�[�^�̃n���h����ǉ����鎖�Ŋe�@��ɑΉ����� MFi ���쐬�\�ł��B</li>
+<li>SMAF �`�����T�|�[�g���Ă��܂��B</li>
+<li>SMAF ���� SMF �̑��ݕϊ����\�ł��B</li>
+<li style="color:red">android �� javax.sound SPI ���̗p���Ă���炵���̂őg�ݍ��݉\��������܂���</li>
+</ul>
+
+<h2>�T�v</h2>
+
+<p>�l�̑傫�ȃp�[�g����\������܂��B</p>
+<ol>
+    <li>ADPCM �R�[�f�b�N</li>
+    <li>MFi ���C�u����</li>
+    <li>SMAF ���C�u����</li>
+    <li>{@link javax.sound.midi.spi} ����</li>
+</ol>
+
+<h3>1. ADPCM �R�[�f�b�N</h3>
+
+<h4>�p�b�P�[�W</h4>
+<ul>
+    <li>{@link vavi.sound.adpcm.ccitt}</li>
+    <li>{@link vavi.sound.adpcm.ym2608}</li>
+    <li>{@link vavi.sound.adpcm.vox}</li>
+</ul>
+
+<p>
+�����Ɏg�p����� ADPCM �R�[�f�b�N����舵���p�b�P�[�W�Q�ł��B
+Java �̕W�� IO ({@link java.io.InputStream}/{@link java.io.OutputStream}) �Ƃ��Ď�������Ă��邽��
+��舵�����e�ՂŃX�g���[�~���O���y�ɍs���܂��B
+</p>
+<p>
+���� Yamaha ���̉����p�Ƀp�b�P�[�W {@link vavi.sound.adpcm.ym2608}�ARohm ���̉����p��
+�p�b�P�[�W {@link vavi.sound.adpcm.vox} ���g�p���Ă��܂����A���@�Ƃ̃R�[�f�b�N������
+�������萳�����Đ��ł��܂���B�����𐳊m�ȃR�[�f�b�N�ōs�������ꍇ�͐��K�� Yamaha ADPCM, Rohm ADPCM
+�ɒu��������K�v���L��܂��B�d�l�͊J������Ă��܂���̂ŁA����]�̍ۂɂ�
+<a href="mailto:info@klab.jp">KLab �������</a> �ɂ��₢���킹�肢�܂��B
+</p>
+
+<h3>2. MFi ���C�u����</h3>
+
+<h4>�p�b�P�[�W</h4>
+<ul>
+    <li>{@link vavi.sound.mfi}</li>
+    <li>{@link vavi.sound.mfi.vavi}</li>
+    <li>:</li>
+</ul>
+
+<p>
+���������C�u�����̊j�ƂȂ镔���ł��BMFi �̃t�@�C���\������舵���AMIDI �\���ɕϊ����鎖���o���܂��B
+�܂� MIDI ���� MFi �ւ̕ϊ����\�ł��B��{�I�� {@link javax.sound.midi} �p�b�P�[�W�Ɠ����\�����Ƃ��Ă��܂��B
+�@��ˑ��f�[�^�������p�b�P�[�W�Ƃ��� {@link vavi.sound.mfi.vavi.mitsubishi D��} ��
+{@link vavi.sound.mfi.vavi.nec N��} ���T���v����������Ă��܂��B
+</p>
+<p>
+�@��ˑ��p�b�P�[�W�����삵���ꍇ�A<code>src/main/java/vavi/sound/mfi/vavi/vavi.properties</code> �t�@�C����
+�ȉ��̂悤�ɋL�q���Ēǉ����Ă��������B
+</p>
+<p>
+��FF�Зp�̃V�[�P���T�� <code style="color:red">vavi.sound.mfi.vavi.fujitsu.FujitsuSequencer</code> �Ƃ��Ď��������ꍇ
+</p>
+<pre>
+	##
+	# �x���_�[�ԍ��ɑΉ�����V�[�P���T�[
+	#
+	# @name "sequencer.vendor" + �x���_�[�ԍ� + �L�����A�ԍ�
+	# @see vavi.sound.mfi.vavi.MetaEventAdapter
+	#
+	# nec 16 | docomo 1
+	sequencer.vendor.17=vavi.sound.mfi.vavi.nec.NecSequencer
+	# fujitsu 32 | docomo 1
+	<span style="color:red">sequencer.vendor.33=vavi.sound.mfi.vavi.fujitsu.FujitsuSequencer</span>
+	# mitsubishi 96 | docomo 1
+	sequencer.vendor.97=vavi.sound.mfi.vavi.mitsubishi.MitsubishiSequencer
+</pre>
+
+<h3>2. SMAF ���C�u����</h3>
+
+<h4>�p�b�P�[�W</h4>
+<ul>
+    <li>{@link vavi.sound.smaf}</li>
+    <li>{@link vavi.sound.smaf.vavi}</li>
+    <li>:</li>
+</ul>
+
+<p>
+���������C�u�����̊j�ƂȂ镔���ł��BSMAF �̃t�@�C���\������舵���AMIDI �\���ɕϊ����鎖���o���܂��B
+�܂� MIDI ���� SMAF �ւ̕ϊ����\�ł��B��{�I�� {@link javax.sound.midi} �p�b�P�[�W�Ɠ����\�����Ƃ��Ă��܂��B
+</p>
+
+<h3>3. {@link javax.sound.midi.spi} ����</h3>
+
+<h4>�p�b�P�[�W</h4>
+<ul>
+    <li>{@link vavi.sound.midi}</li>
+    <li>{@link vavi.sound.midi.mfi}</li>
+</ul>
+
+<p>
+{@link javax.sound.midi.spi} �̈�����Ƃ��ċ@�\�����邽�߂̃p�b�P�[�W�ł��B
+<a href="http://java.sun.com/j2se/1.5.0/ja/docs/ja/guide/sound/programmer_guide/chapter1.html#111901">SPI</a>
+�d�l�ɏ]���o�^����� midi �̈�t�@�C���`���Ƃ��� MFi �t�@�C����
+�Đ����鎖���\�ɂȂ�܂��B
+</p>
+
+<h2>�g�p���@</h2>
+
+<h3>1. MFi ���� MIDI �쐬</h3>
+<pre>
+        // �ȒP�I
+        File inFile = new File("sample.mld");
+        vavi.sound.mfi.Sequence mfiSequence = MfiSystem.getSequence(inFile);
+        Sequence midiSequence = MfiSystem.toMidiSequence(mfiSequence);
+
+        File outFile = new File("sample.mid");
+        MidiSystem.write(midiSequence, 0, outFile);
+</pre>
+
+<h3>2. MIDI ���� MFi �쐬</h3>
+<pre>
+        // �ȒP�I
+        File inFile = new File("sample.mid");
+        javax.sound.midi.Sequence midiSequence = MidiSystem.getSequence(inFile);
+        MidiFileFormat midiFileFormat = MidiSystem.getMidiFileFormat(inFile);
+        int type = midiFileFormat.getType();
+        vavi.sound.mfi.Sequence mfiSequence = MfiSystem.toMfiSequence(midiSequence, type);
+
+        File outFile = new File("sample.mld");
+        MfiSystem.write(mfiSequence, VaviMfiFileFormat.FILE_TYPE, outFile);
+</pre>
+
+<h3>3. �����쐬</h3>
+<pre>
+        // ������Ƃ͕~�������Ȃ������ȁH
+        int time = ...;
+        int channels = 1;
+        byte[] waveStream = ...;
+
+        List&lt;MfiEvent&gt; events = new ArrayList&lt;MfiEvent&gt;();
+        
+        // master volume
+        events.add(MitsubishiMessage.getMasterVolumeEvent(100));
+
+        // tempo
+        events.add(MitsubishiMessage.getTempoEvent());
+
+        // 0x8f adpcm setting
+        events.add(MitsubishiMessage.getSettingEvent(8000, 4, channels));
+
+        // 0x81 adpcm vol
+        events.addAll(MitsubishiMessage.getVolumeEvents(channels, 100));
+        
+        // 0x82 adpcm pan
+        events.addAll(MitsubishiMessage.getPanEvents(channels));
+
+        // 0x83 adpcm
+        events.addAll(MitsubishiMessage.getAdpcmEvents(waveStream, time, 8000, 4, channels));
+
+        //
+        Sequence sequence = new Sequence();
+        Track track = sequence.createTrack();
+        MfiMessage message;
+
+        // copyright
+        message = new SorcMessage(1);
+        track.add(new MfiEvent(message, 0l));
+
+        // title
+        String title = "sample";
+        title = title.substring(0, title.lastIndexOf('.'));
+        message = new TitlMessage(title);
+        track.add(new MfiEvent(message, 0l));
+
+        // version
+        message = new VersMessage("400");
+        track.add(new MfiEvent(message, 0l));
+
+        // maker
+        message = new ProtMessage("vavi");
+        track.add(new MfiEvent(message, 0l));
+
+        // machine depend, do every thing!
+        for (MfiEvent event : events.toArray(new MfiEvent[events.size()])) {
+            track.add(event);
+        }
+
+        // eot
+        message = new EndOfTrackMessage(0, 0);
+        track.add(new MfiEvent(message, 0l));
+
+        MfiSystem.write(sequence, VaviMfiFileFormat.FILE_TYPE, new File("sample.mld"));
+</pre>
+
+</body>
+
+</html>

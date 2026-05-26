@@ -2175,6 +2175,8 @@ public class Display {
      *          application code.
      */
     static void handleThrowable(Throwable t) {
+        System.out.println("[MIDP Display] exception caught in application callback:");
+        t.printStackTrace();
         if (Logging.TRACE_ENABLED) {
             Logging.trace(t, "Exception caught in Display class");
         }

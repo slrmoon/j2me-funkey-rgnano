@@ -1,0 +1,67 @@
+<html lang="ja">
+
+<head>
+<link rev="MADE" href="mailto:vavivavi@yahoo.co.jp"/>
+<link rel="INDEX" href="orverview.html"/>
+<meta http-equiv="Content-Type" content="text/html; charset=shift_jis"/>
+<meta http-equiv="Content-Style-Type" content="text/css"/>
+<link rel="stylesheet" type="text/css" href="../../../../../vavi.css"/>
+<title>vavi.sound.mfi.vavi.system</title>
+<!--
+ * Copyright (c) 2003 by Naohide Sano, All rights reserved.
+ *
+ * Written by Naohide Sano
+ *
+ * @author	<a href="mailto:vavivavi@yahoo.co.jp">Naohide Sano</a> (nsano)
+ *
+ * @version	0.00	030917	nsano	initial version
+-->
+</head>
+
+<body>
+
+<p>
+SysexMessage �̔h���N���X��񋟂��܂��D
+</p>
+
+<h2>���^�C��</h2>
+
+  <li> �e���| ... 1 ���Ԃ� 4 �������̐�
+  <li> �^�C���x�[�X ... 4 �������̕���\ = PPQ (Parts ...), TpQN (Tick par Quarter Note)
+<pre>
+        1�� = 60[s] / �e���| / �^�C���x�[�X;
+</pre>
+
+<h2>���ꂩ��������邱��</h2>
+
+<ul>
+<li>�� > 255 �� Note �̎�舵��</li>
+<p>
+ ���Ƃ��Ή��� 380 (voice = 1)
+</p>
+ 
+<table border="1">
+ <tr>
+ 	<th>delta</th><th>voice</th><th>gateTime</th><th>����</th>
+ </tr>
+ <tr>
+ 	<td>-</td><td>1</td><td>2 + 10 + 1 = 13</td><td></td>
+ </tr>
+ <tr>
+ 	<td>2</td><td>2</td><td>-</td><td></td>
+ </tr>
+ <tr>
+ 	<td>10</td><td>3</td><td>-</td><td></td>
+ </tr>
+ <tr>
+ 	<td>0</td><td>1</td><td>max(380 - 13, 255) = 255</td><td>voice �� 1 ���E���h�������ƂɁH</td>
+ </tr>
+</table>
+
+ PsmPlayer �͔�΂��������ŏ��̃���������Ă���
+<li>MFi 5.0 �g���p���</li>
+</ul>
+
+</body>
+
+</html>

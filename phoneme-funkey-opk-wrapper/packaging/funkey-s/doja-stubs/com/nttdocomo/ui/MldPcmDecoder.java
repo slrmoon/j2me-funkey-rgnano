@@ -155,13 +155,15 @@ final class MldPcmDecoder {
             } else if (shift == 3) {
                 note -= 12;
             }
-            int midi = note + 45;
+            int voice = (status >> 6) & 3;
+            int pseudoChannel = (trackIndex * 4 + voice) & 15;
+            int midi = note + (state.drumChannels[pseudoChannel] ? 35 : 45);
             if (midi < 0) {
                 midi = 0;
             } else if (midi > 127) {
                 midi = 127;
             }
-            int channel = midiChannel(state, trackIndex, status >> 6);
+            int channel = midiChannel(state, trackIndex, voice);
             int vel = velocity * 2;
             if (vel > 127) {
                 vel = 127;
@@ -314,10 +316,7 @@ final class MldPcmDecoder {
     }
 
     private static int scaleTicks(int ticks, int timeBase) {
-        if (timeBase <= 0) {
-            timeBase = 48;
-        }
-        int scaled = ticks * 96 / timeBase;
+        int scaled = ticks * 2;
         return ticks > 0 && scaled <= 0 ? 1 : scaled;
     }
 
@@ -339,7 +338,7 @@ final class MldPcmDecoder {
             if (len <= 0 || start + len > mld.length) {
                 continue;
             }
-            RenderResult result = renderTrack(mld, start, len, noteLength, pcm, maxSample);
+            RenderResult result = renderTrack(mld, start, len, noteLength, tracks, pcm, maxSample);
             pcm = result.pcm;
             tracks++;
             notes += result.notes;
@@ -366,7 +365,7 @@ final class MldPcmDecoder {
         return makeWav(bytes, SYNTH_RATE, 1);
     }
 
-    private static RenderResult renderTrack(byte[] data, int start, int len, int noteLength,
+    private static RenderResult renderTrack(byte[] data, int start, int len, int noteLength, int trackIndex,
             short[] pcm, int initialMaxSample) {
         int pos = start;
         int end = start + len;
@@ -377,7 +376,7 @@ final class MldPcmDecoder {
         while (pos + 2 <= end) {
             int delta = data[pos++] & 255;
             int status = data[pos++] & 255;
-            sampleCursor += ticksToSamples(delta, state.timeBase, state.tempo);
+            sampleCursor += ticksToSamples(delta, state.tempo);
             if (status == 0x3f || status == 0x7f || status == 0xbf || status == 0xff) {
                 if (pos >= end) {
                     break;
@@ -409,10 +408,11 @@ final class MldPcmDecoder {
             } else if (shift == 3) {
                 note -= 12;
             }
-            int midi = note + 45;
             int voice = status >> 6;
+            int pseudoChannel = (trackIndex * 4 + voice) & 15;
+            int midi = note + (state.drumChannels[pseudoChannel] ? 35 : 45);
             int startSample = sampleCursor;
-            int sampleLen = ticksToSamples(gate, state.timeBase, state.tempo);
+            int sampleLen = ticksToSamples(gate, state.tempo);
             int maxCapacity = maxSynthSamples();
             if (startSample >= maxCapacity) {
                 break;
@@ -582,20 +582,17 @@ final class MldPcmDecoder {
     }
 
     private static int ticksToSamples(int ticks) {
-        return ticksToSamples(ticks, 48, 125);
+        return ticksToSamples(ticks, 125);
     }
 
-    private static int ticksToSamples(int ticks, int timeBase, int tempo) {
+    private static int ticksToSamples(int ticks, int tempo) {
         if (ticks <= 0) {
             return 0;
-        }
-        if (timeBase <= 0) {
-            timeBase = 48;
         }
         if (tempo < 20) {
             tempo = 20;
         }
-        double seconds = ticks * 60.0 / ((double) timeBase * (double) tempo);
+        double seconds = ticks * 60.0 / (48.0 * (double) tempo);
         int samples = (int) (seconds * SYNTH_RATE + 0.5);
         return samples < 1 ? 1 : samples;
     }

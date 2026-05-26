@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="Shift_JIS"?>
+<html lang="ja">
+
+<head>
+<link rev="MADE" href="mailto:vavivavi@yahoo.co.jp" />
+<link rel="INDEX" href="orverview.html" />
+<meta http-equiv="Content-Type" content="text/html; charset=shift_jis" />
+<meta http-equiv="Content-Style-Type" content="text/css" />
+<link rel="stylesheet" type="text/css" href="../../vavi.css" />
+<title>vavi.util</title>
+<!--
+ * Copyright (c) 2001 by Naohide Sano, All rights reserved.
+ *
+ * Written by Naohide Sano
+ *
+ * @author	<a href="mailto:vavivavi@yahoo.co.jp">Naohide Sano</a> (nsano)
+ *
+ * @version	0.00	010823	nsano	initial version
+-->
+</head>
+
+<body>
+
+<p>
+���܂��܂ȃ��[�e�B���e�B��񋟂��܂��D
+{@link vavi.util.Debug} �N���X�͑�ϕ֗��ł��D
+</p>
+
+<h2>
+�f�o�b�O��@
+</h2>
+
+<ul>
+    <li><h3>�f�o�b�O����\������</h3>
+
+<pre>
+Debug.println(...);
+</pre>
+
+    </li>
+
+    <li><h3>�����̃N���X���I�[�o���C�h����</h3>
+
+<pre>
+JTree tree= new JTree() {
+
+    public void addTreeSelectionListener(TreeSelectionListener l) {
+        super.addTreeSelectionListener(l);
+Debug.println(Debug.DEBUG, ...);
+    }
+}
+</pre>
+
+    </li>
+
+    <li><h3>���݃f�o�b�O���Ă���Ƃ��낾����\������</h3>
+
+<pre>
+Debug.println(Lebel.SPECIAL, ...);
+
+% java -Ddebug.lebel=0 foo ...
+</pre>
+    </li>
+
+    <li><h3>�Ăяo�����\�b�h��\������</h3>
+
+<pre>
+Debug.println(... Debug.getCallerMethod() ...);
+
+Debug.println(... Debug.getCallerMethod(3) ...);
+
+Debug.println(... Debug.getTopCallerMethod("vavi") ...);
+</pre>
+
+    </li>
+
+    <li><h3>�f�o�b�O�R�[�h����菜��</h3>
+    </li>
+</ul>
+
+
+<h2>���ꂩ��������邱��</h2>
+
+<ul>
+  <li><del>StringUtil.paramString �� aaa$bbb$Ccc=class aaa.bbb.Ccc �Ƃ�����A�ȂɁH</del> ... inner class</li>
+</ul>
+
+</body>
+
+</html>

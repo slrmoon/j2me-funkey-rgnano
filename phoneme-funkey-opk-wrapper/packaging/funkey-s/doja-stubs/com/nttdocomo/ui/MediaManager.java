@@ -70,7 +70,7 @@ public final class MediaManager {
     }
 
     private static final class SimpleMediaSound implements MediaSound, DoJaPlayableSound {
-        private static final SimpleMediaSound[] activeSounds = new SimpleMediaSound[8];
+        private static final SimpleMediaSound[] activeSounds = new SimpleMediaSound[64];
 
         private String name;
         private byte[] data;
@@ -183,8 +183,17 @@ public final class MediaManager {
                     dojaPlayer.realize();
                     dojaPlayer.prefetch();
                 }
+                if (dojaPlayer.isMusicLike()) {
+                    stopOtherMusicSounds(this);
+                }
                 dojaPlayer.setVolume(volume > 100 ? 100 : volume);
                 dojaPlayer.start();
+                if (isDoJaDebugEnabled()) {
+                    System.out.println("DoJa streaming sound play name=" + name
+                            + " bytes=" + (data == null ? 0 : data.length)
+                            + " volume=" + (volume > 100 ? 100 : volume)
+                            + " activeBefore=" + activeSoundCount());
+                }
                 registerActiveSound(this);
                 return true;
             } catch (Throwable t) {
@@ -196,6 +205,11 @@ public final class MediaManager {
 
         private static boolean isDoJaStreamingEnabled() {
             return "true".equals(System.getProperty("doja.audio.streaming"));
+        }
+
+        private static boolean isDoJaDebugEnabled() {
+            return "true".equals(System.getProperty("doja.audio.debug"))
+                    || System.getProperty("doja.audio.dump") != null;
         }
 
         private boolean playMidi(byte[] midi, int volume) {
@@ -273,6 +287,31 @@ public final class MediaManager {
                 for (int i = 0; i < activeSounds.length; i++) {
                     SimpleMediaSound active = activeSounds[i];
                     if (active != null && active != sound && sameSound(active.name, sound.name)) {
+                        if (isDoJaDebugEnabled()) {
+                            System.out.println("DoJa active stop same slot=" + i
+                                    + " name=" + active.name);
+                        }
+                        active.playing = false;
+                        active.closeDoJaPlayer();
+                        active.closePlayer();
+                        activeSounds[i] = null;
+                    }
+                }
+            }
+        }
+
+        private static void stopOtherMusicSounds(SimpleMediaSound sound) {
+            synchronized (activeSounds) {
+                for (int i = 0; i < activeSounds.length; i++) {
+                    SimpleMediaSound active = activeSounds[i];
+                    if (active != null && active != sound
+                            && active.dojaPlayer != null
+                            && active.dojaPlayer.isMusicLike()) {
+                        if (isDoJaDebugEnabled()) {
+                            System.out.println("DoJa active stop music slot=" + i
+                                    + " old=" + active.name
+                                    + " new=" + sound.name);
+                        }
                         active.playing = false;
                         active.closeDoJaPlayer();
                         active.closePlayer();
@@ -288,11 +327,20 @@ public final class MediaManager {
                 for (int i = 0; i < activeSounds.length; i++) {
                     if (activeSounds[i] == null) {
                         activeSounds[i] = sound;
+                        if (isDoJaDebugEnabled()) {
+                            System.out.println("DoJa active register slot=" + i
+                                    + " count=" + activeSoundCountLocked()
+                                    + " name=" + sound.name);
+                        }
                         return;
                     }
                 }
                 SimpleMediaSound old = activeSounds[0];
                 if (old != null && old != sound) {
+                    if (isDoJaDebugEnabled()) {
+                        System.out.println("DoJa active evict slot=0 old=" + old.name
+                                + " new=" + sound.name);
+                    }
                     old.playing = false;
                     old.closeDoJaPlayer();
                     old.closePlayer();
@@ -313,6 +361,22 @@ public final class MediaManager {
                     activeSounds[i] = null;
                 }
             }
+        }
+
+        private static int activeSoundCount() {
+            synchronized (activeSounds) {
+                return activeSoundCountLocked();
+            }
+        }
+
+        private static int activeSoundCountLocked() {
+            int count = 0;
+            for (int i = 0; i < activeSounds.length; i++) {
+                if (activeSounds[i] != null) {
+                    count++;
+                }
+            }
+            return count;
         }
 
         private static boolean sameSound(String a, String b) {

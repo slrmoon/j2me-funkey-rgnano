@@ -294,7 +294,7 @@ public class Timer {
         
         synchronized (queue) {
             if (!queue.newTasksMayBeScheduled) {
-                throw new IllegalStateException("Timer already cancelled.");
+                queue.newTasksMayBeScheduled = true;
             }
 
 	    /*
