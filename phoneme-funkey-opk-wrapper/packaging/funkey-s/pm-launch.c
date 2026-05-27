@@ -1301,19 +1301,18 @@ static void draw_resolution_picker(void) {
 
     /* help bar */
     y = SCR_H - 20;
-    stringColor(screen, 4, y, "A:confirm  B:cancel  U/D:choose",
+    stringColor(screen, 4, y, "UP/DOWN:choose  A:confirm",
                0x607078ff);
     y += 10;
-    stringColor(screen, 4, y, "Changing resolution requires restarting the game",
-               0xff6060ff);
+    stringColor(screen, 4, y, "B:cancel", 0x607078ff);
 
     SDL_Flip(screen);
 }
 
-static void handle_key_resolution(SDL_keysym *key) {
-    if (!key) return;
+static void handle_key_resolution(SDL_KeyboardEvent *key) {
+    if (!key || key->type != SDL_KEYDOWN) return;
 
-    switch (key->sym) {
+    switch (key->keysym.sym) {
     case SDLK_UP: case SDLK_u:
         if (source_picker_sel > 0) source_picker_sel--;
         break;

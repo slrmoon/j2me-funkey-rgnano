@@ -236,6 +236,7 @@ static int OverlayShutdownRequested;
 static int OverlayModeSel;
 static int OverlayScaleSel;
 static int OverlaySourceSel;
+static int OverlayResolutionChanged;
 static int OverlayProfileSel;
 static int OverlayVolume = 100;
 static const char *OverlayConfigPath;
@@ -566,6 +567,7 @@ static void overlay_init(void) {
 
     OverlayConfigPath = getenv("PHONEME_CONFIG_PATH");
     overlay_apply_display();
+    OverlayResolutionChanged = 0;
     OverlayProfileSel = PhoneMEInputGetProfileIndex();
     volumeText = getenv("PHONEME_SOUND_VOLUME");
     if (volumeText != NULL && volumeText[0] != '\0') {
@@ -952,6 +954,10 @@ static void overlay_draw_display(void) {
     overlay_draw_row(54, "Screen", OverlayModes[OverlayModeSel].label, OverlayRow == 0);
     overlay_draw_row(70, "Zoom", overlay_current_scale()->label, OverlayRow == 1);
     overlay_draw_row(86, "Size", OverlaySources[OverlaySourceSel].label, OverlayRow == 2);
+    if (OverlayResolutionChanged) {
+        stringColor(Native_SDL_Screen, 18, 110, "Restart game for new", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 122, "resolution to apply", 0xffd060ff);
+    }
 }
 
 static void overlay_draw_sound(void) {
@@ -1028,7 +1034,10 @@ static void overlay_adjust_selected(int direction) {
     if (OverlayPage == OVERLAY_PAGE_DISPLAY) {
         if (OverlayRow == 0) overlay_set_mode_index(OverlayModeSel + direction);
         else if (OverlayRow == 1) overlay_set_scale_index(OverlayScaleSel + direction);
-        else if (OverlayRow == 2) overlay_set_source_index(OverlaySourceSel + direction);
+        else if (OverlayRow == 2) {
+            overlay_set_source_index(OverlaySourceSel + direction);
+            OverlayResolutionChanged = 1;
+        }
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
         overlay_set_volume(OverlayVolume + direction * 5);
