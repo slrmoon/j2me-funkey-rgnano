@@ -269,7 +269,11 @@ jboolean jsr120_check_signal(midpSignalType signalType, int fd) {
  * Initialize datagram support for the given protocol.
  */
 WMA_STATUS init_jsr120() {
-    return WMA_ERR;
+    /*
+     * The SDL target has no SMS transport.  Keep WMA available as a no-op
+     * subsystem so applications that do not use messaging can still start.
+     */
+    return WMA_NET_SUCCESS;
 }
 
 /**
