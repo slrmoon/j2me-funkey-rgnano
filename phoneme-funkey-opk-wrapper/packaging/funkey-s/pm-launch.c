@@ -82,7 +82,7 @@ static const int bind_defaults[] = {
 };
 
 #define BIND_COUNT  ((int)(sizeof(bind_defaults) / sizeof(bind_defaults[0])))
-#define BIND_ROW_OFFSET 4
+#define BIND_ROW_OFFSET 5
 
 typedef struct {
     const char *id;
@@ -186,6 +186,11 @@ typedef struct {
     const char *label;
 } DisplayModePreset;
 
+typedef struct {
+    const char *id;
+    const char *label;
+} FpsPreset;
+
 static const ScalePreset scale_presets[] = {
     { "zoom-075", "75%", "zoom", 750 },
     { "zoom-100", "100%", "zoom", 1000 },
@@ -278,6 +283,17 @@ static const DisplayModePreset display_modes[] = {
 
 #define DISPLAY_MODE_COUNT ((int)(sizeof(display_modes) / sizeof(display_modes[0])))
 
+static const FpsPreset fps_limits[] = {
+    { "off", "Off" },
+    { "20", "20 FPS" },
+    { "25", "25 FPS" },
+    { "30", "30 FPS" },
+    { "50", "50 FPS" },
+    { "60", "60 FPS" }
+};
+
+#define FPS_LIMIT_COUNT ((int)(sizeof(fps_limits) / sizeof(fps_limits[0])))
+
 /* ── game list ──────────────────────────────────────── */
 #define MAX_GAMES   512
 typedef struct {
@@ -302,6 +318,7 @@ static int    binds[BIND_COUNT];
 static int    scale_sel = 0;
 static int    source_sel = 0;
 static int    display_mode_sel = 5;
+static int    fps_limit_sel = 3;
 static int    sound_volume = 100;
 static int    key_profile_sel = 0;
 static int    bind_sel   = 0;        /* selected row in settings */
@@ -1013,6 +1030,15 @@ static int find_key_profile(const char *id) {
     return 0;
 }
 
+static int find_fps_limit(const char *id) {
+    int i;
+    if (!id) return 3;
+    for (i = 0; i < FPS_LIMIT_COUNT; i++) {
+        if (strcmp(id, fps_limits[i].id) == 0) return i;
+    }
+    return 3;
+}
+
 static void load_binds(const char *game_name, const char *jar_path) {
     char path[PATH_MAX];
     FILE *f;
@@ -1024,6 +1050,7 @@ static void load_binds(const char *game_name, const char *jar_path) {
     scale_sel = 1;
     source_sel = 0;
     display_mode_sel = 5;
+    fps_limit_sel = 3;
     sound_volume = 100;
     key_profile_sel = 0;
 
@@ -1056,6 +1083,10 @@ static void load_binds(const char *game_name, const char *jar_path) {
         }
         if (strcmp(key, "DISPLAY_MODE") == 0) {
             display_mode_sel = find_display_mode(value);
+            continue;
+        }
+        if (strcmp(key, "FPS_LIMIT") == 0) {
+            fps_limit_sel = find_fps_limit(value);
             continue;
         }
         if (strcmp(key, "VOLUME") == 0) {
@@ -1094,6 +1125,7 @@ static void save_binds(const char *game_name) {
     fprintf(f, "SCALE=%s\n", current_scale_preset()->id);
     fprintf(f, "VIEW=%s\n", source_presets[source_sel].id);
     fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
+    fprintf(f, "FPS_LIMIT=%s\n", fps_limits[fps_limit_sel].id);
     fprintf(f, "VOLUME=%d\n", sound_volume);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
 
@@ -1232,6 +1264,8 @@ static void draw_keybinds(void) {
         } else if (i == 2) {
             snprintf(buf, sizeof(buf), "SCREEN %s", display_modes[display_mode_sel].label);
         } else if (i == 3) {
+            snprintf(buf, sizeof(buf), "FPS    %s", fps_limits[fps_limit_sel].label);
+        } else if (i == 4) {
             snprintf(buf, sizeof(buf), "PROFILE %s", key_profiles[key_profile_sel].label);
         } else {
             int phone_index = i - BIND_ROW_OFFSET;
@@ -1556,6 +1590,7 @@ static void launch_game(int idx) {
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
     setenv("PHONEME_SCALE_MODE", display_modes[display_mode_sel].id, 1);
+    setenv("PHONEME_FPS_LIMIT", fps_limits[fps_limit_sel].id, 1);
     {
         char cfg_path[PATH_MAX];
         snprintf(cfg_path, sizeof(cfg_path), BIND_DIR "/%s.cfg", games[idx].config);
@@ -1627,6 +1662,8 @@ static void launch_game(int idx) {
             printf("pm-launch view preset=%s source=%s\n",
                    source_presets[source_sel].id,
                    getenv("PHONEME_SOURCE_SIZE") ? getenv("PHONEME_SOURCE_SIZE") : "");
+            printf("pm-launch fps limit=%s\n",
+                   getenv("PHONEME_FPS_LIMIT") ? getenv("PHONEME_FPS_LIMIT") : "");
             printf("pm-launch sound volume=%s config=%s\n",
                    getenv("PHONEME_SOUND_VOLUME") ? getenv("PHONEME_SOUND_VOLUME") : "",
                    getenv("PHONEME_CONFIG_PATH") ? getenv("PHONEME_CONFIG_PATH") : "");
@@ -1813,6 +1850,9 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             display_mode_sel--;
             if (display_mode_sel < 0) display_mode_sel = DISPLAY_MODE_COUNT - 1;
         } else if (bind_sel == 3) {
+            fps_limit_sel--;
+            if (fps_limit_sel < 0) fps_limit_sel = FPS_LIMIT_COUNT - 1;
+        } else if (bind_sel == 4) {
             key_profile_sel--;
             if (key_profile_sel < 0) key_profile_sel = KEY_PROFILE_COUNT - 1;
             apply_key_profile(key_profile_sel);
@@ -1834,6 +1874,9 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             display_mode_sel++;
             if (display_mode_sel >= DISPLAY_MODE_COUNT) display_mode_sel = 0;
         } else if (bind_sel == 3) {
+            fps_limit_sel++;
+            if (fps_limit_sel >= FPS_LIMIT_COUNT) fps_limit_sel = 0;
+        } else if (bind_sel == 4) {
             key_profile_sel++;
             if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
             apply_key_profile(key_profile_sel);
@@ -1856,6 +1899,9 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
             display_mode_sel++;
             if (display_mode_sel >= DISPLAY_MODE_COUNT) display_mode_sel = 0;
         } else if (bind_sel == 3) {
+            fps_limit_sel++;
+            if (fps_limit_sel >= FPS_LIMIT_COUNT) fps_limit_sel = 0;
+        } else if (bind_sel == 4) {
             key_profile_sel++;
             if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
             apply_key_profile(key_profile_sel);

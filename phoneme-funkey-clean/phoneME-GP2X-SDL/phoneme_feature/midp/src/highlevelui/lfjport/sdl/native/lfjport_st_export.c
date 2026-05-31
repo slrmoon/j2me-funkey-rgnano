@@ -113,6 +113,12 @@ typedef struct {
     int code;
 } OverlayPhoneKey;
 
+typedef struct {
+    const char *id;
+    const char *label;
+    int fps;
+} OverlayFpsPreset;
+
 static const OverlayModePreset OverlayModes[] = {
     { "auto", "Auto", PRESENT_SCALE_AUTO },
     { "fit", "Fit all", PRESENT_SCALE_FIT },
@@ -189,6 +195,14 @@ static const OverlaySourcePreset OverlaySources[] = {
     { "240x320", "Tall 240x320", 240, 320, 0 },
     { "320x240", "Wide 320x240", 320, 240, 0 }
 };
+static const OverlayFpsPreset OverlayFpsLimits[] = {
+    { "off", "Off", 0 },
+    { "20", "20 FPS", 20 },
+    { "25", "25 FPS", 25 },
+    { "30", "30 FPS", 30 },
+    { "50", "50 FPS", 50 },
+    { "60", "60 FPS", 60 }
+};
 static const OverlayPhoneKey OverlayPhoneKeys[] = {
     { "up", "PHONE UP", -1 }, { "down", "PHONE DOWN", -2 },
     { "left", "PHONE LEFT", -3 }, { "right", "PHONE RIGHT", -4 },
@@ -224,6 +238,7 @@ static const char *OverlayBindLabels[] = {
 #define OVERLAY_MODE_COUNT ((int)(sizeof(OverlayModes) / sizeof(OverlayModes[0])))
 #define OVERLAY_SCALE_COUNT ((int)(sizeof(OverlayScales) / sizeof(OverlayScales[0])))
 #define OVERLAY_SOURCE_COUNT ((int)(sizeof(OverlaySources) / sizeof(OverlaySources[0])))
+#define OVERLAY_FPS_LIMIT_COUNT ((int)(sizeof(OverlayFpsLimits) / sizeof(OverlayFpsLimits[0])))
 #define OVERLAY_PHONE_COUNT ((int)(sizeof(OverlayPhoneKeys) / sizeof(OverlayPhoneKeys[0])))
 #define OVERLAY_BIND_COUNT ((int)(sizeof(OverlayBindNames) / sizeof(OverlayBindNames[0])))
 #define OVERLAY_CONTROL_ROW_OFFSET 1
@@ -237,9 +252,12 @@ static int OverlayModeSel;
 static int OverlayScaleSel;
 static int OverlaySourceSel;
 static int OverlayResolutionChanged;
+static int OverlayFpsSel = 3;
 static int OverlayProfileSel;
 static int OverlayVolume = 100;
 static const char *OverlayConfigPath;
+static int FrameLimitFps = 30;
+static Uint32 FrameLimitLastTicks;
 
 enum {
     OVERLAY_PAGE_MAIN = 0,
@@ -273,6 +291,43 @@ static int parse_screen_size(const char *text, int *width, int *height) {
     *width = (int)parsedWidth;
     *height = (int)parsedHeight;
     return 1;
+}
+
+static int find_fps_limit_index(const char *id) {
+    int i;
+    if (id == NULL || id[0] == '\0') return 3;
+    for (i = 0; i < OVERLAY_FPS_LIMIT_COUNT; i++) {
+        if (strcmp(id, OverlayFpsLimits[i].id) == 0) return i;
+    }
+    return 3;
+}
+
+static void configure_frame_limit(void) {
+    const char *fpsText = getenv("PHONEME_FPS_LIMIT");
+    OverlayFpsSel = find_fps_limit_index(fpsText);
+    FrameLimitFps = OverlayFpsLimits[OverlayFpsSel].fps;
+    FrameLimitLastTicks = 0;
+}
+
+static void wait_frame_limit(void) {
+    Uint32 now;
+    Uint32 frameMs;
+    Uint32 elapsed;
+
+    if (FrameLimitFps <= 0) return;
+
+    frameMs = (Uint32)((1000 + (FrameLimitFps / 2)) / FrameLimitFps);
+    if (frameMs == 0) return;
+
+    now = SDL_GetTicks();
+    if (FrameLimitLastTicks != 0) {
+        elapsed = now - FrameLimitLastTicks;
+        if (elapsed < frameMs) {
+            SDL_Delay(frameMs - elapsed);
+            now = SDL_GetTicks();
+        }
+    }
+    FrameLimitLastTicks = now;
 }
 
 static void configure_logical_screen_size(void) {
@@ -539,6 +594,14 @@ static void overlay_set_volume(int volume) {
     MediaSDL_SetMasterVolume(OverlayVolume);
 }
 
+static void overlay_set_fps_index(int index) {
+    if (index < 0) index = OVERLAY_FPS_LIMIT_COUNT - 1;
+    if (index >= OVERLAY_FPS_LIMIT_COUNT) index = 0;
+    OverlayFpsSel = index;
+    FrameLimitFps = OverlayFpsLimits[index].fps;
+    FrameLimitLastTicks = 0;
+}
+
 static void overlay_save_config(void) {
     FILE *f;
     int i;
@@ -554,6 +617,7 @@ static void overlay_save_config(void) {
     fprintf(f, "SCALE=%s\n", overlay_current_scale()->id);
     fprintf(f, "VIEW=%s\n", OverlaySources[OverlaySourceSel].id);
     fprintf(f, "DISPLAY_MODE=%s\n", OverlayModes[OverlayModeSel].id);
+    fprintf(f, "FPS_LIMIT=%s\n", OverlayFpsLimits[OverlayFpsSel].id);
     fprintf(f, "VOLUME=%d\n", OverlayVolume);
     fprintf(f, "PROFILE=%s\n", PhoneMEInputGetProfileId(OverlayProfileSel));
     for (i = 0; i < OVERLAY_BIND_COUNT; i++) {
@@ -566,6 +630,7 @@ static void overlay_init(void) {
     char *volumeText;
 
     OverlayConfigPath = getenv("PHONEME_CONFIG_PATH");
+    configure_frame_limit();
     overlay_apply_display();
     OverlayResolutionChanged = 0;
     OverlayProfileSel = PhoneMEInputGetProfileIndex();
@@ -954,9 +1019,10 @@ static void overlay_draw_display(void) {
     overlay_draw_row(54, "Screen", OverlayModes[OverlayModeSel].label, OverlayRow == 0);
     overlay_draw_row(70, "Zoom", overlay_current_scale()->label, OverlayRow == 1);
     overlay_draw_row(86, "Size", OverlaySources[OverlaySourceSel].label, OverlayRow == 2);
+    overlay_draw_row(102, "FPS", OverlayFpsLimits[OverlayFpsSel].label, OverlayRow == 3);
     if (OverlayResolutionChanged) {
-        stringColor(Native_SDL_Screen, 18, 110, "Restart game for new", 0xffd060ff);
-        stringColor(Native_SDL_Screen, 18, 122, "resolution to apply", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 126, "Restart game for new", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 138, "resolution to apply", 0xffd060ff);
     }
 }
 
@@ -1038,6 +1104,7 @@ static void overlay_adjust_selected(int direction) {
             overlay_set_source_index(OverlaySourceSel + direction);
             OverlayResolutionChanged = 1;
         }
+        else if (OverlayRow == 3) overlay_set_fps_index(OverlayFpsSel + direction);
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
         overlay_set_volume(OverlayVolume + direction * 5);
@@ -1052,7 +1119,7 @@ static void overlay_adjust_selected(int direction) {
 
 static int overlay_row_count(void) {
     if (OverlayPage == OVERLAY_PAGE_MAIN) return 5;
-    if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 3;
+    if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 4;
     if (OverlayPage == OVERLAY_PAGE_SOUND) return 1;
     if (OverlayPage == OVERLAY_PAGE_CONTROLS) return OVERLAY_PHONE_COUNT + OVERLAY_CONTROL_ROW_OFFSET;
     return 1;
@@ -1443,6 +1510,7 @@ void lfjport_refresh(int x1, int y1, int x2, int y2)
             (unsigned long)now);
     lastRefreshLog = now;
   }
+  wait_frame_limit();
   update_refresh_bounds(x1, y1, x2, y2);
   SDL_UnlockSurface(Native_SDL_HScreen);
   SDL_UnlockSurface(Native_SDL_VScreen);
