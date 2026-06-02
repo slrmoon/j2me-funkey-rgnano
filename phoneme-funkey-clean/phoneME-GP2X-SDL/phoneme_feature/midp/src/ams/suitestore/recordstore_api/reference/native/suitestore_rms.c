@@ -34,7 +34,11 @@
  */
 
 #include <kni.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <midpInit.h>
 #include <midpStorage.h>
 #include <midpRMS.h>
@@ -78,10 +82,15 @@ midp_suite_get_rms_filename(SuiteIdType suiteId,
                             const pcsl_string* pResourceName,
                             pcsl_string* pFileName) {
     const pcsl_string* root;
+    pcsl_string rmsRoot = PCSL_STRING_NULL;
     pcsl_string returnPath = PCSL_STRING_NULL;
     pcsl_string rmsFileName = PCSL_STRING_NULL;
     jint suiteIdLen = GET_SUITE_ID_LEN(suiteId);
     jsize resourceNameLen = pcsl_string_length(pResourceName);
+    const char* envRmsRoot;
+    char envRmsRootPath[PATH_MAX];
+    char envRmsSuitePath[PATH_MAX];
+    size_t envRmsRootLen;
 
     /*
      * IMPL_NOTE: currently we have a limitation that the suite's RMS
@@ -89,6 +98,30 @@ midp_suite_get_rms_filename(SuiteIdType suiteId,
      * See rms.c, rmsdb_get_record_store_space_available() for more details.
      */
     root = storage_get_root(storageId);
+    envRmsRoot = getenv("PHONEME_RMS_HOME");
+    if (envRmsRoot != NULL && envRmsRoot[0] != '\0') {
+        envRmsRootLen = strlen(envRmsRoot);
+        if (envRmsRootLen + 2 >= sizeof(envRmsRootPath)) {
+            return OUT_OF_MEMORY;
+        }
+        strcpy(envRmsRootPath, envRmsRoot);
+        if (envRmsRootPath[envRmsRootLen - 1] != '/') {
+            envRmsRootPath[envRmsRootLen] = '/';
+            envRmsRootPath[envRmsRootLen + 1] = '\0';
+        }
+        mkdir(envRmsRootPath, 0777);
+        if (snprintf(envRmsSuitePath, sizeof(envRmsSuitePath), "%s%08lX",
+                     envRmsRootPath, (unsigned long)suiteId) >=
+                (int)sizeof(envRmsSuitePath)) {
+            return OUT_OF_MEMORY;
+        }
+        mkdir(envRmsSuitePath, 0777);
+        if (pcsl_string_from_chars(envRmsRootPath, &rmsRoot) !=
+                PCSL_STRING_OK) {
+            return OUT_OF_MEMORY;
+        }
+        root = &rmsRoot;
+    }
 
     *pFileName = PCSL_STRING_NULL;
 
@@ -115,6 +148,7 @@ midp_suite_get_rms_filename(SuiteIdType suiteId,
                 PCSL_STRING_OK ||
                     pcsl_string_append(&rmsFileName, ext) != PCSL_STRING_OK) {
             pcsl_string_free(&rmsFileName);
+            pcsl_string_free(&rmsRoot);
             return OUT_OF_MEMORY;
         }
     }
@@ -129,10 +163,12 @@ midp_suite_get_rms_filename(SuiteIdType suiteId,
             PCSL_STRING_OK != pcsl_string_append(&returnPath, &rmsFileName)) {
         pcsl_string_free(&rmsFileName);
         pcsl_string_free(&returnPath);
+        pcsl_string_free(&rmsRoot);
         return OUT_OF_MEMORY;
     }
 
     pcsl_string_free(&rmsFileName);
+    pcsl_string_free(&rmsRoot);
 
     *pFileName = returnPath;
 
