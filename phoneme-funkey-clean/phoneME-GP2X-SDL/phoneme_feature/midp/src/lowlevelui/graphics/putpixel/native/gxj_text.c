@@ -53,8 +53,7 @@ static pfontbitmap selectFontBitmap(jchar c, pfontbitmap* pfonts) {
         }
         i++;
     } while (i <= (int) pfonts[0]);
-    /* the first table must cover the range 0-nn */
-    return pfonts[1];
+    return NULL;
 }
 
 /**
@@ -77,8 +76,16 @@ static void drawChar(gxj_screen_buffer *sbuf, jchar c0,
     unsigned long pixelIndex;
     unsigned long pixelIndexLineInc;
     unsigned char bitmapByte;
-    unsigned char const * fontbitmap =
-        selectFontBitmap(c0,pfonts) + FONT_DATA;
+    pfontbitmap selected = selectFontBitmap(c0, pfonts);
+    unsigned char const * fontbitmap;
+    if (selected == NULL) {
+        selected = selectFontBitmap('?', pfonts);
+        if (selected == NULL) {
+            return;
+        }
+        c0 = '?';
+    }
+    fontbitmap = selected + FONT_DATA;
     jchar const c = (c0 & 0xff) -
         fontbitmap[FONT_CODE_FIRST_LOW-FONT_DATA];
     unsigned long mapLen =
