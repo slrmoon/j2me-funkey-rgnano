@@ -26,8 +26,12 @@
 package javax.microedition.media;
 
 
-import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.Vector;
+import javax.microedition.media.control.ToneControl;
+import javax.microedition.media.control.VolumeControl;
 
 
 
@@ -516,7 +520,20 @@ public final class Manager {
      * @return           The list of supported content types for the given protocol.
      */
     public static String[] getSupportedContentTypes(String protocol) {
-        return new String[0];        
+        if (protocol == null || "device".equals(protocol) ||
+                "http".equals(protocol) || "file".equals(protocol)) {
+            return new String[] {
+                "audio/x-tone-seq",
+                "audio/tone",
+                "audio/midi",
+                "audio/x-midi",
+                "audio/mid",
+                "audio/sp-midi",
+                "audio/wav",
+                "audio/x-wav"
+            };
+        }
+        return new String[0];
     }
 
 
@@ -548,6 +565,9 @@ public final class Manager {
      * @return               The list of supported protocols for the given content type.
      */
     public static String[] getSupportedProtocols(String content_type) {
+        if (content_type == null || isAudioContentType(content_type)) {
+            return new String[] { "device", "http", "file" };
+        }
         return new String[0];
     }
 
@@ -569,7 +589,8 @@ public final class Manager {
             throw new IllegalArgumentException();
         }
 
-        throw new MediaException("Cannot create Player");
+        log("createPlayer locator=" + locator);
+        return new AudioPlayer(locator, contentTypeFromLocator(locator), null);
     }
 
 
@@ -605,7 +626,8 @@ public final class Manager {
             throw new MediaException(PL_ERR + "NULL content-type");
         }
         
-        throw new MediaException("Cannot create Player");
+        log("createPlayer stream type=" + type);
+        return new AudioPlayer("stream", type, stream);
 
     }
 
@@ -641,6 +663,677 @@ public final class Manager {
         
         if (note < 0 || note > 127 || duration <= 0) {
             throw new IllegalArgumentException("bad param");
+        }
+        log("playTone note=" + note + " duration=" + duration +
+                " volume=" + volume);
+        if (nPlayTone(note, duration, volume) != 0) {
+            throw new MediaException("Tone playback error");
+        }
+    }
+
+    private static boolean isAudioContentType(String type) {
+        if (type == null) {
+            return false;
+        }
+        return startsWithIgnoreCase(type, "audio/");
+    }
+
+    private static String contentTypeFromLocator(String locator) {
+        if (startsWithIgnoreCase(locator, TONE_DEVICE_LOCATOR) ||
+                indexOfIgnoreCase(locator, "tone") >= 0) {
+            return "audio/x-tone-seq";
+        }
+        if (endsWithIgnoreCase(locator, ".mid") ||
+                endsWithIgnoreCase(locator, ".midi") ||
+                startsWithIgnoreCase(locator, MIDI_DEVICE_LOCATOR)) {
+            return "audio/midi";
+        }
+        if (endsWithIgnoreCase(locator, ".wav") ||
+                endsWithIgnoreCase(locator, ".wave")) {
+            return "audio/x-wav";
+        }
+        if (endsWithIgnoreCase(locator, ".amr")) {
+            return "audio/amr";
+        }
+        return "audio/unknown";
+    }
+
+    private static boolean startsWithIgnoreCase(String value, String prefix) {
+        int i;
+        if (value.length() < prefix.length()) {
+            return false;
+        }
+        for (i = 0; i < prefix.length(); i++) {
+            if (asciiLower(value.charAt(i)) != asciiLower(prefix.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean endsWithIgnoreCase(String value, String suffix) {
+        int offset = value.length() - suffix.length();
+        int i;
+        if (offset < 0) {
+            return false;
+        }
+        for (i = 0; i < suffix.length(); i++) {
+            if (asciiLower(value.charAt(offset + i)) !=
+                    asciiLower(suffix.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int indexOfIgnoreCase(String value, String needle) {
+        int i;
+        int j;
+        if (needle.length() == 0) {
+            return 0;
+        }
+        for (i = 0; i <= value.length() - needle.length(); i++) {
+            for (j = 0; j < needle.length(); j++) {
+                if (asciiLower(value.charAt(i + j)) !=
+                        asciiLower(needle.charAt(j))) {
+                    break;
+                }
+            }
+            if (j == needle.length()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static char asciiLower(char c) {
+        if (c >= 'A' && c <= 'Z') {
+            return (char)(c + ('a' - 'A'));
+        }
+        return c;
+    }
+
+    private static native int nAudioInit();
+    private static native int nPlayTone(int note, int duration, int volume);
+    private static native int nMidiCreate();
+    private static native int nMidiRealize(int id, byte[] data);
+    private static native int nWavRealize(int id, byte[] data);
+    private static native int nMidiStart(int id, int loopCount);
+    private static native void nMidiSetVolume(int id, int volume);
+    private static native void nMidiStop(int id);
+    private static native void nMidiDeallocate(int id);
+    private static native void nMidiClose(int id);
+    private static native long nMidiGetMediaTime(int id);
+    private static native int nMidiIsFinished(int id);
+
+    private static void log(String message) {
+        System.out.println("phoneME audio: " + message);
+    }
+
+    private static final class AudioPlayer
+            implements Player, Runnable, VolumeControl, ToneControl {
+        private final String locator;
+        private final String contentType;
+        private final InputStream source;
+        private final Vector listeners = new Vector();
+        private int state = UNREALIZED;
+        private int loopCount = 1;
+        private long mediaTime = 0;
+        private int nativeId = 0;
+        private int level = 100;
+        private boolean muted = false;
+        private Thread watcher;
+        private byte[] toneSequence;
+
+        AudioPlayer(String locator, String contentType, InputStream source) {
+            this.locator = locator;
+            this.contentType = contentType;
+            this.source = source;
+        }
+
+        public void realize() throws MediaException {
+            int ret;
+            if (state == CLOSED) {
+                return;
+            }
+            if (state >= REALIZED) {
+                return;
+            }
+            if (isNativeAudio()) {
+                ret = nAudioInit();
+                log("audio init ret=" + ret);
+                if (ret != 0) {
+                    throw new MediaException("Audio init error " + ret);
+                }
+                nativeId = nMidiCreate();
+                log("native audio create id=" + nativeId);
+                if (nativeId == 0) {
+                    throw new MediaException("Audio player allocation failed");
+                }
+                if (source != null) {
+                    try {
+                        byte[] data = readAll(source);
+                        log("audio realize locator=" + locator +
+                                " bytes=" + data.length);
+                        ret = realizeNativeData(data);
+                        if (ret != 0) {
+                            throw new MediaException("Audio realize error " + ret);
+                        }
+                    } catch (IOException e) {
+                        throw new MediaException(e.getMessage());
+                    }
+                } else if (isToneSequence() && toneSequence != null) {
+                    ret = nMidiRealize(nativeId, buildToneSequenceMidi(toneSequence));
+                    if (ret != 0) {
+                        throw new MediaException("Tone sequence realize error " + ret);
+                    }
+                } else {
+                    log("locator playback waits for stream/control data: " + locator);
+                }
+            }
+            log("realize locator=" + locator);
+            state = REALIZED;
+        }
+
+        public void prefetch() throws MediaException {
+            if (state == CLOSED) {
+                return;
+            }
+            if (state < REALIZED) {
+                realize();
+            }
+            log("prefetch locator=" + locator);
+            if (state < PREFETCHED) {
+                state = PREFETCHED;
+            }
+        }
+
+        public void start() throws MediaException {
+            int ret;
+            if (state == CLOSED) {
+                return;
+            }
+            if (state < PREFETCHED) {
+                prefetch();
+            }
+            if (isNativeAudio() && nativeId != 0) {
+                ret = nMidiStart(nativeId, loopCount);
+                log("audio start id=" + nativeId + " ret=" + ret +
+                        " loop=" + loopCount);
+                if (ret != 0) {
+                    throw new MediaException("Audio start error " + ret);
+                }
+                ensureWatcher();
+            }
+            state = STARTED;
+            log("start locator=" + locator + " loop=" + loopCount);
+            sendEvent(PlayerListener.STARTED, new Long(getMediaTime()));
+        }
+
+        public void stop() throws MediaException {
+            if (state == STARTED) {
+                if (isNativeAudio() && nativeId != 0) {
+                    nMidiStop(nativeId);
+                }
+                state = PREFETCHED;
+                sendEvent(PlayerListener.STOPPED, new Long(getMediaTime()));
+            }
+            log("stop locator=" + locator);
+        }
+
+        public void deallocate() {
+            if (state != CLOSED) {
+                if (isNativeAudio() && nativeId != 0) {
+                    nMidiDeallocate(nativeId);
+                }
+                state = REALIZED;
+            }
+            log("deallocate locator=" + locator);
+        }
+
+        public void close() {
+            if (nativeId != 0) {
+                nMidiClose(nativeId);
+                nativeId = 0;
+            }
+            state = CLOSED;
+            log("close locator=" + locator);
+        }
+
+        public long setMediaTime(long now) throws MediaException {
+            mediaTime = now;
+            log("setMediaTime locator=" + locator + " time=" + now);
+            return mediaTime;
+        }
+
+        public long getMediaTime() {
+            if (isNativeAudio() && nativeId != 0) {
+                return nMidiGetMediaTime(nativeId);
+            }
+            return mediaTime;
+        }
+
+        public int getState() {
+            return state;
+        }
+
+        public long getDuration() {
+            return TIME_UNKNOWN;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+
+        public void setLoopCount(int count) {
+            if (count == 0 || count < -1) {
+                throw new IllegalArgumentException();
+            }
+            loopCount = count;
+            log("setLoopCount locator=" + locator + " count=" + count);
+        }
+
+        public void addPlayerListener(PlayerListener playerListener) {
+            if (playerListener != null && !listeners.contains(playerListener)) {
+                listeners.addElement(playerListener);
+            }
+        }
+
+        public void removePlayerListener(PlayerListener playerListener) {
+            listeners.removeElement(playerListener);
+        }
+
+        public Control[] getControls() {
+            if (isToneSequence()) {
+                return new Control[] { this };
+            }
+            if (isNativeAudio()) {
+                return new Control[] { this };
+            }
+            return new Control[0];
+        }
+
+        public Control getControl(String controlType) {
+            if (controlType == null) {
+                throw new IllegalArgumentException();
+            }
+            if (isNativeAudio() && (controlType.equals("VolumeControl") ||
+                    controlType.equals(
+                            "javax.microedition.media.control.VolumeControl"))) {
+                return this;
+            }
+            if (isToneSequence() && (controlType.equals("ToneControl") ||
+                    controlType.equals(
+                            "javax.microedition.media.control.ToneControl"))) {
+                return this;
+            }
+            return null;
+        }
+
+        public void setSequence(byte[] sequence) {
+            int ret;
+            if (sequence == null || sequence.length == 0) {
+                throw new IllegalArgumentException();
+            }
+            if (state == PREFETCHED || state == STARTED) {
+                throw new IllegalStateException();
+            }
+            toneSequence = new byte[sequence.length];
+            System.arraycopy(sequence, 0, toneSequence, 0, sequence.length);
+            log("setSequence locator=" + locator + " bytes=" + sequence.length);
+            if (nativeId != 0) {
+                ret = nMidiRealize(nativeId, buildToneSequenceMidi(toneSequence));
+                if (ret != 0) {
+                    throw new IllegalArgumentException("bad tone sequence");
+                }
+            }
+        }
+
+        public void setMute(boolean mute) {
+            muted = mute;
+            updateNativeVolume();
+            sendEvent(PlayerListener.VOLUME_CHANGED, this);
+            log("setMute locator=" + locator + " mute=" + mute);
+        }
+
+        public boolean isMuted() {
+            return muted;
+        }
+
+        public int setLevel(int newLevel) {
+            if (newLevel < 0) {
+                newLevel = 0;
+            }
+            if (newLevel > 100) {
+                newLevel = 100;
+            }
+            level = newLevel;
+            updateNativeVolume();
+            sendEvent(PlayerListener.VOLUME_CHANGED, this);
+            log("setLevel locator=" + locator + " level=" + level);
+            return level;
+        }
+
+        public int getLevel() {
+            return level;
+        }
+
+        public void run() {
+            while (state == STARTED && nativeId != 0) {
+                if (nMidiIsFinished(nativeId) != 0) {
+                    state = PREFETCHED;
+                    sendEvent(PlayerListener.END_OF_MEDIA,
+                            new Long(getMediaTime()));
+                    return;
+                }
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }
+
+        private boolean isMidi() {
+            return startsWithIgnoreCase(contentType, "audio/midi") ||
+                    startsWithIgnoreCase(contentType, "audio/x-midi") ||
+                    startsWithIgnoreCase(contentType, "audio/mid") ||
+                    startsWithIgnoreCase(contentType, "audio/sp-midi");
+        }
+
+        private boolean isWav() {
+            return startsWithIgnoreCase(contentType, "audio/wav") ||
+                    startsWithIgnoreCase(contentType, "audio/x-wav");
+        }
+
+        private boolean isToneSequence() {
+            return startsWithIgnoreCase(contentType, "audio/x-tone-seq") ||
+                    startsWithIgnoreCase(contentType, "audio/tone") ||
+                    startsWithIgnoreCase(locator, TONE_DEVICE_LOCATOR);
+        }
+
+        private boolean isNativeAudio() {
+            return isMidi() || isWav() || isToneSequence();
+        }
+
+        private int realizeNativeData(byte[] data) {
+            if (isMidi()) {
+                return nMidiRealize(nativeId, data);
+            }
+            if (isWav()) {
+                return nWavRealize(nativeId, data);
+            }
+            if (isToneSequence()) {
+                return nMidiRealize(nativeId, data);
+            }
+            return -1;
+        }
+
+        private void ensureWatcher() {
+            if (watcher == null || !watcher.isAlive()) {
+                watcher = new Thread(this);
+                watcher.start();
+            }
+        }
+
+        private void updateNativeVolume() {
+            if (nativeId != 0) {
+                nMidiSetVolume(nativeId, muted ? 0 : level);
+            }
+        }
+
+        private void sendEvent(String event, Object data) {
+            int i;
+            for (i = 0; i < listeners.size(); i++) {
+                ((PlayerListener)listeners.elementAt(i)).playerUpdate(
+                        this, event, data);
+            }
+        }
+
+        private byte[] readAll(InputStream in) throws IOException {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] tmp = new byte[4096];
+            int read;
+            while ((read = in.read(tmp)) != -1) {
+                out.write(tmp, 0, read);
+            }
+            return out.toByteArray();
+        }
+
+        private byte[] buildToneSequenceMidi(byte[] sequence) {
+            ByteArrayOutputStream track = new ByteArrayOutputStream();
+            ByteArrayOutputStream midi = new ByteArrayOutputStream();
+            int i = 0;
+            int tempo = 120;
+            int resolution = 16;
+            int volume = level;
+            int pendingDelta = 0;
+
+            sequence = expandToneBlocks(sequence, 4);
+
+            writeVar(track, 0);
+            track.write(0xc0);
+            track.write(80);
+            writeVar(track, 0);
+            track.write(0xb0);
+            track.write(7);
+            track.write((volume * 127) / 100);
+
+            while (i < sequence.length) {
+                int command = sequence[i++];
+                if (command == ToneControl.VERSION) {
+                    i++;
+                } else if (command == ToneControl.TEMPO) {
+                    if (i >= sequence.length) break;
+                    tempo = (sequence[i++] & 0xff) * 4;
+                    if (tempo < 20) tempo = 20;
+                } else if (command == ToneControl.RESOLUTION) {
+                    if (i >= sequence.length) break;
+                    resolution = sequence[i++] & 0xff;
+                    if (resolution <= 0) resolution = 16;
+                } else if (command == ToneControl.SET_VOLUME) {
+                    if (i >= sequence.length) break;
+                    volume = sequence[i++] & 0xff;
+                    if (volume > 100) volume = 100;
+                    writeVar(track, pendingDelta);
+                    pendingDelta = 0;
+                    track.write(0xb0);
+                    track.write(7);
+                    track.write((volume * 127) / 100);
+                } else if (command == ToneControl.SILENCE) {
+                    if (i >= sequence.length) break;
+                    pendingDelta += toneTicks(sequence[i++] & 0xff, resolution);
+                } else if (command == ToneControl.REPEAT) {
+                    if (i + 2 >= sequence.length) break;
+                    int count = sequence[i++] & 0xff;
+                    int note = sequence[i++];
+                    int duration = sequence[i++] & 0xff;
+                    while (count-- > 0) {
+                        pendingDelta = writeToneEvent(track, pendingDelta, note,
+                                duration, resolution, volume);
+                    }
+                } else if (command < 0) {
+                    if (i < sequence.length) i++;
+                } else {
+                    if (i >= sequence.length) break;
+                    pendingDelta = writeToneEvent(track, pendingDelta, command,
+                            sequence[i++] & 0xff, resolution, volume);
+                }
+            }
+            writeVar(track, pendingDelta);
+            track.write(0xff);
+            track.write(0x2f);
+            track.write(0);
+
+            writeAscii(midi, "MThd");
+            write32(midi, 6);
+            write16(midi, 0);
+            write16(midi, 1);
+            write16(midi, 24);
+            writeAscii(midi, "MTrk");
+            write32(midi, track.size() + 7);
+            writeVar(midi, 0);
+            midi.write(0xff);
+            midi.write(0x51);
+            midi.write(3);
+            write24(midi, 60000000 / tempo);
+            byte[] trackBytes = track.toByteArray();
+            midi.write(trackBytes, 0, trackBytes.length);
+            return midi.toByteArray();
+        }
+
+        private byte[] expandToneBlocks(byte[] sequence, int depth) {
+            byte[][] blocks = new byte[128][];
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            int i;
+
+            if (depth <= 0) {
+                return sequence;
+            }
+
+            i = 0;
+            while (i < sequence.length) {
+                int command = sequence[i++];
+                if (command == ToneControl.BLOCK_START && i < sequence.length) {
+                    int id = sequence[i++] & 0x7f;
+                    ByteArrayOutputStream block = new ByteArrayOutputStream();
+                    while (i < sequence.length) {
+                        command = sequence[i++];
+                        if (command == ToneControl.BLOCK_END) {
+                            if (i < sequence.length) i++;
+                            break;
+                        }
+                        block.write(command);
+                        if (command < 0 && i < sequence.length) {
+                            block.write(sequence[i++]);
+                        } else if (command >= 0 && i < sequence.length) {
+                            block.write(sequence[i++]);
+                        }
+                    }
+                    blocks[id] = block.toByteArray();
+                } else if (command < 0 && i < sequence.length) {
+                    i++;
+                } else if (command >= 0 && i < sequence.length) {
+                    i++;
+                }
+            }
+
+            i = 0;
+            while (i < sequence.length) {
+                int command = sequence[i++];
+                if (command == ToneControl.BLOCK_START) {
+                    if (i < sequence.length) i++;
+                    while (i < sequence.length) {
+                        command = sequence[i++];
+                        if (command == ToneControl.BLOCK_END) {
+                            if (i < sequence.length) i++;
+                            break;
+                        }
+                        if (command < 0 && i < sequence.length) {
+                            i++;
+                        } else if (command >= 0 && i < sequence.length) {
+                            i++;
+                        }
+                    }
+                } else if (command == ToneControl.PLAY_BLOCK && i < sequence.length) {
+                    int id = sequence[i++] & 0x7f;
+                    writeExpandedBlock(out, blocks[id], depth);
+                } else if (command == ToneControl.REPEAT && i + 1 < sequence.length) {
+                    int count = sequence[i++] & 0xff;
+                    int repeatedCommand = sequence[i++];
+                    if (repeatedCommand == ToneControl.PLAY_BLOCK && i < sequence.length) {
+                        int id = sequence[i++] & 0x7f;
+                        while (count-- > 0) {
+                            writeExpandedBlock(out, blocks[id], depth);
+                        }
+                    } else if (i < sequence.length) {
+                        int repeatedValue = sequence[i++];
+                        while (count-- > 0) {
+                            out.write(repeatedCommand);
+                            out.write(repeatedValue);
+                        }
+                    }
+                } else {
+                    out.write(command);
+                    if (command < 0 && i < sequence.length) {
+                        out.write(sequence[i++]);
+                    } else if (command >= 0 && i < sequence.length) {
+                        out.write(sequence[i++]);
+                    }
+                }
+            }
+            return out.toByteArray();
+        }
+
+        private void writeExpandedBlock(ByteArrayOutputStream out, byte[] block,
+                                        int depth) {
+            if (block != null) {
+                byte[] expanded = expandToneBlocks(block, depth - 1);
+                out.write(expanded, 0, expanded.length);
+            }
+        }
+
+        private int writeToneEvent(ByteArrayOutputStream track, int delta,
+                                   int note, int duration, int resolution,
+                                   int volume) {
+            int ticks = toneTicks(duration, resolution);
+            if (note < 0 || note > 127) {
+                return delta + ticks;
+            }
+            writeVar(track, delta);
+            track.write(0x90);
+            track.write(note);
+            track.write((volume * 127) / 100);
+            writeVar(track, ticks);
+            track.write(0x80);
+            track.write(note);
+            track.write(0);
+            return 0;
+        }
+
+        private int toneTicks(int duration, int resolution) {
+            return (duration * 24 + resolution - 1) / resolution;
+        }
+
+        private void writeAscii(ByteArrayOutputStream out, String text) {
+            int i;
+            for (i = 0; i < text.length(); i++) {
+                out.write((byte)text.charAt(i));
+            }
+        }
+
+        private void write16(ByteArrayOutputStream out, int value) {
+            out.write((value >> 8) & 0xff);
+            out.write(value & 0xff);
+        }
+
+        private void write24(ByteArrayOutputStream out, int value) {
+            out.write((value >> 16) & 0xff);
+            out.write((value >> 8) & 0xff);
+            out.write(value & 0xff);
+        }
+
+        private void write32(ByteArrayOutputStream out, int value) {
+            out.write((value >> 24) & 0xff);
+            out.write((value >> 16) & 0xff);
+            out.write((value >> 8) & 0xff);
+            out.write(value & 0xff);
+        }
+
+        private void writeVar(ByteArrayOutputStream out, int value) {
+            int buffer = value & 0x7f;
+            while ((value >>= 7) > 0) {
+                buffer <<= 8;
+                buffer |= ((value & 0x7f) | 0x80);
+            }
+            while (true) {
+                out.write(buffer & 0xff);
+                if ((buffer & 0x80) != 0) {
+                    buffer >>= 8;
+                } else {
+                    break;
+                }
+            }
         }
     }
 }

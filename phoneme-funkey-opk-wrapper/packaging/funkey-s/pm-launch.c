@@ -319,7 +319,6 @@ static int    scale_sel = 0;
 static int    source_sel = 0;
 static int    display_mode_sel = 5;
 static int    fps_limit_sel = 3;
-static int    sound_volume = 100;
 static int    key_profile_sel = 0;
 static int    bind_sel   = 0;        /* selected row in settings */
 static int    bind_scroll = 0;
@@ -1051,7 +1050,6 @@ static void load_binds(const char *game_name, const char *jar_path) {
     source_sel = 0;
     display_mode_sel = 5;
     fps_limit_sel = 3;
-    sound_volume = 100;
     key_profile_sel = 0;
 
     if (!game_name) return;
@@ -1089,12 +1087,6 @@ static void load_binds(const char *game_name, const char *jar_path) {
             fps_limit_sel = find_fps_limit(value);
             continue;
         }
-        if (strcmp(key, "VOLUME") == 0) {
-            sound_volume = val;
-            if (sound_volume < 0) sound_volume = 0;
-            if (sound_volume > 100) sound_volume = 100;
-            continue;
-        }
         if (strcmp(key, "PROFILE") == 0 || strcmp(key, "KEY_PROFILE") == 0) {
             key_profile_sel = find_key_profile(value);
             apply_key_profile(key_profile_sel);
@@ -1126,7 +1118,6 @@ static void save_binds(const char *game_name) {
     fprintf(f, "VIEW=%s\n", source_presets[source_sel].id);
     fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
     fprintf(f, "FPS_LIMIT=%s\n", fps_limits[fps_limit_sel].id);
-    fprintf(f, "VOLUME=%d\n", sound_volume);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
 
     for (i = 0; i < BIND_COUNT; i++)
@@ -1584,8 +1575,6 @@ static void launch_game(int idx) {
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
     setenv("PHONEME_HEAP_MB", "16", 1);
-    setenv("PHONEME_ENABLE_AUDIO", "1", 1);
-    setenv("PHONEME_TIMIDITY_SYNTHETIC", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
@@ -1595,11 +1584,6 @@ static void launch_game(int idx) {
         char cfg_path[PATH_MAX];
         snprintf(cfg_path, sizeof(cfg_path), BIND_DIR "/%s.cfg", games[idx].config);
         setenv("PHONEME_CONFIG_PATH", cfg_path, 1);
-    }
-    {
-        char volume[16];
-        snprintf(volume, sizeof(volume), "%d", sound_volume);
-        setenv("PHONEME_SOUND_VOLUME", volume, 1);
     }
     {
         char ratio[16];
@@ -1650,8 +1634,6 @@ static void launch_game(int idx) {
             printf("pm-launch trace\n");
             printf("pm-launch jar=%s\n", jar_path);
             printf("pm-launch main=%s\n", main_class);
-            printf("pm-launch PHONEME_ENABLE_AUDIO=%s\n",
-                   getenv("PHONEME_ENABLE_AUDIO") ? getenv("PHONEME_ENABLE_AUDIO") : "");
             printf("pm-launch PHONEME_HEAP_MB=%s\n",
                    getenv("PHONEME_HEAP_MB") ? getenv("PHONEME_HEAP_MB") : "");
             printf("pm-launch scale preset=%s ratio=%s lcd=%s mode=%s\n",
@@ -1664,8 +1646,7 @@ static void launch_game(int idx) {
                    getenv("PHONEME_SOURCE_SIZE") ? getenv("PHONEME_SOURCE_SIZE") : "");
             printf("pm-launch fps limit=%s\n",
                    getenv("PHONEME_FPS_LIMIT") ? getenv("PHONEME_FPS_LIMIT") : "");
-            printf("pm-launch sound volume=%s config=%s\n",
-                   getenv("PHONEME_SOUND_VOLUME") ? getenv("PHONEME_SOUND_VOLUME") : "",
+            printf("pm-launch config=%s\n",
                    getenv("PHONEME_CONFIG_PATH") ? getenv("PHONEME_CONFIG_PATH") : "");
             printf("pm-launch key profile=%s\n", key_profiles[key_profile_sel].id);
             for (i = 0; i < BIND_COUNT; i++) {

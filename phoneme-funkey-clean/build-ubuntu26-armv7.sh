@@ -266,7 +266,6 @@ sync_opk_stage_runtime() {
 
     rm -rf "$opk_stage/lib"
     cp -R "$MIDP_OUTPUT_DIR/lib" "$opk_stage/lib"
-    rm -rf "$opk_stage/lib/freepats"
 
     if [ -d "$MIDP_OUTPUT_DIR/appdb" ]; then
         rm -rf "$opk_stage/appdb"
@@ -281,8 +280,7 @@ sync_opk_stage_runtime() {
         {
             printf 'pm-runtime-v1\n'
             date +%s
-            wc -c "$opk_stage/bin/runMidlet" "$opk_stage/bin/cldc_vm" \
-                "$opk_stage/lib/soundfont/default.sf2" 2>/dev/null || true
+            wc -c "$opk_stage/bin/runMidlet" "$opk_stage/bin/cldc_vm" 2>/dev/null || true
         } > "$opk_stage/runtime-version"
     fi
 }
@@ -322,7 +320,6 @@ echo "Checking ARM cross compiler..."
 create_arm_toolchain_shim
 require_arm_lib libSDL.so
 require_arm_lib libSDL_image.so
-require_arm_lib libSDL_mixer.so
 
 mkdir -p "$BUILD_OUTPUT_DIR"
 
@@ -389,7 +386,6 @@ invalidate_midp_artifacts_if_sources_changed
 echo "Building ARM MIDP SDL..."
 cd "$MEHOME/midp/build/linux_sdl_gcc"
 run_make \
-    USE_SDL_ABB=true \
     PCSL_OUTPUT_DIR="$PCSL_OUTPUT_DIR" \
     CLDC_DIST_DIR="$ARM_CLDC_DIST_DIR" \
     JSR_120_DIR="$MEHOME/jsr120" \
@@ -399,7 +395,6 @@ run_make \
     USE_MULTIPLE_ISOLATES="$MIDP_USE_MULTIPLE_ISOLATES" \
     GNU_TOOLS_DIR="$ARM_TOOLCHAIN_DIR" \
     CMDLINE_CFLAGS="$MIDP_CMDLINE_CFLAGS" \
-    SDL_MIXER_EXTRA_LIBS="${SDL_MIXER_EXTRA_LIBS:-}" \
     USE_LIBFLOAT="$USE_LIBFLOAT"
 
 sync_opk_stage_runtime

@@ -83,7 +83,6 @@ export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -march=armv7
 export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-march=armv7-a -mfpu=vfpv3-d16"}
 export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS"}
 export MIDP_CMDLINE_CFLAGS=${MIDP_CMDLINE_CFLAGS:-"$ARM_CFLAGS"}
-export SDL_MIXER_EXTRA_LIBS=${SDL_MIXER_EXTRA_LIBS:--lmikmod}
 export BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s}
 export USE_LIBFLOAT=false
 export GCC_VERSION=

@@ -125,10 +125,6 @@ inject_nokia_stubs() {
     if [ ! -d "$NOKIA_STUB_SRC" ]; then
         return
     fi
-    if jar_has_entry "$STAGE/midlets/a.jar" "com/nokia/mid/sound/Sound.class"; then
-        return
-    fi
-
     echo "Injecting Nokia compatibility stubs"
     mkdir -p "$HELLO_BUILD/nokia-stubs/classes" "$HELLO_BUILD/nokia-stubs/verified"
     "$JDK_DIR/bin/javac" \
@@ -288,7 +284,6 @@ if [ -s "$TARGET_CLDC_BIN/cldc_vm" ] || { [ -n "$CLDC_VM_FALLBACK" ] && [ -s "$C
     copy_nonempty_file "$TARGET_CLDC_BIN/cldc_vm" "$STAGE/bin/cldc_vm" "$CLDC_VM_FALLBACK"
 fi
 cp -R "$MEHOME/build_output_funkey_s/midp/lib" "$STAGE/lib"
-rm -rf "$STAGE/lib/freepats"
 cp -R "$MEHOME/build_output_funkey_s/midp/appdb" "$STAGE/appdb"
 echo "Compiling SDL launcher (browser mode)"
 
@@ -317,8 +312,7 @@ fi
         bin/cldc_vm \
         bin/installMidlet \
         bin/listMidlets.sh \
-        bin/preverify \
-        lib/soundfont/default.sf2; do
+        bin/preverify; do
         if [ -f "$STAGE/$runtime_file" ]; then
             sha256sum "$STAGE/$runtime_file" | awk -v name="$runtime_file" '{ print $1 "  " name }'
         fi
@@ -382,7 +376,6 @@ else
     echo "appdb already exists, preserving" >> "$EARLY_LOG"
 fi
 export MIDP_HOME="$APP_DIR"
-export PHONEME_TIMIDITY_SYNTHETIC="${PHONEME_TIMIDITY_SYNTHETIC:-1}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
 if [ "${PHONEME_DEBUG_LOGS:-0}" = "1" ]; then
     export PHONEME_KEY_DEBUG="${PHONEME_KEY_DEBUG:-1}"

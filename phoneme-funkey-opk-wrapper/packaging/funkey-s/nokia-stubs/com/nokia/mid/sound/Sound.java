@@ -1,5 +1,10 @@
 package com.nokia.mid.sound;
 
+import java.io.ByteArrayInputStream;
+import javax.microedition.media.Manager;
+import javax.microedition.media.MediaException;
+import javax.microedition.media.Player;
+
 public class Sound {
     public static final int FORMAT_TONE = 1;
     public static final int FORMAT_WAV = 5;
@@ -8,28 +13,25 @@ public class Sound {
     public static final int SOUND_STOPPED = 1;
     public static final int SOUND_PLAYING = 2;
 
-    private static final short[] FREQ_TABLE = {
-        0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23,
-        24, 26, 27, 29, 30, 32, 34, 36, 38, 41, 43, 45, 48, 51, 54, 57, 60,
-        64, 68, 72, 76, 81, 85, 90, 96, 101, 107, 114, 120, 128, 135, 143,
-        152, 161, 170, 180, 191, 202, 214, 227, 240, 255, 270, 286, 303, 321,
-        340, 360, 381, 404, 428, 453, 480, 509, 539, 571, 605, 641, 679, 719,
-        762, 807, 855, 906, 960, 1017, 1078, 1142, 1210, 1282, 1358, 1438,
-        1524, 1614, 1710, 1812, 1920, 2034, 2155, 2283, 2419, 2563, 2715,
-        2876, 3047, 3228, 3420, 3624, 3839, 4067, 4309, 4565, 4837, 5125,
-        5429, 5752, 6094, 6456, 6840, 7247, 7678, 8134, 8618, 9130, 9673,
-        10249, 10858, 11504, 12188, 12912
-    };
-
     private int state = SOUND_STOPPED;
     private int gain = 100;
     private SoundListener listener;
+    private int type = FORMAT_TONE;
     private byte[] data;
-    private int type;
     private int frequency;
     private long duration;
-    private volatile boolean stopRequested;
-    private Thread playbackThread;
+    private Player player;
+
+    private static final int[] MIDI_NOTE_FREQ = {
+        8,8,9,9,10,10,11,12,12,13,14,15,16,17,18,19,
+        20,21,23,24,25,27,29,30,32,34,36,38,41,43,46,49,
+        51,55,58,61,65,69,73,77,82,87,92,98,103,110,116,123,
+        130,138,146,155,164,174,185,196,207,220,233,246,261,277,293,311,
+        329,349,369,392,415,440,466,493,523,554,587,622,659,698,739,783,
+        830,880,932,987,1046,1108,1174,1244,1318,1396,1479,1567,1661,1760,1864,1975,
+        2093,2217,2349,2489,2637,2793,2959,3135,3322,3520,3729,3951,4186,4434,4698,4978,
+        5274,5587,5919,6271,6644,7040,7458,7902,8372,8869,9397,9956,10548,11175,11839,12543
+    };
 
     public Sound(byte[] data, int type) {
         init(data, type);
@@ -45,37 +47,60 @@ public class Sound {
         this.frequency = 0;
         this.duration = 0;
         state = SOUND_STOPPED;
+        log("init bytes type=" + type + " length=" +
+                (data == null ? 0 : data.length));
     }
 
     public void init(int frequency, long duration) {
+        this.type = FORMAT_TONE;
+        this.data = null;
         this.frequency = frequency;
         this.duration = duration;
-        this.data = null;
-        this.type = FORMAT_TONE;
         state = SOUND_STOPPED;
+        log("init tone frequency=" + frequency + " duration=" + duration);
     }
 
     public void play(int loop) {
-        final int requestedLoop = loop;
-        stop();
+        stopPlayer();
         state = SOUND_PLAYING;
-        stopRequested = false;
-        playbackThread = new Thread(new Runnable() {
-            public void run() {
-                playImpl(requestedLoop);
-            }
-        });
-        playbackThread.start();
+        log("play type=" + type + " loop=" + loop + " gain=" + gain +
+                " frequency=" + frequency + " duration=" + duration);
         notifyListener();
+        if (type == FORMAT_TONE && frequency > 0 && duration > 0) {
+            try {
+                Manager.playTone(frequencyToMidiNote(frequency),
+                        (int)duration, gain);
+                scheduleStop(duration);
+                return;
+            } catch (MediaException e) {
+                log("play tone failed " + e.getMessage());
+            }
+        } else if (type == FORMAT_WAV && data != null && data.length > 0) {
+            try {
+                player = Manager.createPlayer(new ByteArrayInputStream(data),
+                        "audio/x-wav");
+                player.realize();
+                player.setLoopCount(loop <= 0 ? -1 : loop);
+                player.start();
+                return;
+            } catch (Exception e) {
+                log("play wav failed " + e.getMessage());
+            }
+        } else {
+            log("play bytes unsupported type=" + type);
+        }
+        finishPlayback();
     }
 
     public void stop() {
-        stopRequested = true;
+        stopPlayer();
         state = SOUND_STOPPED;
+        log("stop");
         notifyListener();
     }
 
     public void resume() {
+        log("resume");
         play(1);
     }
 
@@ -88,109 +113,78 @@ public class Sound {
     }
 
     public void setGain(int gain) {
+        if (gain < 0) {
+            gain = 0;
+        }
+        if (gain > 100) {
+            gain = 100;
+        }
         this.gain = gain;
+        log("setGain gain=" + gain);
     }
 
     public void setSoundListener(SoundListener listener) {
         this.listener = listener;
-    }
-
-    private void playImpl(int loop) {
-        int repeats = (loop <= 0) ? Integer.MAX_VALUE : loop;
-        int note;
-        int toneDuration;
-        int volume;
-        int i;
-
-        volume = clampGain(gain);
-
-        if (data != null && data.length > 0) {
-            note = 48 + (checksum(data) % 24);
-            toneDuration = 60 + ((data.length > 1 ? data[1] & 0xFF : data[0] & 0xFF) % 180);
-        } else {
-            note = convertFreqToNote(frequency > 0 ? frequency : 1760);
-            toneDuration = (duration > 0 && duration < 2000) ? (int)duration : 100;
-        }
-
-        for (i = 0; i < repeats && !stopRequested; i++) {
-            try {
-                javax.microedition.media.Manager.playTone(note, toneDuration, volume);
-                sleepQuietly(toneDuration + 20);
-            } catch (Throwable t) {
-                break;
-            }
-        }
-
-        if (!stopRequested) {
-            state = SOUND_STOPPED;
-            notifyListener();
-        }
-    }
-
-    private static int checksum(byte[] bytes) {
-        int sum = 0;
-        int i;
-        for (i = 0; i < bytes.length; i++) {
-            sum = (sum + (bytes[i] & 0xFF)) & 0x7FFFFFFF;
-        }
-        return sum;
-    }
-
-    private static int clampGain(int value) {
-        if (value < 0) {
-            return 0;
-        }
-        if (value > 100) {
-            return 100;
-        }
-        return value;
-    }
-
-    private static void sleepQuietly(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-        }
-    }
-
-    private static int convertFreqToNote(int freq) {
-        int low = 0;
-        int high = FREQ_TABLE.length - 1;
-        int mid;
-        int midVal;
-
-        if (freq <= 0) {
-            return 69;
-        }
-
-        while (low <= high) {
-            mid = (low + high) >>> 1;
-            midVal = FREQ_TABLE[mid];
-
-            if (midVal < freq) {
-                low = mid + 1;
-            } else if (midVal > freq) {
-                high = mid - 1;
-            } else {
-                return mid;
-            }
-        }
-
-        if (low <= 0) {
-            return 0;
-        }
-        if (low >= FREQ_TABLE.length) {
-            return FREQ_TABLE.length - 1;
-        }
-        if ((freq - FREQ_TABLE[low - 1]) < (FREQ_TABLE[low] - freq)) {
-            return low - 1;
-        }
-        return low;
+        log("setSoundListener present=" + (listener != null));
     }
 
     private void notifyListener() {
         if (listener != null) {
             listener.soundStateChanged(this, state);
         }
+    }
+
+    private void scheduleStop(final long delay) {
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                }
+                finishPlayback();
+            }
+        }).start();
+    }
+
+    private void finishPlayback() {
+        stopPlayer();
+        state = SOUND_STOPPED;
+        notifyListener();
+    }
+
+    private void stopPlayer() {
+        if (player != null) {
+            try {
+                player.stop();
+            } catch (MediaException e) {
+            }
+            player.close();
+            player = null;
+        }
+    }
+
+    private int frequencyToMidiNote(int hz) {
+        int i;
+        int best = 0;
+        int bestDiff = 2147483647;
+        int diff;
+        if (hz <= 0) {
+            return 0;
+        }
+        for (i = 0; i < MIDI_NOTE_FREQ.length; i++) {
+            diff = MIDI_NOTE_FREQ[i] - hz;
+            if (diff < 0) {
+                diff = -diff;
+            }
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private static void log(String message) {
+        System.out.println("Nokia sound: " + message);
     }
 }

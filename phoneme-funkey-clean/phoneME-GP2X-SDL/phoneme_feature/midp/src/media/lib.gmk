@@ -57,7 +57,11 @@ MIDP_JAVADOC_ALL += \
 
 # vpath for ( media ) subsystem
 #
-# no native sources for media, therefore empty
+vpath % \
+    $(SUBSYSTEM_DIR)/media/reference/native \
+    $(SUBSYSTEM_DIR)/media/reference/native/tinysoundfont
+
+SUBSYSTEM_MEDIA_RESOURCES_DIR = $(SUBSYSTEM_DIR)/media/reference/resource
 
 # Java files for the ( media ) subsystem
 #
@@ -73,11 +77,18 @@ SUBSYSTEM_MEDIA_JAVA_FILES += \
 
 # Native files for the ( media ) subsystem
 #
-#####  no native sources for media, therefore empty
+SUBSYSTEM_MEDIA_NATIVE_FILES += \
+    media-audio.c \
+    w200-synth.c \
+    tml_impl.c
+
+MIDP_RESOURCES += media_audio_resources
+
+media_audio_resources: $(LIBDIR)
+	@mkdir -p $(LIBDIR)/soundfont
+	@cp -R $(SUBSYSTEM_MEDIA_RESOURCES_DIR)/soundfont/. $(LIBDIR)/soundfont $(LOG)
 
 ############################################################
 # Native files under MEDIA subsystem
 ############################################################
 ##  no native sources for media, therefore empty
-
-

@@ -40,10 +40,6 @@
 #define SDL_FULLWIDTH	FULLWIDTH
 #define SDL_FULLHEIGHT	FULLHEIGHT
 void InitGP2XKeys(void);
-int  InitAudioSubsystem(void);
-void FinalizeAudioSubsystem(void);
-void MediaSDL_SetMasterVolume(int volume);
-int  MediaSDL_GetMasterVolume(void);
 int  PhoneMEInputGetBind(int index);
 void PhoneMEInputSetBind(int index, int key);
 int  PhoneMEInputGetProfileCount(void);
@@ -254,7 +250,6 @@ static int OverlaySourceSel;
 static int OverlayResolutionChanged;
 static int OverlayFpsSel = 3;
 static int OverlayProfileSel;
-static int OverlayVolume = 100;
 static const char *OverlayConfigPath;
 static int FrameLimitFps = 30;
 static Uint32 FrameLimitLastTicks;
@@ -262,7 +257,6 @@ static Uint32 FrameLimitLastTicks;
 enum {
     OVERLAY_PAGE_MAIN = 0,
     OVERLAY_PAGE_DISPLAY,
-    OVERLAY_PAGE_SOUND,
     OVERLAY_PAGE_CONTROLS
 };
 
@@ -587,13 +581,6 @@ static void overlay_set_profile_index(int index) {
     PhoneMEInputApplyProfile(index);
 }
 
-static void overlay_set_volume(int volume) {
-    if (volume < 0) volume = 0;
-    if (volume > 100) volume = 100;
-    OverlayVolume = volume;
-    MediaSDL_SetMasterVolume(OverlayVolume);
-}
-
 static void overlay_set_fps_index(int index) {
     if (index < 0) index = OVERLAY_FPS_LIMIT_COUNT - 1;
     if (index >= OVERLAY_FPS_LIMIT_COUNT) index = 0;
@@ -618,7 +605,6 @@ static void overlay_save_config(void) {
     fprintf(f, "VIEW=%s\n", OverlaySources[OverlaySourceSel].id);
     fprintf(f, "DISPLAY_MODE=%s\n", OverlayModes[OverlayModeSel].id);
     fprintf(f, "FPS_LIMIT=%s\n", OverlayFpsLimits[OverlayFpsSel].id);
-    fprintf(f, "VOLUME=%d\n", OverlayVolume);
     fprintf(f, "PROFILE=%s\n", PhoneMEInputGetProfileId(OverlayProfileSel));
     for (i = 0; i < OVERLAY_BIND_COUNT; i++) {
         fprintf(f, "%s=%d\n", OverlayBindNames[i], PhoneMEInputGetBind(i));
@@ -627,20 +613,11 @@ static void overlay_save_config(void) {
 }
 
 static void overlay_init(void) {
-    char *volumeText;
-
     OverlayConfigPath = getenv("PHONEME_CONFIG_PATH");
     configure_frame_limit();
     overlay_apply_display();
     OverlayResolutionChanged = 0;
     OverlayProfileSel = PhoneMEInputGetProfileIndex();
-    volumeText = getenv("PHONEME_SOUND_VOLUME");
-    if (volumeText != NULL && volumeText[0] != '\0') {
-        OverlayVolume = atoi(volumeText);
-    } else {
-        OverlayVolume = MediaSDL_GetMasterVolume();
-    }
-    overlay_set_volume(OverlayVolume);
 }
 
 static int compute_fit_height_width(int srcWidth, int srcHeight) {
@@ -1008,9 +985,9 @@ static void overlay_assigned_binds_for_phone(int phoneCode, char *out, int outSi
 }
 
 static void overlay_draw_main(void) {
-    const char *items[] = { "Resume", "Display", "Controls", "Sound", "Exit" };
+    const char *items[] = { "Resume", "Display", "Controls", "Exit" };
     int i;
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < 4; i++) {
         overlay_draw_row(54 + i * 16, items[i], "", OverlayRow == i);
     }
 }
@@ -1024,12 +1001,6 @@ static void overlay_draw_display(void) {
         stringColor(Native_SDL_Screen, 18, 126, "Restart game for new", 0xffd060ff);
         stringColor(Native_SDL_Screen, 18, 138, "resolution to apply", 0xffd060ff);
     }
-}
-
-static void overlay_draw_sound(void) {
-    char value[32];
-    snprintf(value, sizeof(value), "%d%%", OverlayVolume);
-    overlay_draw_row(54, "Volume", value, OverlayRow == 0);
 }
 
 static void overlay_draw_controls(void) {
@@ -1084,9 +1055,6 @@ static void overlay_draw(void) {
     } else if (OverlayPage == OVERLAY_PAGE_DISPLAY) {
         stringColor(Native_SDL_Screen, 18, 34, "Display", 0x7df9ffff);
         overlay_draw_display();
-    } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
-        stringColor(Native_SDL_Screen, 18, 34, "Sound", 0x7df9ffff);
-        overlay_draw_sound();
     } else if (OverlayPage == OVERLAY_PAGE_CONTROLS) {
         stringColor(Native_SDL_Screen, 18, 34, "Controls", 0x7df9ffff);
         overlay_draw_controls();
@@ -1106,9 +1074,6 @@ static void overlay_adjust_selected(int direction) {
         }
         else if (OverlayRow == 3) overlay_set_fps_index(OverlayFpsSel + direction);
         overlay_save_config();
-    } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
-        overlay_set_volume(OverlayVolume + direction * 5);
-        overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_CONTROLS) {
         if (OverlayRow == 0) {
             overlay_set_profile_index(OverlayProfileSel + direction);
@@ -1118,9 +1083,8 @@ static void overlay_adjust_selected(int direction) {
 }
 
 static int overlay_row_count(void) {
-    if (OverlayPage == OVERLAY_PAGE_MAIN) return 5;
+    if (OverlayPage == OVERLAY_PAGE_MAIN) return 4;
     if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 4;
-    if (OverlayPage == OVERLAY_PAGE_SOUND) return 1;
     if (OverlayPage == OVERLAY_PAGE_CONTROLS) return OVERLAY_PHONE_COUNT + OVERLAY_CONTROL_ROW_OFFSET;
     return 1;
 }
@@ -1151,9 +1115,6 @@ static void overlay_accept(void) {
             OverlayPage = OVERLAY_PAGE_CONTROLS;
             OverlayRow = 0;
         } else if (OverlayRow == 3) {
-            OverlayPage = OVERLAY_PAGE_SOUND;
-            OverlayRow = 0;
-        } else if (OverlayRow == 4) {
             overlay_save_config();
             OverlayVisible = 0;
             OverlayShutdownRequested = 1;
@@ -1187,7 +1148,6 @@ int PhoneMEOverlayHandleSDLEvent(SDL_Event *event) {
             OverlayCapture = 0;
             overlay_apply_display();
             OverlayProfileSel = PhoneMEInputGetProfileIndex();
-            OverlayVolume = MediaSDL_GetMasterVolume();
             return 1;
         }
         return 0;
@@ -1382,8 +1342,7 @@ gxj_screen_buffer gxj_system_screen_buffer;
  *         <tt>other value</tt> otherwise
  */
 int lfjport_ui_init() 
-{ int audioStatus;
-  DisplayDebug = getenv("PHONEME_DISPLAY_DEBUG") != NULL;
+{ DisplayDebug = getenv("PHONEME_DISPLAY_DEBUG") != NULL;
   if (DisplayDebug) {
     fprintf(stderr, "lfjport_ui_init: begin %dx%d\n",
             SDL_FULLWIDTH, SDL_FULLHEIGHT);
@@ -1394,12 +1353,6 @@ int lfjport_ui_init()
    }
   if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: SDL_Init ok\n");
   SDL_ShowCursor(SDL_DISABLE);
-  if (getenv("PHONEME_ENABLE_AUDIO") != NULL)
-   { audioStatus = InitAudioSubsystem();
-     if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: InitAudioSubsystem=%d\n", audioStatus);
-   }
-  else
-   { if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: audio disabled\n"); }
   if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: joysticks=%d\n", SDL_NumJoysticks());
   if (SDL_NumJoysticks() > 0) {
     SDL_JoystickOpen(0);
@@ -1468,8 +1421,7 @@ int lfjport_ui_init()
  * Finalize the lfjport_ui_ native resources.
  */
 void lfjport_ui_finalize() 
-{ if (getenv("PHONEME_ENABLE_AUDIO") != NULL) FinalizeAudioSubsystem();
-  SDL_Quit();
+{ SDL_Quit();
 }
 
 /**

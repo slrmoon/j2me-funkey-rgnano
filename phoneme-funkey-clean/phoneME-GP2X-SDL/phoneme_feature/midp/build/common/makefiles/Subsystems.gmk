@@ -367,14 +367,6 @@ include $(PROJECT_MIDP_ABB_DIR)/src/config/$(SUBSYSTEM_MAKE_FILE)
 endif
 
 #####################################################################
-# Multimedia Subsystem
-# Description: SDL implements ABB 
-#####################################################################
-ifeq ($(USE_SDL_ABB), true)
-include $(SUBSYSTEM_DIR)/media-sdl/$(LIB_MAKE_FILE)
-endif
-
-#####################################################################
 # (Extra) Mobile I18N Subsystem
 # Description: JSR 238
 #####################################################################
@@ -410,9 +402,7 @@ ifneq ($(TARGET_VM),cdc_vm)
 ifneq ($(USE_JSR_234), true)
 ifneq ($(USE_JSR_135), true)
 ifneq ($(USE_MIDP_ABB), true)
-ifneq ($(USE_SDL_ABB), true)
 include $(SUBSYSTEM_DIR)/media/$(LIB_MAKE_FILE)
-endif
 endif
 endif
 endif
