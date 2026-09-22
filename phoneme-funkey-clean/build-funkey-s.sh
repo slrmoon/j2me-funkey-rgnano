@@ -8,7 +8,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-FUNKEY_SDK_DIR="$(cd "$(dirname "$0")" && pwd)/FunKey-sdk-2.3.0"
+FUNKEY_SDK_DIR=${FUNKEY_SDK_DIR:-"$(cd "$(dirname "$0")" && pwd)/FunKey-sdk-2.3.0"}
 
 if [ ! -d "$FUNKEY_SDK_DIR" ]; then
     echo "FunKey SDK not found: $FUNKEY_SDK_DIR" >&2
@@ -69,7 +69,10 @@ echo "SDK target triplet: $ARM_TRIPLET"
 SDK_TARGET_FLAGS=${CFLAGS:-}
 SDK_TARGET_LDFLAGS=${LDFLAGS:-}
 
-if command -v sdl-config >/dev/null 2>&1; then
+SDK_SDL_CONFIG="$FUNKEY_SDK_DIR/arm-funkey-linux-musleabihf/sysroot/usr/bin/sdl-config"
+if [ -x "$SDK_SDL_CONFIG" ]; then
+    export SDL_CONFIG="$SDK_SDL_CONFIG"
+elif command -v sdl-config >/dev/null 2>&1; then
     export SDL_CONFIG=$(command -v sdl-config)
 fi
 
@@ -81,7 +84,7 @@ export CROSS_CC CROSS_CXX CROSS_CPP CROSS_AR CROSS_AS CROSS_LD
 export CROSS_RANLIB CROSS_STRIP CROSS_OBJCOPY CROSS_OBJDUMP CROSS_NM
 export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard"}
 export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-march=armv7-a -mfpu=vfpv3-d16"}
-export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS"}
+export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS -lz"}
 export MIDP_CMDLINE_CFLAGS=${MIDP_CMDLINE_CFLAGS:-"$ARM_CFLAGS"}
 export SDL_MIXER_EXTRA_LIBS=${SDL_MIXER_EXTRA_LIBS:--lmikmod}
 export BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s}

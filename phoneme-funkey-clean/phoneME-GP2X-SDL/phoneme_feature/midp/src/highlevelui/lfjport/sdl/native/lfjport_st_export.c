@@ -34,8 +34,47 @@
 #include <gxj_screen_buffer.h>
 
 #include "SDL.h"
-#include "SDL_gfxPrimitives.h"
 #include "midp_constants_data.h"
+
+extern int characterColor(SDL_Surface *dst, Sint16 x, Sint16 y, char c,
+                          Uint32 color);
+
+static int boxColor(SDL_Surface *dst, Sint16 x1, Sint16 y1, Sint16 x2, Sint16 y2,
+                    Uint32 color) {
+    SDL_Rect rect;
+    rect.x = x1;
+    rect.y = y1;
+    rect.w = (Uint16) (x2 >= x1 ? x2 - x1 + 1 : 0);
+    rect.h = (Uint16) (y2 >= y1 ? y2 - y1 + 1 : 0);
+    return SDL_FillRect(dst, &rect, color);
+}
+
+static int rectangleColor(SDL_Surface *dst, Sint16 x1, Sint16 y1, Sint16 x2,
+                          Sint16 y2, Uint32 color) {
+    boxColor(dst, x1, y1, x2, y1, color);
+    boxColor(dst, x1, y2, x2, y2, color);
+    boxColor(dst, x1, y1, x1, y2, color);
+    return boxColor(dst, x2, y1, x2, y2, color);
+}
+
+static int stringColor(SDL_Surface *dst, Sint16 x, Sint16 y, const char *s,
+                       Uint32 color) {
+    Sint16 pen_x = x;
+    if (dst == NULL || s == NULL) {
+        return -1;
+    }
+    while (*s != '\0') {
+        if (*s == '\n') {
+            pen_x = x;
+            y = (Sint16)(y + 8);
+        } else {
+            characterColor(dst, pen_x, y, *s, color);
+            pen_x = (Sint16)(pen_x + 8);
+        }
+        ++s;
+    }
+    return 0;
+}
 
 #define SDL_FULLWIDTH	FULLWIDTH
 #define SDL_FULLHEIGHT	FULLHEIGHT

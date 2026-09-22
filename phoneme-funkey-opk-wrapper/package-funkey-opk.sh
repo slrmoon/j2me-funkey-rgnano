@@ -34,6 +34,8 @@ RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
 BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
 RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
+M3G_RENDERER=${FUNKEY_M3G_RENDERER:-ngl}
+M3G_TRACE=${FUNKEY_M3G_TRACE:-0}
 
 if [ "$BUNDLE_MIDLET" = "1" ]; then
     RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
@@ -382,6 +384,8 @@ else
     echo "appdb already exists, preserving" >> "$EARLY_LOG"
 fi
 export MIDP_HOME="$APP_DIR"
+export FUNKEY_M3G_RENDERER='__M3G_RENDERER__'
+export M3G_NGL_TRACE='__M3G_TRACE__'
 export PHONEME_TIMIDITY_SYNTHETIC="${PHONEME_TIMIDITY_SYNTHETIC:-1}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
 if [ "${PHONEME_DEBUG_LOGS:-0}" = "1" ]; then
@@ -471,6 +475,8 @@ echo "Starting phoneME FunKey runtime"
 date
 echo "APP_DIR=$APP_DIR"
 echo "MIDP_HOME=$MIDP_HOME"
+echo "FUNKEY_M3G_RENDERER=$FUNKEY_M3G_RENDERER"
+echo "M3G_NGL_TRACE=$M3G_NGL_TRACE"
 echo "PHONEME_ENABLE_GP2X_KEYS=$PHONEME_ENABLE_GP2X_KEYS"
 echo "PHONEME_KEY_PROFILE=$PHONEME_KEY_PROFILE"
 echo "RUNMIDLET_HEAP_ARG=${RUNMIDLET_HEAP_ARG:-}"
@@ -504,8 +510,12 @@ echo "$status" > "$APP_DIR/s"
 exit "$(cat "$APP_DIR/s" 2>/dev/null || echo 1)"
 EOF
 escaped_heap_arg=$(printf '%s' "$RUNMIDLET_HEAP_ARG" | sed "s/'/'\\\\''/g")
+escaped_m3g_renderer=$(printf '%s' "$M3G_RENDERER" | sed 's/[\/&]/\\&/g')
+escaped_m3g_trace=$(printf '%s' "$M3G_TRACE" | sed 's/[\/&]/\\&/g')
 sed -i "s|__RUNMIDLET_HEAP_ARG__|$escaped_heap_arg|" "$STAGE/r.sh"
 sed -i "s|__RUNTIME_ONLY__|$RUNTIME_ONLY|g" "$STAGE/r.sh"
+sed -i "s|__M3G_RENDERER__|$escaped_m3g_renderer|g" "$STAGE/r.sh"
+sed -i "s|__M3G_TRACE__|$escaped_m3g_trace|g" "$STAGE/r.sh"
 chmod +x "$STAGE/r.sh"
 
 cat > "$STAGE/pm.funkey-s.desktop" <<EOF

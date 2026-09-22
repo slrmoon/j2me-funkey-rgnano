@@ -400,6 +400,13 @@ KNIEXPORT void     _KNI_pop_handles(_KNI_HandleInfo*);
  * values.
  */
 #define JVM_SOFTFP_LINKAGE __softfp
+#elif defined(__GNUC__) && defined(__arm__)
+/*
+ * GCC hard-float builds otherwise use VFP registers for parameters and
+ * results. The interpreter calls these routines using the base AAPCS, just
+ * like the ARMCC __softfp convention above.
+ */
+#define JVM_SOFTFP_LINKAGE __attribute__((pcs("aapcs")))
 #else
 /*
  * Change this if your C/C++ compiler uses a special keyword to indicate
