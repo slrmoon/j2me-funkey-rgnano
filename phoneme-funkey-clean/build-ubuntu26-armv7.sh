@@ -395,7 +395,7 @@ run_make \
     JSR_120_DIR="$MEHOME/jsr120" \
     PROJECT_JSR_120_DIR="$MEHOME/jsr120" \
     USE_JSR_120="${FUNKEY_USE_JSR_120:-true}" \
-    USE_JSR_184="${FUNKEY_USE_JSR_184:-false}" \
+    USE_JSR_184="${FUNKEY_USE_JSR_184:-true}" \
     JSR_184_DIR="$MEHOME/jsr184" \
     PROJECT_JSR_184_DIR="$MEHOME/jsr184" \
     SWERVE_DIR="$MEHOME/jsr184/src/native/upstream/m3g" \
