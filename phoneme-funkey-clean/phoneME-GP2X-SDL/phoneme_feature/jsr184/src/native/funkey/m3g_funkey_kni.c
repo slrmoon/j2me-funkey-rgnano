@@ -29,7 +29,7 @@ m3g_renderer_is_legacy(void) {
 
 static int
 m3g_trace_enabled(void) {
-    const char *value = getenv("M3G_NGL_TRACE");
+	const char *value = getenv("M3G_TRACE_VERBOSE");
     return value != 0 && value[0] != '\0' && value[0] != '0';
 }
 
@@ -88,6 +88,48 @@ m3g_read_matrix_param(int param, float *matrix) {
         matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f;
     }
     KNI_EndHandles();
+}
+
+static int
+m3g_read_transform_trace_id_param(int param) {
+    int trace_id = 0;
+    KNI_StartHandles(1);
+    KNI_DeclareHandle(array);
+    KNI_GetParameterAsObject(param, array);
+    if (!KNI_IsNullHandle(array) && KNI_GetArrayLength(array) >= 76) {
+        KNI_GetRawArrayRegion(array, 72, 4, (jbyte *) &trace_id);
+    }
+    KNI_EndHandles();
+    return trace_id;
+}
+
+static int
+m3g_matrix_is_degenerate(const float *matrix) {
+    int i;
+    static const int basis[] = { 0, 1, 2, 4, 5, 6, 8, 9, 10 };
+    for (i = 0; i < 9; ++i) {
+        float value = matrix[basis[i]];
+        if (value < -0.000001f || value > 0.000001f) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void
+m3g_trace_render_node_matrix(int trace_id, const float *matrix) {
+    static int count;
+    if (count < 4 && m3g_matrix_is_degenerate(matrix)) {
+        fprintf(stderr,
+                "[M3G TRANSFORM TRACE] KNI renderNode id=%d matrix="
+                "%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+                trace_id,
+                matrix[0], matrix[1], matrix[2], matrix[3],
+                matrix[4], matrix[5], matrix[6], matrix[7],
+                matrix[8], matrix[9], matrix[10], matrix[11],
+                matrix[12], matrix[13], matrix[14], matrix[15]);
+        ++count;
+    }
 }
 
 static void
@@ -751,6 +793,7 @@ KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1renderNode(void) {
     float matrix[16];
     m3g_read_matrix_param(5, matrix);
+    m3g_trace_render_node_matrix(m3g_read_transform_trace_id_param(5), matrix);
     if (g_legacy_renderer) {
         funkey_m3g_surface_render_node(&g_surface, M3G_LONG_PARAM(3));
     } else {

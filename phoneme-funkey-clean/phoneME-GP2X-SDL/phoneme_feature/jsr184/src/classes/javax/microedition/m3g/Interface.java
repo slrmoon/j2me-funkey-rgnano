@@ -17,7 +17,10 @@
 
 package javax.microedition.m3g;
 
+import java.lang.ref.WeakReference;
+import java.util.Enumeration;
 import java.util.Hashtable;
+import java.util.Vector;
 
 /**
  * M3G interface object. An interface is automatically created for
@@ -142,11 +145,14 @@ class Interface {
 	 * set at this point!
 	 */
 	static final void register(Object3D obj) {
-		getInstance().liveObjects.put(new Long(obj.handle), obj);
+		Interface self = getInstance();
+		pruneDeadObjects();
+		self.liveObjects.put(new Long(obj.handle), new WeakReference(obj));
 	}
 
 	static final void register(Loader obj) {
-		getInstance().liveObjects.put(new Long(obj.handle), obj);
+		pruneDeadObjects();
+		getInstance().liveObjects.put(new Long(obj.handle), new WeakReference(obj));
 	}
 
 	/**
@@ -158,6 +164,12 @@ class Interface {
 		Interface self = getInstance();
 		Long iHandle = new Long(handle);
 		Object ref = self.liveObjects.get(iHandle);
+		if (ref instanceof WeakReference) {
+			ref = ((WeakReference) ref).get();
+			if (ref == null) {
+				self.liveObjects.remove(iHandle);
+			}
+		}
 
 		if (ref != null) {
 			return (ref instanceof Object3D) ? (Object3D) ref : null;
@@ -171,25 +183,38 @@ class Interface {
 	 * creates a new proxy/peer if one doesn't exist yet.
 	 */
 	static final Object3D getObjectInstance(long handle) {
+		int nativeClass;
 
 		// A zero handle equals null
 
 		if (handle == 0) {
 			return null;
 		}
+		nativeClass = _getClassID(handle);
 
 		// Then try to find an existing Java representative for the
 		// object
 
 		Object3D obj = findObject(handle);
 		if (obj != null) {
-			return obj;
+			boolean match = classMatchesNative(nativeClass, obj);
+			if (!match) {
+				System.out.println("[M3G PEER CACHE MISMATCH] handle=" + handle +
+						" nativeClass=" + nativeClass + " cachedClass=" +
+						obj.getClass().getName());
+				getInstance().liveObjects.remove(new Long(handle));
+				/* The old native slot has already been reused. Prevent its
+				 * eventual finalizer from releasing the new occupant. */
+				obj.handle = 0;
+			} else {
+				return obj;
+			}
 		}
 
 		// Not found, create a new Java object. Note that only
 		// non-abstract classes can possibly be returned.
 
-		switch (_getClassID(handle)) {
+		switch (nativeClass) {
 			case ANIMATION_CONTROLLER:
 				return new AnimationController(handle);
 			case ANIMATION_TRACK:
@@ -238,6 +263,60 @@ class Interface {
 				return new World(handle);
 			default:
 				throw new Error();
+		}
+	}
+
+	static final int getNativeClassID(long handle) {
+		return handle == 0 ? 0 : _getClassID(handle);
+	}
+
+	static final int getLiveObjectCount() {
+		pruneDeadObjects();
+		return getInstance().liveObjects.size();
+	}
+
+	private static boolean classMatchesNative(int nativeClass, Object3D obj) {
+		switch (nativeClass) {
+			case ANIMATION_CONTROLLER: return obj instanceof AnimationController;
+			case ANIMATION_TRACK: return obj instanceof AnimationTrack;
+			case APPEARANCE: return obj instanceof Appearance;
+			case BACKGROUND: return obj instanceof Background;
+			case CAMERA: return obj instanceof Camera;
+			case COMPOSITING_MODE: return obj instanceof CompositingMode;
+			case FOG: return obj instanceof Fog;
+			case GROUP: return obj instanceof Group;
+			case IMAGE_2D: return obj instanceof Image2D;
+			case INDEX_BUFFER: return obj instanceof TriangleStripArray;
+			case KEYFRAME_SEQUENCE: return obj instanceof KeyframeSequence;
+			case LIGHT: return obj instanceof Light;
+			case MATERIAL: return obj instanceof Material;
+			case MESH: return obj instanceof Mesh;
+			case MORPHING_MESH: return obj instanceof MorphingMesh;
+			case POLYGON_MODE: return obj instanceof PolygonMode;
+			case SKINNED_MESH: return obj instanceof SkinnedMesh;
+			case SPRITE_3D: return obj instanceof Sprite3D;
+			case TEXTURE_2D: return obj instanceof Texture2D;
+			case VERTEX_ARRAY: return obj instanceof VertexArray;
+			case VERTEX_BUFFER: return obj instanceof VertexBuffer;
+			case WORLD: return obj instanceof World;
+			default: return false;
+		}
+	}
+
+	private static void pruneDeadObjects() {
+		Interface self = getInstance();
+		Vector dead = new Vector();
+		Enumeration keys = self.liveObjects.keys();
+		while (keys.hasMoreElements()) {
+			Object key = keys.nextElement();
+			Object value = self.liveObjects.get(key);
+			if (value instanceof WeakReference &&
+					((WeakReference) value).get() == null) {
+				dead.addElement(key);
+			}
+		}
+		for (int i = 0; i < dead.size(); ++i) {
+			self.liveObjects.remove(dead.elementAt(i));
 		}
 	}
 

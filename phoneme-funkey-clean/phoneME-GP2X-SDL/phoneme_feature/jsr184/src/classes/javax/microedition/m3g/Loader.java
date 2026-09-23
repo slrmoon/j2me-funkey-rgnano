@@ -125,6 +125,9 @@ public class Loader {
 		} catch (IOException e) {
 			throw e;
 		} catch (Exception e) {
+			System.out.println("[M3G LOADER ERROR] resource=" + name +
+					" exception=" + e);
+			e.printStackTrace();
 			throw new IOException("Load error " + e);
 		}
 	}
@@ -145,6 +148,8 @@ public class Loader {
 		} catch (IOException e) {
 			throw e;
 		} catch (Exception e) {
+			System.out.println("[M3G LOADER ERROR] byte-array exception=" + e);
+			e.printStackTrace();
 			throw new IOException("Load error " + e);
 		}
 	}

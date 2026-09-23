@@ -27,6 +27,8 @@ public class Graphics3D {
 	private static int debugBindCount;
 	private static long debugLastWorldHandle;
 	private static int debugCurrentWorldFrames;
+	private static int transformTraceLastId = -1;
+	private static String transformTraceLastMatrix;
 	//------------------------------------------------------------------
 	// Static data
 	//------------------------------------------------------------------
@@ -397,6 +399,12 @@ public class Graphics3D {
 
 		final Node finalNode = node;
 		final Transform finalTransform = transform;
+		if (shouldTraceDegenerate(finalTransform)) {
+			System.out.println("[M3G TRANSFORM TRACE] render(Node) call id=" +
+					finalTransform.traceId() + " matrix=" +
+					finalTransform.traceMatrixString());
+			finalTransform.traceRender("render(Node) call");
+		}
 		
 		/* _renderNode(handle,
 								finalNode.handle,
@@ -405,12 +413,30 @@ public class Graphics3D {
 		Platform.executeInUIThread(
 				new M3gRunnable() {
 					public void doRun() {
+						if (shouldTraceDegenerate(finalTransform)) {
+							System.out.println("[M3G TRANSFORM TRACE] render(Node) before _renderNode id=" +
+									finalTransform.traceId() + " matrix=" +
+									finalTransform.traceMatrixString());
+							finalTransform.traceRender("before _renderNode");
+						}
 						_renderNode(handle,
 								finalNode.handle,
 								finalTransform != null ? finalTransform.matrix : null);
 					}
 				});
 		//System.out.println("render out");
+	}
+
+	private static boolean shouldTraceDegenerate(Transform transform) {
+		if (transform == null || !transform.traceIsDegenerate()) return false;
+		String matrix = transform.traceMatrixString();
+		if (transform.traceId() == transformTraceLastId &&
+				matrix.equals(transformTraceLastMatrix)) {
+			return false;
+		}
+		transformTraceLastId = transform.traceId();
+		transformTraceLastMatrix = matrix;
+		return true;
 	}
 
 
@@ -593,7 +619,6 @@ public class Graphics3D {
 		}
 		if (iInterface.isFullyInitialized() && Platform.uiThreadAvailable()) {
 			handle = _ctor(Interface.getHandle());
-			_addRef(handle);
 
 
 			/* iIsProperRenderer = _isProperRenderer(); */

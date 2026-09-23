@@ -33,6 +33,10 @@
 #endif
 
 #include "m3g_array.h"
+#include <stdio.h>
+
+static int m3g_renderqueue_insert_trace_count;
+static int m3g_renderqueue_commit_trace_count;
 
 /*----------------------------------------------------------------------
  * Private data structures
@@ -230,6 +234,7 @@ static M3Gbool m3gInsertDrawable(Interface *m3g,
 {
     RenderItem *item;
     RenderBucket *bucket;
+    int trace = m3gTraceVerboseEnabled() && m3g_renderqueue_insert_trace_count < 128;
     
     item = m3gGetRenderItem(rq, m3g);
     if (!item) {
@@ -243,6 +248,7 @@ static M3Gbool m3gInsertDrawable(Interface *m3g,
 
     item->node         = node;
     item->toCamera     = *toCamera;
+    m3gTraceTransformMatrix("[M3G QUEUE TOCAMERA STORED]", &item->toCamera);
     item->subMeshIndex = subMeshIndex;
     item->sortKey      = (sortKey << M3G_RENDERQUEUE_BUCKET_BITS);
 
@@ -251,9 +257,26 @@ static M3Gbool m3gInsertDrawable(Interface *m3g,
         goto OutOfMemory;
     }
     M3G_END_PROFILE(m3g, M3G_PROFILE_SETUP_SORT);
+    if (trace) {
+        fprintf(stderr,
+                "[M3G INSERT] node=%p class=%d submesh=%d sortKey=0x%x "
+                "bucketMin=%d bucketMax=%d bucketItems=%d ok=1\n",
+                (void *) node, M3G_CLASS(node), subMeshIndex, sortKey,
+                rq->minBucket, rq->maxBucket,
+                m3gArraySize(&bucket->items));
+        ++m3g_renderqueue_insert_trace_count;
+    }
     return M3G_TRUE;
 
 OutOfMemory:        
+    if (trace) {
+        fprintf(stderr,
+                "[M3G INSERT] node=%p class=%d submesh=%d sortKey=0x%x "
+                "bucketMin=%d bucketMax=%d ok=0\n",
+                (void *) node, node != NULL ? M3G_CLASS(node) : -1,
+                subMeshIndex, sortKey, rq->minBucket, rq->maxBucket);
+        ++m3g_renderqueue_insert_trace_count;
+    }
     m3gRecycleRenderItem(rq, item);
     return M3G_FALSE;
 }
@@ -282,21 +305,47 @@ static void m3gClearRenderQueue(RenderQueue *rq)
 static void m3gCommit(RenderQueue *rq, RenderContext *ctx)
 {
     M3Gint b;
+    int trace = m3gTraceVerboseEnabled() && m3g_renderqueue_commit_trace_count < 128;
+    int total = 0;
+
+    if (trace) {
+        fprintf(stderr,
+                "[M3G COMMIT] root=%p min=%d max=%d scope=0x%x\n",
+                (void *) rq->root, rq->minBucket, rq->maxBucket, rq->scope);
+    }
 
     for (b = rq->minBucket; b <= rq->maxBucket; ++b) {
         if (rq->buckets[b]) {
             PointerArray *items = &rq->buckets[b]->items;
             int n = m3gArraySize(items);
             int i;
+            if (trace) {
+                fprintf(stderr,
+                        "[M3G COMMIT BUCKET] bucket=%d items=%d\n",
+                        b, n);
+            }
             for (i = 0; i < n; ++i) {
                 RenderItem *item = (RenderItem*) m3gGetArrayElement(items, i);
+                if (trace) {
+                    fprintf(stderr,
+                            "[M3G COMMIT ITEM] bucket=%d index=%d node=%p "
+                            "class=%d submesh=%d\n",
+                            b, i, (void *) item->node,
+                            M3G_CLASS(item->node), item->subMeshIndex);
+                }
+                m3gTraceTransformMatrix("[M3G QUEUE TOCAMERA EXTRACTED]",
+                                        &item->toCamera);
                 M3G_VFUNC(Node, item->node, doRender)(
                     item->node, ctx, &item->toCamera, item->subMeshIndex);
                 m3gRecycleRenderItem(rq, item);
             }
+            total += n;
             m3gClearArray(items);
             m3gIncStat(M3G_INTERFACE(ctx), M3G_STAT_RENDER_NODES_DRAWN, n);
         }
     }
+    if (trace) {
+        fprintf(stderr, "[M3G COMMIT RESULT] total=%d\n", total);
+        ++m3g_renderqueue_commit_trace_count;
+    }
 }
-

@@ -28,6 +28,12 @@
 
 #include "m3g_mesh.h"
 #include "m3g_memory.h"
+#include <stdio.h>
+
+static int m3g_mesh_validate_trace_count;
+static int m3g_mesh_setup_trace_count;
+static int m3g_mesh_queue_trace_count;
+static int m3g_mesh_dorender_trace_count;
 
 /*----------------------------------------------------------------------
  * Internal functions
@@ -70,6 +76,10 @@ static M3Gbool m3gQueueMesh(Mesh *mesh, const Matrix *toCamera,
                             RenderQueue *renderQueue)
 {
     M3Gint i;
+    M3Gint queued = 0;
+    int trace = m3gTraceVerboseEnabled() && m3g_mesh_queue_trace_count < 128;
+
+    m3gTraceTransformMatrix("[M3G QUEUE TOCAMERA]", toCamera);
 
     /* Fetch the cumulative alpha factor for this node */
     
@@ -80,14 +90,32 @@ static M3Gbool m3gQueueMesh(Mesh *mesh, const Matrix *toCamera,
             
     for (i = 0; i < mesh->trianglePatchCount; i++) {
         if (mesh->appearances[i] != NULL) {
-            if (!m3gInsertDrawable(M3G_INTERFACE(mesh),
-                                   renderQueue,
-                                   (Node*) mesh,
-                                   toCamera,
-                                   i,
-                                   m3gGetAppearanceSortKey(((Appearance*)mesh->appearances[i]))))
+            M3Guint sortKey = m3gGetAppearanceSortKey(((Appearance*)mesh->appearances[i]));
+            M3Gbool inserted = m3gInsertDrawable(M3G_INTERFACE(mesh),
+                                                 renderQueue,
+                                                 (Node*) mesh,
+                                                 toCamera,
+                                                 i,
+                                                 sortKey);
+            if (trace) {
+                fprintf(stderr,
+                        "[M3G QUEUE PATCH] mesh=%p patch=%d app=%p "
+                        "sortKey=0x%x inserted=%d\n",
+                        (void *) mesh, i, (void *) mesh->appearances[i],
+                        sortKey, inserted);
+            }
+            if (!inserted)
                 return M3G_FALSE;
+            ++queued;
         }
+    }
+    if (trace) {
+        fprintf(stderr,
+                "[M3G QUEUE RESULT] mesh=%p patches=%d queued=%d "
+                "alpha=%d\n",
+                (void *) mesh, mesh->trianglePatchCount, queued,
+                mesh->totalAlphaFactor);
+        ++m3g_mesh_queue_trace_count;
     }
     return M3G_TRUE;
 }
@@ -114,28 +142,61 @@ static M3Gbool m3gMeshSetupRender(Node *self,
                                   RenderQueue *renderQueue)
 {
 	Mesh *mesh = (Mesh *)self;
+    int trace = m3gTraceVerboseEnabled() && m3g_mesh_setup_trace_count < 128;
     M3G_UNREF(caller);
     m3gIncStat(M3G_INTERFACE(self), M3G_STAT_RENDER_NODES, 1);
+    if (trace) {
+        fprintf(stderr,
+                "[M3G SETUP] mesh=%p enable=0x%x scope=0x%x "
+                "rqScope=0x%x cullMask=0x%x patches=%d vb=%p\n",
+                (void *) mesh, self->enableBits, self->scope,
+                renderQueue->scope, s->cullMask, mesh->trianglePatchCount,
+                (void *) mesh->vertexBuffer);
+    }
     
 	if ((self->enableBits & NODE_RENDER_BIT) != 0 &&
         (self->scope & renderQueue->scope) != 0) {
 
         /* Check view frustum culling */
         
-#       if defined(M3G_ENABLE_VF_CULLING)
+#       if defined(M3G_ENABLE_VF_CULLING) && !defined(M3G_FUNKEY_DISABLE_MESH_VF_CULLING)
         AABB bbox;
         m3gGetBoundingBox(mesh->vertexBuffer, &bbox);
         m3gUpdateCullingMask(s, renderQueue->camera, &bbox);
         if (s->cullMask == 0) {
             m3gIncStat(M3G_INTERFACE(self),
                        M3G_STAT_RENDER_NODES_CULLED, 1);
+            if (trace) {
+                fprintf(stderr,
+                        "[M3G SETUP RESULT] mesh=%p queued=0 culled=1 "
+                        "success=1\n",
+                        (void *) mesh);
+                ++m3g_mesh_setup_trace_count;
+            }
             return M3G_TRUE;
         }
 #       endif
 
         /* No dice, let's render... */
 
-        return m3gQueueMesh(mesh, &s->toCamera, renderQueue);
+        {
+            M3Gbool queued = m3gQueueMesh(mesh, &s->toCamera, renderQueue);
+            if (trace) {
+                fprintf(stderr,
+                        "[M3G SETUP RESULT] mesh=%p queued=1 culled=0 "
+                        "success=%d\n",
+                        (void *) mesh, queued);
+                ++m3g_mesh_setup_trace_count;
+            }
+            return queued;
+        }
+    }
+    if (trace) {
+        fprintf(stderr,
+                "[M3G SETUP SKIP] mesh=%p renderEnabled=%d scopeMatch=%d\n",
+                (void *) mesh, (self->enableBits & NODE_RENDER_BIT) != 0,
+                (self->scope & renderQueue->scope) != 0);
+        ++m3g_mesh_setup_trace_count;
     }
     return M3G_TRUE;
 }
@@ -156,7 +217,19 @@ static void m3gMeshDoRender(Node *self,
                             M3Gint patchIndex)
 {
     Mesh *mesh = (Mesh *)self;
+    m3gTraceTransformMatrix("[M3G DORENDER TOCAMERA]", toCamera);
+    if (m3gTraceVerboseEnabled() && m3g_mesh_dorender_trace_count < 128) {
+        fprintf(stderr,
+                "[M3G MESH DORENDER] mesh=%p patch=%d vb=%p ib=%p app=%p "
+                "alpha=%d scope=0x%x\n",
+                (void *) mesh, patchIndex, (void *) mesh->vertexBuffer,
+                (void *) mesh->indexBuffers[patchIndex],
+                (void *) mesh->appearances[patchIndex],
+                mesh->totalAlphaFactor + 1, self->scope);
+        ++m3g_mesh_dorender_trace_count;
+    }
 
+    ++m3g_scene_drawmesh_trace_depth;
 	m3gDrawMesh(ctx,
                 mesh->vertexBuffer,
                 (const IndexBuffer *) mesh->indexBuffers[patchIndex],
@@ -164,6 +237,7 @@ static void m3gMeshDoRender(Node *self,
                 toCamera,
                 mesh->totalAlphaFactor + 1,
                 self->scope);
+    --m3g_scene_drawmesh_trace_depth;
 }
 
 /*!
@@ -628,6 +702,16 @@ static M3Gbool m3gMeshValidate(Node *self, M3Gbitmask stateBits, M3Gint scope)
     Mesh *mesh = (Mesh *) self;
     VertexBuffer *vb = mesh->vertexBuffer;
     int i;
+    int trace = m3gTraceVerboseEnabled() && m3g_mesh_validate_trace_count < 128;
+
+    if (trace) {
+        fprintf(stderr,
+                "[M3G VALIDATE] mesh=%p scope=0x%x nodeScope=0x%x "
+                "state=0x%x enable=0x%x vb=%p patches=%d\n",
+                (void *) mesh, scope, self->scope, stateBits,
+                self->enableBits, (void *) vb, mesh->trianglePatchCount);
+        ++m3g_mesh_validate_trace_count;
+    }
 
     if ((scope & self->scope) != 0) {
         if (stateBits & self->enableBits) {
@@ -636,9 +720,22 @@ static M3Gbool m3gMeshValidate(Node *self, M3Gbitmask stateBits, M3Gint scope)
             
             for (i = 0; i < mesh->trianglePatchCount; ++i) {
                 Appearance *app = ((Appearance*)mesh->appearances[i]);
+                IndexBuffer *ib = (IndexBuffer *) mesh->indexBuffers[i];
                 if (app) {
-                    if (!m3gValidateVertexBuffer(
-                            vb, app, m3gGetMaxIndex((const IndexBuffer *) mesh->indexBuffers[i]))) {
+                    M3Gint maxIndex = ib != NULL ? m3gGetMaxIndex(ib) : -1;
+                    M3Gbool valid = vb != NULL && ib != NULL &&
+                        m3gValidateVertexBuffer(vb, app, maxIndex);
+                    if (trace) {
+                        fprintf(stderr,
+                                "[M3G VALIDATE PATCH] mesh=%p patch=%d "
+                                "vb=%p positions=%p vertices=%d ib=%p "
+                                "maxIndex=%d app=%p valid=%d\n",
+                                (void *) mesh, i, (void *) vb,
+                                vb != NULL ? (void *) vb->vertices : NULL,
+                                vb != NULL ? m3gGetNumVertices(vb) : 0,
+                                (void *) ib, maxIndex, (void *) app, valid);
+                    }
+                    if (!valid) {
                         m3gRaiseError(M3G_INTERFACE(mesh), M3G_INVALID_OPERATION);
                         return M3G_FALSE;
                     }
@@ -656,6 +753,12 @@ static M3Gbool m3gMeshValidate(Node *self, M3Gbitmask stateBits, M3Gint scope)
             
             return m3gNodeValidate(self, stateBits, scope);
         }
+    }
+    if (trace) {
+        fprintf(stderr,
+                "[M3G VALIDATE SKIP] mesh=%p scopeMatch=%d enabled=%d\n",
+                (void *) mesh, (scope & self->scope) != 0,
+                (stateBits & self->enableBits) != 0);
     }
     return M3G_TRUE;
 }
@@ -836,4 +939,3 @@ M3G_API M3Gint m3gGetSubmeshCount(M3GMesh handle)
 
     return mesh->trianglePatchCount;
 }
-
