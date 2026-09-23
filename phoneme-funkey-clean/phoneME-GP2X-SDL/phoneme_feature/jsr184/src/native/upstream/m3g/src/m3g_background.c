@@ -32,6 +32,8 @@
 #include "m3g_animationtrack.h"
 #include "m3g_rendercontext.h"
 
+static int m3g_background_trace_count;
+
 /*----------------------------------------------------------------------
  * Internal functions
  *--------------------------------------------------------------------*/
@@ -63,6 +65,18 @@ static void m3gApplyBackground(RenderContext *ctx, Background *background)
 {
     GLbitfield glBits = 0;
     GLfixed temp[4];
+
+    if (m3gTraceVerboseEnabled() && m3g_background_trace_count < 32) {
+        fprintf(stderr,
+                "[M3G BACKGROUND] bg=%p image=%p colorClear=%d depthClear=%d "
+                "crop=%d,%d %dx%d mode=%d,%d\n",
+                (void *) background, (void *) background->image,
+                background->colorClearEnable, background->depthClearEnable,
+                background->crop.x, background->crop.y,
+                background->crop.width, background->crop.height,
+                background->modeX, background->modeY);
+        ++m3g_background_trace_count;
+    }
     
     if (background->depthClearEnable) {
         glBits |= GL_DEPTH_BUFFER_BIT;
@@ -671,4 +685,3 @@ M3G_API M3Gbool m3gIsBgEnabled(M3GBackground handle, M3Gint which)
             return background->depthClearEnable;
     }
 }
-

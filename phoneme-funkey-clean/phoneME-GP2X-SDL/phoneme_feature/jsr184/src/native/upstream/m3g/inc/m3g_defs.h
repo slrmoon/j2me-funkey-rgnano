@@ -497,6 +497,7 @@ extern "C" {
 
 #define M3G_RENDERQUEUE_BUCKET_BITS 8
 #define M3G_ENABLE_VF_CULLING
+#define M3G_FUNKEY_DISABLE_MESH_VF_CULLING
 #define M3G_GL_FORCE_PBUFFER_SIZE
     
 /*----------------------------------------------------------------------

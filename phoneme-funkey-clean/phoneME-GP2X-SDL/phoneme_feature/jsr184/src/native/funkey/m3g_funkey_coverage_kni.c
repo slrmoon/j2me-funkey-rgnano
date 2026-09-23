@@ -1586,6 +1586,25 @@ Java_javax_microedition_m3g_Transform__1setIdentity(void) {
 }
 
 KNIEXPORT KNI_RETURNTYPE_VOID
+Java_javax_microedition_m3g_Transform__1setTraceId(void) {
+    int trace_id = KNI_GetParameterAsInt(2);
+    KNI_StartHandles(1);
+    KNI_DeclareHandle(array);
+    KNI_GetParameterAsObject(1, array);
+    if (!KNI_IsNullHandle(array) && KNI_GetArrayLength(array) >= 76) {
+        KNI_SetRawArrayRegion(array, 72, 4, (const jbyte *) &trace_id);
+    }
+    KNI_EndHandles();
+    KNI_ReturnVoid();
+}
+
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+Java_javax_microedition_m3g_Transform__1traceVerbose(void) {
+    const char *value = getenv("M3G_TRACE_VERBOSE");
+    KNI_ReturnBoolean(value != 0 && value[0] != '\0' && value[0] != '0');
+}
+
+KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Transform__1setMatrix(void) {
     float m[16];
     float *src;

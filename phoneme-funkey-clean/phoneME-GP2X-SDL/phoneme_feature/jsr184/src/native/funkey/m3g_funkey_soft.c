@@ -166,13 +166,70 @@ static int g_draw_trace_count;
 static long g_ngl_trace_world;
 static int g_ngl_trace_frame;
 static int g_ngl_trace_immediate;
+static int g_render_node_transform_trace_count;
+#define FUNKEY_IMMEDIATE_TRACE_FRAMES 8
+#define FUNKEY_IMMEDIATE_TRACE_MESHES 24
+typedef struct {
+    long vertices;
+    long indices;
+    long appearance;
+} FunKeyImmediateTraceMesh;
+static int g_immediate_trace_frame = -1;
+static int g_immediate_trace_mesh_count;
+static FunKeyImmediateTraceMesh g_immediate_trace_meshes[FUNKEY_IMMEDIATE_TRACE_MESHES];
 
 static int
 funkey_m3g_ngl_trace_enabled(void) {
-    const char *value = getenv("M3G_NGL_TRACE");
+	const char *value = getenv("M3G_TRACE_VERBOSE");
     if (value != 0) {
         return value[0] != '\0' && value[0] != '0';
     }
+    return 1;
+}
+
+static void
+funkey_m3g_trace_float_matrix(const char *tag, const float *matrix) {
+    fprintf(stderr,
+            "%s %g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+            tag,
+            matrix[0], matrix[1], matrix[2], matrix[3],
+            matrix[4], matrix[5], matrix[6], matrix[7],
+            matrix[8], matrix[9], matrix[10], matrix[11],
+            matrix[12], matrix[13], matrix[14], matrix[15]);
+}
+
+static void
+funkey_m3g_immediate_trace_frame(void) {
+    if (g_immediate_trace_frame < FUNKEY_IMMEDIATE_TRACE_FRAMES) {
+        ++g_immediate_trace_frame;
+        g_immediate_trace_mesh_count = 0;
+    }
+}
+
+static int
+funkey_m3g_immediate_trace_mesh(long vertices, long indices, long appearance) {
+    int i;
+    FunKeyImmediateTraceMesh *mesh;
+    if (g_immediate_trace_frame < 0) {
+        g_immediate_trace_frame = 0;
+    }
+    if (g_immediate_trace_frame >= FUNKEY_IMMEDIATE_TRACE_FRAMES) {
+        return 0;
+    }
+    for (i = 0; i < g_immediate_trace_mesh_count; ++i) {
+        mesh = &g_immediate_trace_meshes[i];
+        if (mesh->vertices == vertices && mesh->indices == indices &&
+                mesh->appearance == appearance) {
+            return 0;
+        }
+    }
+    if (g_immediate_trace_mesh_count >= FUNKEY_IMMEDIATE_TRACE_MESHES) {
+        return 0;
+    }
+    mesh = &g_immediate_trace_meshes[g_immediate_trace_mesh_count++];
+    mesh->vertices = vertices;
+    mesh->indices = indices;
+    mesh->appearance = appearance;
     return 1;
 }
 
@@ -1514,9 +1571,10 @@ funkey_m3g_transform_get_matrix(long handle, float *matrix) {
     }
     if (obj != 0) {
         memcpy(matrix, obj->transform, 16 * sizeof(float));
-        matrix[12] += obj->translation[0];
-        matrix[13] += obj->translation[1];
-        matrix[14] += obj->translation[2];
+        /* Wrapper matrices are row-major; translation is column 3. */
+        matrix[3] += obj->translation[0];
+        matrix[7] += obj->translation[1];
+        matrix[11] += obj->translation[2];
     } else {
         for (i = 0; i < 16; ++i) {
             matrix[i] = 0.0f;
@@ -5615,6 +5673,7 @@ funkey_m3g_context_clear(long context, long background) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     M3GObject bg = funkey_m3g_core_object(background);
     if (ctx != 0) {
+        funkey_m3g_immediate_trace_frame();
         m3gClear(ctx, (M3GBackground) bg);
     }
 }
@@ -5639,6 +5698,21 @@ funkey_m3g_context_render(long context, long vertices, long indices,
     if (transform != 0) {
         funkey_m3g_matrix_from_float(&matrix, transform);
         matrix_ptr = &matrix;
+    }
+    if (funkey_m3g_immediate_trace_mesh(vertices, indices, appearance)) {
+        FunKeyM3GObject *vb_obj = funkey_m3g_object(vertices);
+        FunKeyM3GObject *ib_obj = funkey_m3g_object(indices);
+        FunKeyM3GObject *app_obj = funkey_m3g_object(appearance);
+        long texture0 = app_obj != 0 ? app_obj->appearance_textures[0] : 0;
+        FunKeyM3GObject *tex_obj = funkey_m3g_object(texture0);
+        nglTraceImmediateMesh((unsigned long) vertices,
+                              (unsigned long) indices,
+                              (unsigned long) appearance,
+                              (unsigned long) texture0,
+                              (unsigned long) (tex_obj != 0 ? tex_obj->texture_image : 0),
+                              vb_obj != 0 ? funkey_m3g_vertex_buffer_get_vertex_count(vertices) : 0,
+                              ib_obj != 0 ? ib_obj->index_count : 0,
+                              g_immediate_trace_frame);
     }
     if (funkey_m3g_ngl_trace_enabled() && !g_ngl_trace_immediate) {
         fprintf(stderr, "[M3G NGL] trace first immediate frame\n");
@@ -5675,7 +5749,10 @@ funkey_m3g_context_render_node(long context, long node, const float *transform) 
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     M3GInterface iface;
     M3GMatrix matrix;
+    float converted[16];
     M3GMatrix *matrix_ptr = 0;
+    int trace_transform = funkey_m3g_ngl_trace_enabled() &&
+                          g_render_node_transform_trace_count == 0;
     M3GObject n = funkey_m3g_core_object(node);
     if (ctx == 0 || n == 0) {
         if (funkey_m3g_ngl_trace_enabled()) {
@@ -5685,8 +5762,20 @@ funkey_m3g_context_render_node(long context, long node, const float *transform) 
         return;
     }
     if (transform != 0) {
+        if (trace_transform) {
+            funkey_m3g_trace_float_matrix("[M3G RENDERNODE RAW TRANSFORM]",
+                                          transform);
+        }
         funkey_m3g_matrix_from_float(&matrix, transform);
+        if (trace_transform) {
+            m3gGetMatrixColumns(&matrix, converted);
+            funkey_m3g_trace_float_matrix(
+                "[M3G RENDERNODE CONVERTED TRANSFORM]", converted);
+        }
         matrix_ptr = &matrix;
+        if (trace_transform) {
+            ++g_render_node_transform_trace_count;
+        }
     }
     if (funkey_m3g_ngl_trace_enabled()) {
         fprintf(stderr, "[M3G NGL] render node=%ld\n", node);
@@ -5759,6 +5848,8 @@ void
 funkey_m3g_context_set_camera(long context, long camera, const float *transform) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     M3GMatrix matrix;
+    M3GMatrix returned;
+    float returned_rows[16];
     M3GMatrix *matrix_ptr = 0;
     M3GObject c = funkey_m3g_core_object(camera);
     if (ctx == 0 || c == 0) {
@@ -5769,6 +5860,33 @@ funkey_m3g_context_set_camera(long context, long camera, const float *transform)
         matrix_ptr = &matrix;
     }
     m3gSetCamera(ctx, (M3GCamera) c, matrix_ptr);
+    if (funkey_m3g_ngl_trace_enabled() && g_ngl_trace_frame < 16) {
+        m3gGetViewTransform(ctx, &returned);
+        m3gGetMatrixRows(&returned, returned_rows);
+        fprintf(stderr,
+                "[M3G CAMERA MATRIX] input=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g "
+                "camera=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+                transform != 0 ? transform[0] : 1.0f,
+                transform != 0 ? transform[1] : 0.0f,
+                transform != 0 ? transform[2] : 0.0f,
+                transform != 0 ? transform[3] : 0.0f,
+                transform != 0 ? transform[4] : 0.0f,
+                transform != 0 ? transform[5] : 1.0f,
+                transform != 0 ? transform[6] : 0.0f,
+                transform != 0 ? transform[7] : 0.0f,
+                transform != 0 ? transform[8] : 0.0f,
+                transform != 0 ? transform[9] : 0.0f,
+                transform != 0 ? transform[10] : 1.0f,
+                transform != 0 ? transform[11] : 0.0f,
+                transform != 0 ? transform[12] : 0.0f,
+                transform != 0 ? transform[13] : 0.0f,
+                transform != 0 ? transform[14] : 0.0f,
+                transform != 0 ? transform[15] : 1.0f,
+                returned_rows[0], returned_rows[1], returned_rows[2], returned_rows[3],
+                returned_rows[4], returned_rows[5], returned_rows[6], returned_rows[7],
+                returned_rows[8], returned_rows[9], returned_rows[10], returned_rows[11],
+                returned_rows[12], returned_rows[13], returned_rows[14], returned_rows[15]);
+    }
 }
 
 void

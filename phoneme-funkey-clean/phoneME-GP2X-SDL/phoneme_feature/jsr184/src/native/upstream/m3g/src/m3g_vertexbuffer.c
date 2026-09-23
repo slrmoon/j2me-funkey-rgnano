@@ -79,7 +79,19 @@ static void m3gDestroyVertexBuffer(Object *obj)
  */
 static void m3gApplyScaleAndBias(const VertexBuffer *buffer)
 {
+    static int trace_count;
     M3G_VALIDATE_OBJECT(buffer);
+
+    nglTraceSceneVertexScale(buffer->vertexScale, buffer->vertexBias);
+    if (m3gTraceVerboseEnabled() && trace_count < 64) {
+        fprintf(stderr,
+                "[M3G VERTEX SCALE] vb=%p scale=%g bias=%g,%g,%g "
+                "hasVertices=%d\n",
+                (void *) buffer, buffer->vertexScale,
+                buffer->vertexBias[0], buffer->vertexBias[1],
+                buffer->vertexBias[2], buffer->vertices != NULL);
+        ++trace_count;
+    }
     
     glMatrixMode(GL_TEXTURE);
     {
@@ -1011,4 +1023,3 @@ M3G_API M3Gint  m3gGetVertexCount(M3GVertexBuffer handle)
 
     return buffer->vertexCount;    
 }
-

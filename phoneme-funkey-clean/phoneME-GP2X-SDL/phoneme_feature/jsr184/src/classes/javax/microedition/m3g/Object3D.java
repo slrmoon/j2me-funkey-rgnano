@@ -46,7 +46,6 @@ public abstract class Object3D {
 	Object3D(long handle) {
 		if (handle != 0) {
 			this.handle = handle;
-			_addRef(handle);
 
 			// Get associated Interafece object and
 			// register this instance with that

@@ -37,6 +37,37 @@
 #include "m3g_lightmanager.h"
 #include "m3g_vertexbuffer.h"
 #include "m3g_world.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+static int m3g_rendernode_trace_count;
+static int m3g_drawmesh_trace_count;
+static int m3g_scene_drawmesh_trace_depth;
+static int m3g_scene_drawmesh_trace_count;
+static int m3g_transform_trace_active;
+static int m3g_transform_trace_lines;
+
+static int m3gTraceVerboseEnabled(void)
+{
+    const char *value = getenv("M3G_TRACE_VERBOSE");
+    return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static void m3gTraceTransformMatrix(const char *tag, const Matrix *matrix)
+{
+    if (!m3gTraceVerboseEnabled() || !m3g_transform_trace_active ||
+            m3g_transform_trace_lines >= 128) {
+        return;
+    }
+    fprintf(stderr,
+            "%s %g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+            tag,
+            matrix->elem[0], matrix->elem[1], matrix->elem[2], matrix->elem[3],
+            matrix->elem[4], matrix->elem[5], matrix->elem[6], matrix->elem[7],
+            matrix->elem[8], matrix->elem[9], matrix->elem[10], matrix->elem[11],
+            matrix->elem[12], matrix->elem[13], matrix->elem[14], matrix->elem[15]);
+    ++m3g_transform_trace_lines;
+}
 
 /*----------------------------------------------------------------------
  * Private data types
@@ -804,9 +835,11 @@ static void m3gInitRender(M3GRenderContext context, M3Genum renderMode)
     /* Set up the projection and viewing transformations (static
      * during rendering) */
 
-	m3gApplyProjection(ctx->camera);
+    m3gApplyProjection(ctx->camera);
     if (renderMode == RENDER_NODES) {
+        glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
+        nglTraceSceneModelviewReset();
     }
     else {
         glLoadMatrixf(ctx->viewTransform);
@@ -1109,10 +1142,20 @@ static void m3gDrawMesh(RenderContext *ctx,
                         M3Gint alphaFactor,
                         M3Gint scope)
 {
+    int trace_scene_matrix = 0;
     M3G_VALIDATE_OBJECT(ctx);
     M3G_VALIDATE_OBJECT(vb);
     M3G_VALIDATE_OBJECT(ib);
     M3G_VALIDATE_OBJECT(app);
+
+    if (m3gTraceVerboseEnabled() && m3g_scene_drawmesh_trace_depth > 0 &&
+        m3g_scene_drawmesh_trace_count < 128) {
+        fprintf(stderr,
+                "[M3G SCENE DRAWMESH ENTRY] ctx=%p vb=%p ib=%p app=%p "
+                "model=%p alpha=%d scope=0x%x\n",
+                (void *) ctx, (void *) vb, (void *) ib, (void *) app,
+                (void *) modelTransform, alphaFactor, scope);
+    }
 
     /* Check whether we need to use alternate rendering to get
      * two-sided lighting */
@@ -1133,12 +1176,53 @@ static void m3gDrawMesh(RenderContext *ctx,
     m3gApplyLights(ctx, scope);
     
     /* Apply the extra modeling transformation if present */
-    
+
+    if (m3g_transform_trace_active && modelTransform != NULL) {
+        trace_scene_matrix = nglTraceSceneModelviewBegin();
+        if (trace_scene_matrix) {
+            float input[16];
+            m3gGetMatrixColumns(modelTransform, input);
+            fprintf(stderr,
+                    "[M3G SCENE MATRIX INPUT] "
+                    "%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+                    input[0], input[1], input[2], input[3],
+                    input[4], input[5], input[6], input[7],
+                    input[8], input[9], input[10], input[11],
+                    input[12], input[13], input[14], input[15]);
+        }
+    }
+
     if (modelTransform != NULL) {
 		float transform[16];
+        if (m3gTraceVerboseEnabled() && m3g_rendernode_trace_count < 8) {
+		    fprintf(stderr,
+		            "[M3G MODEL MATRIX] complete=%d classified=%d mask=0x%x "
+		            "elem=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+		            modelTransform->complete, modelTransform->classified,
+		            (unsigned int) modelTransform->mask,
+		            modelTransform->elem[0], modelTransform->elem[1],
+		            modelTransform->elem[2], modelTransform->elem[3],
+		            modelTransform->elem[4], modelTransform->elem[5],
+		            modelTransform->elem[6], modelTransform->elem[7],
+		            modelTransform->elem[8], modelTransform->elem[9],
+		            modelTransform->elem[10], modelTransform->elem[11],
+		            modelTransform->elem[12], modelTransform->elem[13],
+		            modelTransform->elem[14], modelTransform->elem[15]);
+		}
 		m3gGetMatrixColumns(modelTransform, transform);
+        if (m3gTraceVerboseEnabled() && m3g_rendernode_trace_count < 8) {
+		    fprintf(stderr,
+		            "[M3G MODEL MATRIX OUT] %g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+		            transform[0], transform[1], transform[2], transform[3],
+		            transform[4], transform[5], transform[6], transform[7],
+		            transform[8], transform[9], transform[10], transform[11],
+		            transform[12], transform[13], transform[14], transform[15]);
+		}
         
         glPushMatrix();
+        if (trace_scene_matrix) {
+            nglTraceSceneModelviewExpectModel();
+        }
         glMultMatrixf(transform);
     }
 
@@ -1187,7 +1271,26 @@ static void m3gDrawMesh(RenderContext *ctx,
     m3gApplyScaleAndBias(vb);
     
     /* All ready, render and then release the stuff we bound above */
-    
+
+    if (m3gTraceVerboseEnabled() && m3g_drawmesh_trace_count < 128) {
+        fprintf(stderr,
+                "[M3G DRAWMESH] ctx=%p vb=%p ib=%p app=%p model=%p "
+                "alpha=%d scope=0x%x\n",
+                (void *) ctx, (void *) vb, (void *) ib, (void *) app,
+                (void *) modelTransform, alphaFactor, scope);
+        ++m3g_drawmesh_trace_count;
+    }
+    if (m3gTraceVerboseEnabled() && m3g_scene_drawmesh_trace_depth > 0 &&
+        m3g_scene_drawmesh_trace_count < 128) {
+        fprintf(stderr,
+                "[M3G SCENE DRAWMESH SEND] ctx=%p vb=%p ib=%p app=%p\n",
+                (void *) ctx, (void *) vb, (void *) ib, (void *) app);
+        ++m3g_scene_drawmesh_trace_count;
+    }
+
+    if (m3gTraceVerboseEnabled() && m3g_scene_drawmesh_trace_depth > 0) {
+        nglTraceSceneDraw();
+    }
     m3gSendIndexBuffer(ib);
     m3gReleaseVertexBuffer(vb);
     m3gReleaseTextures(app);
@@ -1218,6 +1321,15 @@ static M3Gbool m3gValidateBackground(RenderContext *ctx, Background *bg)
         if (ctx->target.type == SURFACE_IMAGE && boundFormat == M3G_RGBA8) {
             return (m3gGetFormat(bg->image) == M3G_RGBA);
         }
+#if defined(M3G_NGL_CONTEXT_API)
+        /* The FunKey software NGL backend composites RGBA images into the
+         * RGB565 memory target, so an RGBA background is valid here. */
+        else if (ctx->target.type == SURFACE_MEMORY &&
+                 (m3gGetFormat(bg->image) == M3G_RGB ||
+                  m3gGetFormat(bg->image) == M3G_RGBA)) {
+            return M3G_TRUE;
+        }
+#endif
         else {
             return (m3gGetFormat(bg->image) == M3G_RGB);
         }
@@ -1980,6 +2092,11 @@ M3G_API void m3gRenderNode(M3GRenderContext context,
     M3G_VALIDATE_OBJECT(ctx);
     M3G_VALIDATE_OBJECT(node);
 
+    if (m3gTraceVerboseEnabled() && m3g_rendernode_trace_count == 0) {
+        m3g_transform_trace_active = 1;
+        m3g_transform_trace_lines = 0;
+    }
+
     /* Check for errors */
     
     if (node == NULL) {
@@ -2007,7 +2124,15 @@ M3G_API void m3gRenderNode(M3GRenderContext context,
     if (m3gValidateNode(node, NODE_RENDER_BIT, ctx->camera->node.scope)) {
         M3Gbool setup;
         SetupRenderState s;
+        int trace = m3gTraceVerboseEnabled() && m3g_rendernode_trace_count < 128;
         M3G_END_PROFILE(M3G_INTERFACE(ctx), M3G_PROFILE_VALIDATE);
+        if (trace) {
+            fprintf(stderr,
+                    "[M3G RENDERNODE] node=%p class=%d validated=1 "
+                    "camScope=0x%x target=%d camera=%p\n",
+                    (void *) node, M3G_CLASS(node), ctx->camera->node.scope,
+                    ctx->target.type, (void *) ctx->camera);
+        }
         
         s.cullMask = CULLMASK_ALL;
 
@@ -2016,8 +2141,12 @@ M3G_API void m3gRenderNode(M3GRenderContext context,
          * meshes and correct view frustum culling */
         
         m3gSetMatrixColumns(&s.toCamera, ctx->viewTransform);
+        m3gTraceTransformMatrix("[M3G RENDERNODE VIEW]", &s.toCamera);
+        m3gTraceTransformMatrix("[M3G RENDERNODE TOCAMERA INITIAL]", &s.toCamera);
         if (transform) {
+            m3gTraceTransformMatrix("[M3G RENDERNODE ARG]", transform);
             m3gMulMatrix(&s.toCamera, transform);
+            m3gTraceTransformMatrix("[M3G RENDERNODE TOCAMERA AFTER ARG]", &s.toCamera);
         }
         ctx->renderQueue->root = (Node *) node;
         ctx->renderQueue->scope = ctx->camera->node.scope;
@@ -2030,6 +2159,14 @@ M3G_API void m3gRenderNode(M3GRenderContext context,
                                                    NULL,
                                                    &s,
                                                    ctx->renderQueue);
+        if (trace) {
+            fprintf(stderr,
+                    "[M3G RENDERNODE SETUP] node=%p class=%d setup=%d "
+                    "rqMin=%d rqMax=%d cullMask=0x%x\n",
+                    (void *) node, M3G_CLASS(node), setup,
+                    ctx->renderQueue->minBucket, ctx->renderQueue->maxBucket,
+                    s.cullMask);
+        }
         M3G_END_PROFILE(M3G_INTERFACE(ctx), M3G_PROFILE_SETUP);
         M3G_LOG(M3G_LOG_RENDERING, "Rendering: commit\n");
         M3G_BEGIN_PROFILE(M3G_INTERFACE(ctx), M3G_PROFILE_COMMIT);
@@ -2040,9 +2177,21 @@ M3G_API void m3gRenderNode(M3GRenderContext context,
     		m3gCommit(ctx->renderQueue, ctx);
             m3gReleaseFrameBuffer(ctx);
         }
+        if (trace) {
+            ++m3g_rendernode_trace_count;
+        }
         
         M3G_END_PROFILE(M3G_INTERFACE(ctx), M3G_PROFILE_COMMIT);
+		m3g_transform_trace_active = 0;
 	}
+    else if (m3gTraceVerboseEnabled() && m3g_rendernode_trace_count < 128) {
+        fprintf(stderr,
+                "[M3G RENDERNODE] node=%p class=%d validated=0 "
+                "camScope=0x%x target=%d camera=%p\n",
+                (void *) node, M3G_CLASS(node), ctx->camera->node.scope,
+                ctx->target.type, (void *) ctx->camera);
+        ++m3g_rendernode_trace_count;
+    }
 
 	m3gClearRenderQueue(ctx->renderQueue);
     
