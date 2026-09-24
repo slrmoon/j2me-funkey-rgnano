@@ -13,10 +13,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #define NGL_SW_MAX_TEXTURES 256
 #define NGL_SW_STACK_DEPTH 16
 #define NGL_SW_TEXTURE_UNITS 2
+
+typedef struct {
+    int valid;
+    int index[3];
+    float object[3][4];
+    float clip[3][4];
+    float screen[3][2];
+    float uv[3][2];
+    float signed_area;
+    int front_face;
+    GLenum cull_mode;
+} NGLImmediateTriangleSample;
 
 typedef struct {
     GLint size;
@@ -57,6 +70,23 @@ typedef struct {
     GLfloat emission[4];
     GLfloat shininess;
 } NGLMaterial;
+
+typedef struct {
+    int frame;
+    int draw_call;
+    unsigned long vb, ib, app, texture, image;
+    int vertex_count, index_count;
+    int input_triangles, raster_calls, clip_reject[7];
+    int w_reject, area_zero, culled, depth_reject, alpha_reject;
+    int bounds_valid, min_x, max_x, min_y, max_y;
+    float w_min, w_max;
+    int pixels;
+    int cull_override;
+    int highlight;
+    NGLImmediateTriangleSample first_nonzero;
+    NGLImmediateTriangleSample first_culled;
+    NGLImmediateTriangleSample first_passed;
+} NGLImmediateRecord;
 
 typedef struct {
     unsigned short *pixels;
@@ -152,6 +182,10 @@ typedef struct {
     int immediate_vertex_count;
     int immediate_index_count;
     int immediate_frame;
+    int immediate_draw_call;
+    int immediate_defer;
+    int immediate_record_count;
+    NGLImmediateRecord immediate_records[32];
     int immediate_min_x;
     int immediate_max_x;
     int immediate_min_y;
@@ -163,6 +197,35 @@ typedef struct {
     int immediate_raster_calls;
     int immediate_w_reject;
     int immediate_area_zero;
+    int immediate_bounds_valid;
+    float immediate_w_min;
+    float immediate_w_max;
+    NGLImmediateTriangleSample immediate_first_nonzero;
+    NGLImmediateTriangleSample immediate_first_culled;
+    NGLImmediateTriangleSample immediate_first_passed;
+    int immediate_disable_cull;
+    int immediate_highlight;
+    float immediate_transform[16];
+    int immediate_transform_valid;
+    int rally_geometry_trace_count;
+    int trace_frame_matrices_pending;
+    int trace_frame_matrix_frame;
+    int diag_enabled;
+    int diag_inited;
+    int diag_frame;
+    int diag_capture_frame;
+    int diag_capture_active;
+    int diag_done;
+    int diag_draw_index;
+    int diag_draw_limit;
+    int diag_skipped_draws;
+    int diag_source;
+    int diag_mode;
+    int diag_depth_reject;
+    int diag_alpha_reject;
+    int diag_pixels_changed;
+    int diag_texture_dumped[NGL_SW_MAX_TEXTURES];
+    char diag_dir[192];
     GLenum error;
 } NGLContext;
 
@@ -186,6 +249,25 @@ static int ngl_sw_trace_enabled(void) {
 
 static int ngl_sw_verbose_trace_enabled(void) {
 	const char *value = getenv("M3G_TRACE_VERBOSE");
+    return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static int ngl_sw_rally_trace_enabled(void) {
+    const char *value = getenv("M3G_RALLY_TRACE");
+    return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static int ngl_sw_rally_reflect_stage(void) {
+    const char *value = getenv("M3G_RALLY_REFLECT_X");
+    if (!ngl_sw_rally_trace_enabled() || value == NULL) return 0;
+    if (strcmp(value, "model") == 0) return 1;
+    if (strcmp(value, "view") == 0) return 2;
+    if (strcmp(value, "projection") == 0) return 3;
+    return 0;
+}
+
+static int ngl_sw_diag_flip_front_enabled(void) {
+    const char *value = getenv("M3G_VIS_FLIP_FRONT");
     return value != NULL && value[0] != '\0' && value[0] != '0';
 }
 
@@ -283,6 +365,99 @@ static unsigned int ngl_sw_rgb565_to_argb(unsigned short p) {
     g = (g << 2) | (g >> 4);
     b = (b << 3) | (b >> 2);
     return 0xff000000U | (r << 16) | (g << 8) | b;
+}
+
+static int ngl_sw_diag_env_enabled(void) {
+    const char *value = getenv("M3G_VIS_CAPTURE");
+    return value != NULL && value[0] != '\0' && value[0] != '0';
+}
+
+static void ngl_sw_diag_init(void) {
+    const char *dir;
+    const char *frame;
+    const char *limit;
+    const char *mode;
+    if (ngl_sw.diag_inited) return;
+    ngl_sw.diag_inited = 1;
+    ngl_sw.diag_enabled = ngl_sw_diag_env_enabled();
+    if (!ngl_sw.diag_enabled) return;
+    dir = getenv("M3G_VIS_DIR");
+    if (dir == NULL || dir[0] == '\0') dir = "/tmp/opencode/m3g-vis";
+    snprintf(ngl_sw.diag_dir, sizeof(ngl_sw.diag_dir), "%s", dir);
+    mkdir(ngl_sw.diag_dir, 0777);
+    frame = getenv("M3G_VIS_FRAME");
+    ngl_sw.diag_capture_frame = frame != NULL && frame[0] != '\0' ? atoi(frame) : -1;
+    limit = getenv("M3G_VIS_DRAW_LIMIT");
+    ngl_sw.diag_draw_limit = limit != NULL && limit[0] != '\0' ? atoi(limit) : 160;
+    if (ngl_sw.diag_draw_limit <= 0) ngl_sw.diag_draw_limit = 160;
+    mode = getenv("M3G_VIS_MODE");
+    ngl_sw.diag_mode = 0;
+    if (mode != NULL && strcmp(mode, "solid") == 0) ngl_sw.diag_mode = 1;
+    else if (mode != NULL && strcmp(mode, "nocull") == 0) ngl_sw.diag_mode = 2;
+    else if (mode != NULL && strcmp(mode, "nodepth") == 0) ngl_sw.diag_mode = 3;
+    else if (mode != NULL && strcmp(mode, "flipfront") == 0) ngl_sw.diag_mode = 4;
+    if (ngl_sw_diag_flip_front_enabled()) ngl_sw.diag_mode = 4;
+    fprintf(stderr,
+            "[NGLDIAG] event=init dir=%s frame=%d drawLimit=%d mode=%d modeText=%s flipFront=%d\n",
+            ngl_sw.diag_dir, ngl_sw.diag_capture_frame,
+            ngl_sw.diag_draw_limit, ngl_sw.diag_mode,
+            mode != NULL ? mode : "", ngl_sw_diag_flip_front_enabled());
+}
+
+static const char *ngl_sw_diag_source_name(void) {
+    if (ngl_sw.diag_source == 1) return "direct";
+    if (ngl_sw.diag_source == 2) return "renderNode";
+    if (ngl_sw.diag_source == 3) return "renderWorld";
+    return "unknown";
+}
+
+static unsigned int ngl_sw_diag_color(int index) {
+    unsigned int x = (unsigned int)index * 2654435761U;
+    unsigned int r = 64U + ((x >> 16) & 191U);
+    unsigned int g = 64U + ((x >> 8) & 191U);
+    unsigned int b = 64U + (x & 191U);
+    return ngl_sw_pack(r, g, b, 255U);
+}
+
+static void ngl_sw_diag_write_rgb565(const char *kind, int draw_index) {
+    char path[320];
+    FILE *file;
+    int y;
+    if (!ngl_sw.diag_enabled || ngl_sw.pixels == NULL ||
+            ngl_sw.width <= 0 || ngl_sw.height <= 0) return;
+    if (draw_index >= 0) {
+        snprintf(path, sizeof(path), "%s/%s-f%04d-d%04d.rgb565",
+                 ngl_sw.diag_dir, kind, ngl_sw.diag_frame, draw_index);
+    } else {
+        snprintf(path, sizeof(path), "%s/%s-f%04d.rgb565",
+                 ngl_sw.diag_dir, kind, ngl_sw.diag_frame);
+    }
+    file = fopen(path, "wb");
+    if (file == NULL) return;
+    for (y = 0; y < ngl_sw.height; ++y) {
+        fwrite(ngl_sw.pixels + y * ngl_sw.stride, sizeof(unsigned short),
+               (size_t)ngl_sw.width, file);
+    }
+    fclose(file);
+    fprintf(stderr,
+            "[NGLDIAG] event=image kind=%s frame=%d draw=%d path=%s width=%d height=%d stride=%d format=rgb565le\n",
+            kind, ngl_sw.diag_frame, draw_index, path,
+            ngl_sw.width, ngl_sw.height, ngl_sw.stride);
+}
+
+static int ngl_sw_diag_count_changed(const unsigned short *before) {
+    int changed = 0;
+    int x;
+    int y;
+    if (before == NULL || ngl_sw.pixels == NULL) return -1;
+    for (y = 0; y < ngl_sw.height; ++y) {
+        const unsigned short *src = before + y * ngl_sw.width;
+        const unsigned short *dst = ngl_sw.pixels + y * ngl_sw.stride;
+        for (x = 0; x < ngl_sw.width; ++x) {
+            if (src[x] != dst[x]) ++changed;
+        }
+    }
+    return changed;
 }
 
 static unsigned int ngl_sw_apply_color_mask(unsigned int src, unsigned int dst) {
@@ -536,6 +711,25 @@ static NGLTexture *ngl_sw_bound_texture(int unit) {
         return &ngl_sw.textures[unit];
     }
     return ngl_sw_texture(ngl_sw.bound_texture[unit]);
+}
+
+static void ngl_sw_diag_dump_texture(GLuint id, const NGLTexture *t) {
+    char path[320];
+    FILE *file;
+    unsigned int slot = ((unsigned int)id) % NGL_SW_MAX_TEXTURES;
+    if (!ngl_sw.diag_capture_active || t == NULL || t->argb == NULL ||
+            t->width <= 0 || t->height <= 0 || ngl_sw.diag_texture_dumped[slot]) return;
+    snprintf(path, sizeof(path), "%s/texture-%04u.argb",
+             ngl_sw.diag_dir, (unsigned int)id);
+    file = fopen(path, "wb");
+    if (file == NULL) return;
+    fwrite(t->argb, sizeof(unsigned int), (size_t)t->width * (size_t)t->height,
+           file);
+    fclose(file);
+    ngl_sw.diag_texture_dumped[slot] = 1;
+    fprintf(stderr,
+            "[NGLDIAG] event=texture frame=%d texture=%u path=%s width=%d height=%d format=argb32-source\n",
+            ngl_sw.diag_frame, (unsigned int)id, path, t->width, t->height);
 }
 
 static int ngl_sw_pixel_bytes(GLenum format) {
@@ -872,6 +1066,9 @@ static unsigned int ngl_sw_apply_fog(unsigned int color, float z) {
 
 typedef struct {
     float x, y, z, w;
+    float object[4];
+    float view[4];
+    int source_index;
     float fog;
     float u[NGL_SW_TEXTURE_UNITS], v[NGL_SW_TEXTURE_UNITS];
     unsigned int color;
@@ -891,6 +1088,152 @@ static void ngl_sw_trace_screen_vertex(const NGLVertex *v) {
     if (sy > (float) ngl_sw.immediate_max_y) ngl_sw.immediate_max_y = (int) sy;
 }
 
+static inline void nglTraceFrameMatricesRequest(int frame) {
+    ngl_sw.trace_frame_matrices_pending = 1;
+    ngl_sw.trace_frame_matrix_frame = frame;
+}
+
+static void ngl_sw_trace_frame_matrices(void) {
+    if (!ngl_sw.trace_frame_matrices_pending) return;
+    fprintf(stderr,
+            "[M3G FRAME MATRICES] frame=%d modelview=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g "
+            "projection=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+            ngl_sw.trace_frame_matrix_frame,
+            ngl_sw.modelview[0], ngl_sw.modelview[1], ngl_sw.modelview[2], ngl_sw.modelview[3],
+            ngl_sw.modelview[4], ngl_sw.modelview[5], ngl_sw.modelview[6], ngl_sw.modelview[7],
+            ngl_sw.modelview[8], ngl_sw.modelview[9], ngl_sw.modelview[10], ngl_sw.modelview[11],
+            ngl_sw.modelview[12], ngl_sw.modelview[13], ngl_sw.modelview[14], ngl_sw.modelview[15],
+            ngl_sw.projection[0], ngl_sw.projection[1], ngl_sw.projection[2], ngl_sw.projection[3],
+            ngl_sw.projection[4], ngl_sw.projection[5], ngl_sw.projection[6], ngl_sw.projection[7],
+            ngl_sw.projection[8], ngl_sw.projection[9], ngl_sw.projection[10], ngl_sw.projection[11],
+            ngl_sw.projection[12], ngl_sw.projection[13], ngl_sw.projection[14], ngl_sw.projection[15]);
+    ngl_sw.trace_frame_matrices_pending = 0;
+}
+
+static int ngl_sw_env_draw_selected(const char *name,
+                                    unsigned long vb, int draw_call) {
+    const char *text = getenv(name);
+    char *end;
+    unsigned long selected_vb;
+    long selected_draw;
+    if (text == NULL || text[0] == '\0') return 0;
+    while (*text != '\0') {
+        while (*text == ',' || *text == ' ' || *text == '\t') ++text;
+        selected_vb = strtoul(text, &end, 10);
+        if (end == text) {
+            while (*text != '\0' && *text != ',') ++text;
+            continue;
+        }
+        text = end;
+        if (*text == ':') {
+            ++text;
+            selected_draw = strtol(text, &end, 10);
+            if (end != text && selected_vb == vb && selected_draw == draw_call) {
+                return 1;
+            }
+            text = end;
+        } else if (selected_vb == vb) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void ngl_sw_capture_triangle(NGLImmediateTriangleSample *sample,
+                                    NGLVertex a, NGLVertex b, NGLVertex c,
+                                    float ax, float ay, float bx, float by,
+                                    float cx, float cy, float area) {
+    NGLVertex vertices[3];
+    int i;
+    if (sample->valid) return;
+    vertices[0] = a;
+    vertices[1] = b;
+    vertices[2] = c;
+    memset(sample, 0, sizeof(*sample));
+    sample->valid = 1;
+    sample->signed_area = area;
+    sample->front_face = (area > 0.0f) == (ngl_sw.front_face == GL_CCW);
+    sample->cull_mode = ngl_sw.cull_mode;
+    for (i = 0; i < 3; ++i) {
+        sample->index[i] = vertices[i].source_index;
+        memcpy(sample->object[i], vertices[i].object, sizeof(sample->object[i]));
+        sample->clip[i][0] = vertices[i].x;
+        sample->clip[i][1] = vertices[i].y;
+        sample->clip[i][2] = vertices[i].z;
+        sample->clip[i][3] = vertices[i].w;
+        sample->uv[i][0] = vertices[i].u[0];
+        sample->uv[i][1] = vertices[i].v[0];
+    }
+    sample->screen[0][0] = ax;
+    sample->screen[0][1] = ay;
+    sample->screen[1][0] = bx;
+    sample->screen[1][1] = by;
+    sample->screen[2][0] = cx;
+    sample->screen[2][1] = cy;
+}
+
+static void ngl_sw_print_triangle_sample(const char *kind,
+                                         const NGLImmediateTriangleSample *s,
+                                         const NGLImmediateRecord *r) {
+    int i;
+    if (!s->valid) {
+        fprintf(stderr,
+                "[M3G IMMEDIATE TRI] kind=%s frame=%d drawCall=%d vb=%lu none\n",
+                kind, r->frame, r->draw_call, r->vb);
+        return;
+    }
+    fprintf(stderr,
+            "[M3G IMMEDIATE TRI] kind=%s frame=%d drawCall=%d vb=%lu "
+            "idx=%d,%d,%d area=%g frontFace=%d cullMode=%u",
+            kind, r->frame, r->draw_call, r->vb,
+            s->index[0], s->index[1], s->index[2], s->signed_area,
+            s->front_face, (unsigned int)s->cull_mode);
+    for (i = 0; i < 3; ++i) {
+        fprintf(stderr,
+                " v%d=obj(%g,%g,%g,%g) clip(%g,%g,%g,%g) screen(%g,%g) uv(%g,%g)",
+                i,
+                s->object[i][0], s->object[i][1], s->object[i][2], s->object[i][3],
+                s->clip[i][0], s->clip[i][1], s->clip[i][2], s->clip[i][3],
+                s->screen[i][0], s->screen[i][1],
+                s->uv[i][0], s->uv[i][1]);
+    }
+    fprintf(stderr, "\n");
+}
+
+static void ngl_sw_print_immediate_record(const NGLImmediateRecord *r) {
+    fprintf(stderr,
+            "[M3G IMMEDIATE DRAW] frame=%d drawCall=%d vb=%lu ib=%lu app=%lu "
+            "tex=%lu image=%lu vertices=%d indices=%d "
+            "inputTri=%d raster=%d clip=%d,%d,%d,%d,%d,%d,%d "
+            "wClip=%d wReject=%d areaZero=%d culled=%d depthReject=%d "
+            "alphaReject=%d boundsValid=%d wRange=%g,%g "
+             "bounds=%d,%d,%d,%d pixels=%d cullOverride=%d highlight=%d\n",
+            r->frame, r->draw_call, r->vb, r->ib, r->app, r->texture, r->image,
+            r->vertex_count, r->index_count, r->input_triangles,
+            r->raster_calls, r->clip_reject[0], r->clip_reject[1],
+            r->clip_reject[2], r->clip_reject[3], r->clip_reject[4],
+            r->clip_reject[5], r->clip_reject[6], r->clip_reject[0],
+            r->w_reject, r->area_zero, r->culled, r->depth_reject,
+            r->alpha_reject, r->bounds_valid, r->w_min, r->w_max,
+             r->min_x, r->max_x, r->min_y, r->max_y, r->pixels,
+             r->cull_override, r->highlight);
+    ngl_sw_print_triangle_sample("nonzero", &r->first_nonzero, r);
+    ngl_sw_print_triangle_sample("culled", &r->first_culled, r);
+    ngl_sw_print_triangle_sample("passed", &r->first_passed, r);
+}
+
+static inline void nglTraceImmediateFrameBegin(void) {
+    ngl_sw.immediate_record_count = 0;
+}
+
+static inline void nglTraceImmediateFrameFlush(void) {
+    int i;
+    for (i = 0; i < ngl_sw.immediate_record_count; ++i) {
+        ngl_sw_print_immediate_record(&ngl_sw.immediate_records[i]);
+    }
+    ngl_sw.immediate_record_count = 0;
+}
+
 static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
     float p[4];
     float mv[4];
@@ -898,12 +1241,15 @@ static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
     float tc[4];
     int unit;
     ngl_sw_vec(&ngl_sw.vertex, index, p, 4);
+    memcpy(out->object, p, sizeof(out->object));
+    out->source_index = index;
     ngl_sw_transform_vec4(mv, ngl_sw.modelview, p);
     ngl_sw_transform_vec4(clip, ngl_sw.projection, mv);
     out->x = clip[0];
     out->y = clip[1];
     out->z = clip[2];
     out->w = clip[3];
+    memcpy(out->view, mv, sizeof(out->view));
     out->fog = fabsf(mv[2]);
     out->color = ngl_sw_lit_color(index, mv, ngl_sw_color(index));
     for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
@@ -919,6 +1265,65 @@ static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
                            ngl_sw.texture_matrix[unit][13];
         }
     }
+}
+
+static void ngl_sw_rally_trace_geometry(const NGLVertex *a,
+                                        const NGLVertex *b,
+                                        const NGLVertex *c) {
+    const NGLVertex *vertices[3];
+    int i;
+    if (!ngl_sw_rally_trace_enabled() ||
+            !ngl_sw.immediate_transform_valid ||
+            ngl_sw.rally_geometry_trace_count >= 8) {
+        return;
+    }
+    vertices[0] = a;
+    vertices[1] = b;
+    vertices[2] = c;
+    fprintf(stderr,
+            "[M3G RALLY NGL MATRICES] frame=%d drawCall=%d "
+            "sourceLayout=row-major modelviewLayout=column-major "
+            "projectionLayout=column-major sourceTransform=",
+            ngl_sw.immediate_frame, ngl_sw.immediate_draw_call);
+    for (i = 0; i < 16; ++i) {
+        fprintf(stderr, "%s%g", i == 0 ? "" : ",",
+                ngl_sw.immediate_transform[i]);
+    }
+    fprintf(stderr, " modelview=");
+    for (i = 0; i < 16; ++i) {
+        fprintf(stderr, "%s%g", i == 0 ? "" : ",", ngl_sw.modelview[i]);
+    }
+    fprintf(stderr, " projection=");
+    for (i = 0; i < 16; ++i) {
+        fprintf(stderr, "%s%g", i == 0 ? "" : ",", ngl_sw.projection[i]);
+    }
+    fprintf(stderr, " order=clip=projection*modelview*object\n");
+    for (i = 0; i < 3; ++i) {
+        const NGLVertex *v = vertices[i];
+        if (v->w != 0.0f) {
+            fprintf(stderr,
+                    "[M3G RALLY NGL VERTEX] frame=%d drawCall=%d v=%d "
+                    "index=%d object=%g,%g,%g,%g view=%g,%g,%g,%g "
+                    "clip=%g,%g,%g,%g ndc=%g,%g,%g\n",
+                    ngl_sw.immediate_frame, ngl_sw.immediate_draw_call, i,
+                    v->source_index,
+                    v->object[0], v->object[1], v->object[2], v->object[3],
+                    v->view[0], v->view[1], v->view[2], v->view[3],
+                    v->x, v->y, v->z, v->w,
+                    v->x / v->w, v->y / v->w, v->z / v->w);
+        } else {
+            fprintf(stderr,
+                    "[M3G RALLY NGL VERTEX] frame=%d drawCall=%d v=%d "
+                    "index=%d object=%g,%g,%g,%g view=%g,%g,%g,%g "
+                    "clip=%g,%g,%g,%g ndc=undefined\n",
+                    ngl_sw.immediate_frame, ngl_sw.immediate_draw_call, i,
+                    v->source_index,
+                    v->object[0], v->object[1], v->object[2], v->object[3],
+                    v->view[0], v->view[1], v->view[2], v->view[3],
+                    v->x, v->y, v->z, v->w);
+        }
+    }
+    ++ngl_sw.rally_geometry_trace_count;
 }
 
 static float ngl_sw_edge(float ax, float ay, float bx, float by,
@@ -975,6 +1380,15 @@ static NGLVertex ngl_sw_lerp_vertex(NGLVertex a, NGLVertex b, float t) {
     out.y = a.y + (b.y - a.y) * t;
     out.z = a.z + (b.z - a.z) * t;
     out.w = a.w + (b.w - a.w) * t;
+    out.object[0] = a.object[0] + (b.object[0] - a.object[0]) * t;
+    out.object[1] = a.object[1] + (b.object[1] - a.object[1]) * t;
+    out.object[2] = a.object[2] + (b.object[2] - a.object[2]) * t;
+    out.object[3] = a.object[3] + (b.object[3] - a.object[3]) * t;
+    out.view[0] = a.view[0] + (b.view[0] - a.view[0]) * t;
+    out.view[1] = a.view[1] + (b.view[1] - a.view[1]) * t;
+    out.view[2] = a.view[2] + (b.view[2] - a.view[2]) * t;
+    out.view[3] = a.view[3] + (b.view[3] - a.view[3]) * t;
+    out.source_index = -1;
     out.fog = a.fog + (b.fog - a.fog) * t;
     {
         int unit;
@@ -1077,18 +1491,34 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
         if (ngl_sw.trace_immediate_draw) ++ngl_sw.immediate_area_zero;
         return;
     }
+    if (ngl_sw.trace_immediate_draw) {
+        ngl_sw_capture_triangle(&ngl_sw.immediate_first_nonzero,
+                                a, b, c, ax, ay, bx, by, cx, cy, area);
+    }
     if (ngl_sw.trace_current_draw) {
         ++ngl_sw.trace_triangles;
     }
-    if (ngl_sw.cull_face) {
-        int front = (area < 0.0f) == (ngl_sw.front_face == GL_CCW);
+    if (ngl_sw.cull_face &&
+            !(ngl_sw.trace_immediate_draw && ngl_sw.immediate_disable_cull)) {
+        int front = ((ngl_sw.diag_capture_active &&
+                      (ngl_sw.diag_mode == 4 || ngl_sw_diag_flip_front_enabled())) ?
+                     (area < 0.0f) : (area > 0.0f)) ==
+                    (ngl_sw.front_face == GL_CCW);
         if ((front && ngl_sw.cull_mode == GL_FRONT) ||
             (!front && ngl_sw.cull_mode == GL_BACK)) {
+            if (ngl_sw.trace_immediate_draw) {
+                ngl_sw_capture_triangle(&ngl_sw.immediate_first_culled,
+                                        a, b, c, ax, ay, bx, by, cx, cy, area);
+            }
             if (ngl_sw.trace_current_draw) {
                 ++ngl_sw.trace_culled;
             }
             return;
         }
+    }
+    if (ngl_sw.trace_immediate_draw) {
+        ngl_sw_capture_triangle(&ngl_sw.immediate_first_passed,
+                                a, b, c, ax, ay, bx, by, cx, cy, area);
     }
     if (area < 0.0f) {
         area = -area;
@@ -1155,6 +1585,7 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
                 if (!ngl_sw_depth_compare(ngl_sw.depth_func, depth_value,
                                           ngl_sw.depth[offset])) {
                     if (ngl_sw.trace_immediate_draw) ++ngl_sw.immediate_depth_reject;
+                    if (ngl_sw.diag_capture_active) ++ngl_sw.diag_depth_reject;
                     continue;
                 }
             }
@@ -1199,7 +1630,14 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
                                 (float)((color >> 24) & 0xffU) / 255.0f,
                                 ngl_sw.alpha_ref)) {
                 if (ngl_sw.trace_immediate_draw) ++ngl_sw.immediate_alpha_reject;
+                if (ngl_sw.diag_capture_active) ++ngl_sw.diag_alpha_reject;
                 continue;
+            }
+            if (ngl_sw.diag_capture_active && ngl_sw.diag_mode == 1) {
+                color = ngl_sw_diag_color(ngl_sw.diag_draw_index);
+            }
+            if (ngl_sw.trace_immediate_draw && ngl_sw.immediate_highlight) {
+                color = 0xffff0000U;
             }
             if (ngl_sw.depth_test && ngl_sw.depth != NULL && ngl_sw.depth_mask) {
                 ngl_sw.depth[offset] = depth_value;
@@ -1232,6 +1670,19 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     first[2] = c;
     if (ngl_sw.trace_immediate_draw) {
         ++ngl_sw.immediate_input_triangles;
+        if (ngl_sw.immediate_input_triangles == 1) {
+            ngl_sw.immediate_w_min = a.w;
+            ngl_sw.immediate_w_max = a.w;
+        }
+        if (a.w < ngl_sw.immediate_w_min) ngl_sw.immediate_w_min = a.w;
+        if (b.w < ngl_sw.immediate_w_min) ngl_sw.immediate_w_min = b.w;
+        if (c.w < ngl_sw.immediate_w_min) ngl_sw.immediate_w_min = c.w;
+        if (a.w > ngl_sw.immediate_w_max) ngl_sw.immediate_w_max = a.w;
+        if (b.w > ngl_sw.immediate_w_max) ngl_sw.immediate_w_max = b.w;
+        if (c.w > ngl_sw.immediate_w_max) ngl_sw.immediate_w_max = c.w;
+        if (a.w <= 0.0001f || b.w <= 0.0001f || c.w <= 0.0001f) {
+            ngl_sw.immediate_bounds_valid = 0;
+        }
         ngl_sw_trace_screen_vertex(&a);
         ngl_sw_trace_screen_vertex(&b);
         ngl_sw_trace_screen_vertex(&c);
@@ -1265,6 +1716,15 @@ static int ngl_sw_index(GLenum type, const GLvoid *indices, int i) {
 static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
                                 const GLvoid *indices, GLint first) {
     int i;
+    int reflect_stage = 0;
+    float saved_modelview[16];
+    float saved_projection[16];
+    unsigned short *diag_before = NULL;
+    GLboolean saved_texture_2d[NGL_SW_TEXTURE_UNITS];
+    GLboolean saved_cull_face = GL_FALSE;
+    GLboolean saved_depth_test = GL_FALSE;
+    unsigned int saved_current_color = 0xffffffffU;
+    int diag_this_draw = 0;
     int trace = ngl_sw.trace_draw_budget > 0;
     int scene_trace = ngl_sw.trace_scene_draw;
     int immediate_trace = ngl_sw.trace_immediate_draw;
@@ -1273,6 +1733,43 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
     NGLTexture *t1 = NULL;
     (void)mode;
     if (!ngl_sw.vertex.enabled || ngl_sw.vertex.ptr == NULL || count < 3) return;
+    ngl_sw_diag_init();
+    if (ngl_sw.diag_capture_active) {
+        if (ngl_sw.diag_draw_index < ngl_sw.diag_draw_limit) {
+            size_t bytes = (size_t)ngl_sw.width * (size_t)ngl_sw.height *
+                           sizeof(unsigned short);
+            int y;
+            diag_this_draw = ++ngl_sw.diag_draw_index;
+            if (ngl_sw.pixels != NULL && ngl_sw.width > 0 && ngl_sw.height > 0) {
+                diag_before = (unsigned short *)malloc(bytes);
+                if (diag_before != NULL) {
+                    for (y = 0; y < ngl_sw.height; ++y) {
+                        memcpy(diag_before + y * ngl_sw.width,
+                               ngl_sw.pixels + y * ngl_sw.stride,
+                               (size_t)ngl_sw.width * sizeof(unsigned short));
+                    }
+                }
+            }
+            memcpy(saved_texture_2d, ngl_sw.texture_2d, sizeof(saved_texture_2d));
+            saved_cull_face = ngl_sw.cull_face;
+            saved_depth_test = ngl_sw.depth_test;
+            saved_current_color = ngl_sw.current_color;
+            if (ngl_sw.diag_mode == 1) {
+                memset(ngl_sw.texture_2d, 0, sizeof(ngl_sw.texture_2d));
+                ngl_sw.current_color = ngl_sw_diag_color(diag_this_draw);
+            } else if (ngl_sw.diag_mode == 2) {
+                ngl_sw.cull_face = GL_FALSE;
+            } else if (ngl_sw.diag_mode == 3) {
+                ngl_sw.depth_test = GL_FALSE;
+            }
+            ngl_sw.trace_current_draw = 1;
+            ngl_sw.trace_triangles = 0;
+            ngl_sw.trace_culled = 0;
+            ngl_sw.trace_pixels = 0;
+        } else {
+            ++ngl_sw.diag_skipped_draws;
+        }
+    }
     if (collect_trace) {
         int plane;
         ngl_sw.trace_current_draw = 1;
@@ -1293,6 +1790,23 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         ngl_sw.immediate_max_x = -2147483647;
         ngl_sw.immediate_min_y = 2147483647;
         ngl_sw.immediate_max_y = -2147483647;
+        ngl_sw.immediate_bounds_valid = 1;
+        ngl_sw.immediate_w_min = 0.0f;
+        ngl_sw.immediate_w_max = 0.0f;
+        memset(&ngl_sw.immediate_first_nonzero, 0,
+               sizeof(ngl_sw.immediate_first_nonzero));
+        memset(&ngl_sw.immediate_first_culled, 0,
+               sizeof(ngl_sw.immediate_first_culled));
+        memset(&ngl_sw.immediate_first_passed, 0,
+               sizeof(ngl_sw.immediate_first_passed));
+        ngl_sw.immediate_disable_cull = immediate_trace &&
+            ngl_sw_env_draw_selected("M3G_IMMEDIATE_DISABLE_CULL",
+                                     ngl_sw.immediate_vb,
+                                     ngl_sw.immediate_draw_call);
+        ngl_sw.immediate_highlight = immediate_trace &&
+            ngl_sw_env_draw_selected("M3G_IMMEDIATE_HIGHLIGHT",
+                                     ngl_sw.immediate_vb,
+                                     ngl_sw.immediate_draw_call);
         for (plane = 0; plane < 7; ++plane) {
             ngl_sw.trace_scene_clip_reject[plane] = 0;
             ngl_sw.immediate_clip_reject[plane] = 0;
@@ -1302,6 +1816,47 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         }
         if (NGL_SW_TEXTURE_UNITS > 1 && ngl_sw.texture_2d[1]) {
             t1 = ngl_sw_bound_texture(1);
+        }
+    }
+    if (ngl_sw.diag_capture_active && diag_this_draw > 0) {
+        ngl_sw.diag_depth_reject = 0;
+        ngl_sw.diag_alpha_reject = 0;
+    }
+    if (ngl_sw.diag_capture_active && diag_this_draw > 0) {
+        if (ngl_sw.texture_2d[0]) t0 = ngl_sw_bound_texture(0);
+        if (NGL_SW_TEXTURE_UNITS > 1 && ngl_sw.texture_2d[1]) {
+            t1 = ngl_sw_bound_texture(1);
+        }
+        if (t0 != NULL) ngl_sw_diag_dump_texture(ngl_sw.bound_texture[0], t0);
+        if (t1 != NULL) ngl_sw_diag_dump_texture(ngl_sw.bound_texture[1], t1);
+    }
+    if (immediate_trace) {
+        reflect_stage = ngl_sw_rally_reflect_stage();
+        if (reflect_stage != 0) {
+            memcpy(saved_modelview, ngl_sw.modelview, sizeof(saved_modelview));
+            memcpy(saved_projection, ngl_sw.projection, sizeof(saved_projection));
+            if (reflect_stage == 1) {
+                ngl_sw.modelview[0] = -ngl_sw.modelview[0];
+                ngl_sw.modelview[1] = -ngl_sw.modelview[1];
+                ngl_sw.modelview[2] = -ngl_sw.modelview[2];
+                ngl_sw.modelview[3] = -ngl_sw.modelview[3];
+            } else if (reflect_stage == 2) {
+                ngl_sw.modelview[0] = -ngl_sw.modelview[0];
+                ngl_sw.modelview[4] = -ngl_sw.modelview[4];
+                ngl_sw.modelview[8] = -ngl_sw.modelview[8];
+                ngl_sw.modelview[12] = -ngl_sw.modelview[12];
+            } else {
+                ngl_sw.projection[0] = -ngl_sw.projection[0];
+                ngl_sw.projection[4] = -ngl_sw.projection[4];
+                ngl_sw.projection[8] = -ngl_sw.projection[8];
+                ngl_sw.projection[12] = -ngl_sw.projection[12];
+            }
+            fprintf(stderr,
+                    "[M3G RALLY REFLECT] frame=%d drawCall=%d stage=%s "
+                    "axis=X temporary=1\n",
+                    ngl_sw.immediate_frame, ngl_sw.immediate_draw_call,
+                    reflect_stage == 1 ? "model" :
+                    (reflect_stage == 2 ? "view" : "projection"));
         }
     }
     for (i = 0; i + 2 < count; ++i) {
@@ -1364,8 +1919,48 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         ngl_sw_transform_vertex(ia, &a);
         ngl_sw_transform_vertex(ib, &b);
         ngl_sw_transform_vertex(ic, &c);
+        if (immediate_trace && i == 0) {
+            ngl_sw_rally_trace_geometry(&a, &b, &c);
+        }
         ngl_sw_draw_tri(a, b, c);
     }
+    if (reflect_stage != 0) {
+        memcpy(ngl_sw.modelview, saved_modelview, sizeof(saved_modelview));
+        memcpy(ngl_sw.projection, saved_projection, sizeof(saved_projection));
+    }
+    if (ngl_sw.diag_capture_active && diag_this_draw > 0) {
+        int changed = ngl_sw_diag_count_changed(diag_before);
+        ngl_sw.diag_pixels_changed = changed;
+        if (ngl_sw.diag_mode != 0) {
+            memcpy(ngl_sw.texture_2d, saved_texture_2d, sizeof(saved_texture_2d));
+            ngl_sw.cull_face = saved_cull_face;
+            ngl_sw.depth_test = saved_depth_test;
+            ngl_sw.current_color = saved_current_color;
+        }
+        ngl_sw_diag_write_rgb565(ngl_sw.diag_mode == 1 ? "solid-draw" : "draw",
+                                 diag_this_draw);
+        fprintf(stderr,
+                "[NGLDIAG] event=draw frame=%d draw=%d source=%s mode=%d count=%d inputTri=%d rasterTri=%d culled=%d pixels=%d pixelsChanged=%d depthReject=%d alphaReject=%d tex0=%u tex0w=%d tex0h=%d tex1=%u tex1w=%d tex1h=%d depth=%d depthFunc=0x%x depthMask=%d cull=%d cullMode=0x%x frontFace=0x%x alpha=%d blend=%d bbox=%d,%d,%d,%d modelview=",
+                ngl_sw.diag_frame, diag_this_draw, ngl_sw_diag_source_name(),
+                ngl_sw.diag_mode, (int)count, count >= 3 ? (int)count - 2 : 0,
+                ngl_sw.trace_triangles, ngl_sw.trace_culled, ngl_sw.trace_pixels,
+                changed, ngl_sw.diag_depth_reject, ngl_sw.diag_alpha_reject,
+                (unsigned int)ngl_sw.bound_texture[0],
+                t0 != NULL ? t0->width : 0, t0 != NULL ? t0->height : 0,
+                (unsigned int)ngl_sw.bound_texture[1],
+                t1 != NULL ? t1->width : 0, t1 != NULL ? t1->height : 0,
+                (int)saved_depth_test, (unsigned int)ngl_sw.depth_func,
+                (int)ngl_sw.depth_mask, (int)saved_cull_face,
+                (unsigned int)ngl_sw.cull_mode, (unsigned int)ngl_sw.front_face,
+                (int)ngl_sw.alpha_test, (int)ngl_sw.blend,
+                0, ngl_sw.width - 1, 0, ngl_sw.height - 1);
+        for (i = 0; i < 16; ++i) fprintf(stderr, "%s%g", i == 0 ? "" : ",", ngl_sw.modelview[i]);
+        fprintf(stderr, " projection=");
+        for (i = 0; i < 16; ++i) fprintf(stderr, "%s%g", i == 0 ? "" : ",", ngl_sw.projection[i]);
+        fprintf(stderr, "\n");
+        ngl_sw.trace_current_draw = 0;
+    }
+    free(diag_before);
     if (trace) {
         fprintf(stderr,
                 "[M3G NGL draw] idx=%d count=%d tex0=%dx%d tex1=%dx%d "
@@ -1421,33 +2016,46 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         ngl_sw.trace_scene_draw = 0;
     }
     if (immediate_trace) {
-        fprintf(stderr,
-                "[M3G IMMEDIATE DRAW] frame=%d vb=%lu ib=%lu app=%lu "
-                "tex=%lu image=%lu vertices=%d indices=%d "
-                "inputTri=%d raster=%d clip=%d,%d,%d,%d,%d,%d,%d "
-                "wReject=%d areaZero=%d culled=%d depthReject=%d "
-                "alphaReject=%d bounds=%d,%d,%d,%d pixels=%d\n",
-                ngl_sw.immediate_frame, ngl_sw.immediate_vb, ngl_sw.immediate_ib,
-                ngl_sw.immediate_app, ngl_sw.immediate_texture,
-                ngl_sw.immediate_image, ngl_sw.immediate_vertex_count,
-                ngl_sw.immediate_index_count,
-                ngl_sw.immediate_input_triangles,
-                ngl_sw.immediate_raster_calls,
-                ngl_sw.immediate_clip_reject[0],
-                ngl_sw.immediate_clip_reject[1],
-                ngl_sw.immediate_clip_reject[2],
-                ngl_sw.immediate_clip_reject[3],
-                ngl_sw.immediate_clip_reject[4],
-                ngl_sw.immediate_clip_reject[5],
-                ngl_sw.immediate_clip_reject[6],
-                ngl_sw.immediate_w_reject, ngl_sw.immediate_area_zero,
-                ngl_sw.trace_culled, ngl_sw.immediate_depth_reject,
-                ngl_sw.immediate_alpha_reject,
-                ngl_sw.immediate_min_x == 2147483647 ? 0 : ngl_sw.immediate_min_x,
-                ngl_sw.immediate_max_x == -2147483647 ? 0 : ngl_sw.immediate_max_x,
-                ngl_sw.immediate_min_y == 2147483647 ? 0 : ngl_sw.immediate_min_y,
-                ngl_sw.immediate_max_y == -2147483647 ? 0 : ngl_sw.immediate_max_y,
-                ngl_sw.trace_pixels);
+        NGLImmediateRecord record;
+        ngl_sw_trace_frame_matrices();
+        record.frame = ngl_sw.immediate_frame;
+        record.draw_call = ngl_sw.immediate_draw_call;
+        record.vb = ngl_sw.immediate_vb;
+        record.ib = ngl_sw.immediate_ib;
+        record.app = ngl_sw.immediate_app;
+        record.texture = ngl_sw.immediate_texture;
+        record.image = ngl_sw.immediate_image;
+        record.vertex_count = ngl_sw.immediate_vertex_count;
+        record.index_count = ngl_sw.immediate_index_count;
+        record.input_triangles = ngl_sw.immediate_input_triangles;
+        record.raster_calls = ngl_sw.immediate_raster_calls;
+        for (i = 0; i < 7; ++i) record.clip_reject[i] = ngl_sw.immediate_clip_reject[i];
+        record.w_reject = ngl_sw.immediate_w_reject;
+        record.area_zero = ngl_sw.immediate_area_zero;
+        record.culled = ngl_sw.trace_culled;
+        record.depth_reject = ngl_sw.immediate_depth_reject;
+        record.alpha_reject = ngl_sw.immediate_alpha_reject;
+        record.bounds_valid = ngl_sw.immediate_bounds_valid;
+        record.w_min = ngl_sw.immediate_w_min;
+        record.w_max = ngl_sw.immediate_w_max;
+        record.cull_override = ngl_sw.immediate_disable_cull;
+        record.highlight = ngl_sw.immediate_highlight;
+        memcpy(&record.first_nonzero, &ngl_sw.immediate_first_nonzero,
+               sizeof(record.first_nonzero));
+        memcpy(&record.first_culled, &ngl_sw.immediate_first_culled,
+               sizeof(record.first_culled));
+        memcpy(&record.first_passed, &ngl_sw.immediate_first_passed,
+               sizeof(record.first_passed));
+        record.min_x = ngl_sw.immediate_min_x == 2147483647 ? 0 : ngl_sw.immediate_min_x;
+        record.max_x = ngl_sw.immediate_max_x == -2147483647 ? 0 : ngl_sw.immediate_max_x;
+        record.min_y = ngl_sw.immediate_min_y == 2147483647 ? 0 : ngl_sw.immediate_min_y;
+        record.max_y = ngl_sw.immediate_max_y == -2147483647 ? 0 : ngl_sw.immediate_max_y;
+        record.pixels = ngl_sw.trace_pixels;
+        if (ngl_sw.immediate_defer && ngl_sw.immediate_record_count < 32) {
+            ngl_sw.immediate_records[ngl_sw.immediate_record_count++] = record;
+        } else {
+            ngl_sw_print_immediate_record(&record);
+        }
         ngl_sw.trace_current_draw = 0;
         ngl_sw.trace_immediate_draw = 0;
     }
@@ -1478,8 +2086,81 @@ static inline void nglTraceFrame(int draw_budget, int upload_budget) {
     ngl_sw.trace_scene_draw = 0;
 }
 
+static inline void nglDiagFrameBegin(int frame, int auto_capture) {
+    ngl_sw_diag_init();
+    if (!ngl_sw.diag_enabled) return;
+    if (ngl_sw.diag_capture_active && !ngl_sw.diag_done) {
+        ngl_sw_diag_write_rgb565("frame-final", -1);
+        fprintf(stderr,
+                "[NGLDIAG] event=frameEnd frame=%d draws=%d skipped=%d state=DONE\n",
+                ngl_sw.diag_frame, ngl_sw.diag_draw_index,
+                ngl_sw.diag_skipped_draws);
+        ngl_sw.diag_done = 1;
+        ngl_sw.diag_capture_active = 0;
+    }
+    ngl_sw.diag_frame = frame;
+    ngl_sw.diag_draw_index = 0;
+    ngl_sw.diag_skipped_draws = 0;
+    memset(ngl_sw.diag_texture_dumped, 0, sizeof(ngl_sw.diag_texture_dumped));
+    if (!ngl_sw.diag_done &&
+            ((ngl_sw.diag_capture_frame >= 0 && frame == ngl_sw.diag_capture_frame) ||
+             (ngl_sw.diag_capture_frame < 0 && auto_capture))) {
+        ngl_sw.diag_capture_active = 1;
+        fprintf(stderr,
+                "[NGLDIAG] event=frameBegin frame=%d mode=%d sourceAuto=%d width=%d height=%d stride=%d\n",
+                frame, ngl_sw.diag_mode, auto_capture, ngl_sw.width,
+                ngl_sw.height, ngl_sw.stride);
+        ngl_sw_diag_write_rgb565("frame-begin", -1);
+    }
+}
+
+static inline void nglDiagForceCapture(void) {
+    ngl_sw_diag_init();
+    if (!ngl_sw.diag_enabled || ngl_sw.diag_done || ngl_sw.diag_capture_active) {
+        return;
+    }
+    if (ngl_sw.diag_capture_frame >= 0 && ngl_sw.diag_frame != ngl_sw.diag_capture_frame) {
+        return;
+    }
+    ngl_sw.diag_draw_index = 0;
+    ngl_sw.diag_skipped_draws = 0;
+    ngl_sw.diag_capture_active = 1;
+    fprintf(stderr,
+            "[NGLDIAG] event=frameBegin frame=%d mode=%d sourceAuto=1 width=%d height=%d stride=%d\n",
+            ngl_sw.diag_frame, ngl_sw.diag_mode, ngl_sw.width,
+            ngl_sw.height, ngl_sw.stride);
+    ngl_sw_diag_write_rgb565("frame-begin", -1);
+}
+
+static inline void nglDiagFinish(void) {
+    ngl_sw_diag_init();
+    if (!ngl_sw.diag_enabled || !ngl_sw.diag_capture_active || ngl_sw.diag_done) return;
+    ngl_sw_diag_write_rgb565("frame-final", -1);
+    fprintf(stderr,
+            "[NGLDIAG] event=frameEnd frame=%d draws=%d skipped=%d state=DONE\n",
+            ngl_sw.diag_frame, ngl_sw.diag_draw_index,
+            ngl_sw.diag_skipped_draws);
+    ngl_sw.diag_done = 1;
+    ngl_sw.diag_capture_active = 0;
+}
+
+static inline void nglDiagSetSource(int source) {
+    ngl_sw_diag_init();
+    ngl_sw.diag_source = source;
+}
+
 static inline void nglTraceSceneDraw(void) {
     ngl_sw.trace_scene_draw = 1;
+}
+
+static inline void nglTraceImmediateTransform(const float *matrix) {
+    if (matrix != NULL) {
+        memcpy(ngl_sw.immediate_transform, matrix,
+               sizeof(ngl_sw.immediate_transform));
+    } else {
+        ngl_sw_identity(ngl_sw.immediate_transform);
+    }
+    ngl_sw.immediate_transform_valid = 1;
 }
 
 static inline void nglTraceImmediateMesh(unsigned long vb,
@@ -1489,7 +2170,9 @@ static inline void nglTraceImmediateMesh(unsigned long vb,
                                          unsigned long image,
                                          int vertex_count,
                                          int index_count,
-                                         int frame) {
+                                         int frame,
+                                         int draw_call,
+                                         int defer) {
     ngl_sw.trace_immediate_draw = 1;
     ngl_sw.immediate_vb = vb;
     ngl_sw.immediate_ib = ib;
@@ -1499,6 +2182,8 @@ static inline void nglTraceImmediateMesh(unsigned long vb,
     ngl_sw.immediate_vertex_count = vertex_count;
     ngl_sw.immediate_index_count = index_count;
     ngl_sw.immediate_frame = frame;
+    ngl_sw.immediate_draw_call = draw_call;
+    ngl_sw.immediate_defer = defer;
 }
 
 static inline void nglTraceSceneModelviewReset(void) {

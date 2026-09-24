@@ -20,6 +20,7 @@
 
 static FunKeyM3GSurface g_surface;
 static int g_legacy_renderer;
+static int g_rally_render_trace_count;
 
 static int
 m3g_renderer_is_legacy(void) {
@@ -31,6 +32,29 @@ static int
 m3g_trace_enabled(void) {
 	const char *value = getenv("M3G_TRACE_VERBOSE");
     return value != 0 && value[0] != '\0' && value[0] != '0';
+}
+
+static int
+m3g_rally_trace_enabled(void) {
+    const char *value = getenv("M3G_RALLY_TRACE");
+    return value != 0 && value[0] != '\0' && value[0] != '0';
+}
+
+static void
+m3g_trace_immediate_matrix(const float *matrix, int vb, int ib, int app) {
+    if (!m3g_rally_trace_enabled() || g_rally_render_trace_count >= 8) {
+        return;
+    }
+    fprintf(stderr,
+            "[M3G RALLY KNI] stage=KNI renderImmediate layout=row-major "
+            "order=M*v vb=%d ib=%d app=%d matrix="
+            "%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
+            vb, ib, app,
+            matrix[0], matrix[1], matrix[2], matrix[3],
+            matrix[4], matrix[5], matrix[6], matrix[7],
+            matrix[8], matrix[9], matrix[10], matrix[11],
+            matrix[12], matrix[13], matrix[14], matrix[15]);
+    ++g_rally_render_trace_count;
 }
 
 #define M3G_LONG_PARAM(index) ((long) KNI_GetParameterAsLong(index))
@@ -119,6 +143,9 @@ m3g_matrix_is_degenerate(const float *matrix) {
 static void
 m3g_trace_render_node_matrix(int trace_id, const float *matrix) {
     static int count;
+    if (!m3g_trace_enabled()) {
+        return;
+    }
     if (count < 4 && m3g_matrix_is_degenerate(matrix)) {
         fprintf(stderr,
                 "[M3G TRANSFORM TRACE] KNI renderNode id=%d matrix="
@@ -783,6 +810,10 @@ KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1render(void) {
     float matrix[16];
     m3g_read_matrix_param(9, matrix);
+    m3g_trace_immediate_matrix(matrix,
+                               (int)M3G_LONG_PARAM(3),
+                               (int)M3G_LONG_PARAM(5),
+                               (int)M3G_LONG_PARAM(7));
     funkey_m3g_context_render(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3),
                               M3G_LONG_PARAM(5), M3G_LONG_PARAM(7),
                               matrix, KNI_GetParameterAsInt(10));

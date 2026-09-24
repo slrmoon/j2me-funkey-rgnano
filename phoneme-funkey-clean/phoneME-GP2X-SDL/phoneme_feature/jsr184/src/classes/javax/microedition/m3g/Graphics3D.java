@@ -29,6 +29,8 @@ public class Graphics3D {
 	private static int debugCurrentWorldFrames;
 	private static int transformTraceLastId = -1;
 	private static String transformTraceLastMatrix;
+	private static int rallyImmediateTraceCount;
+	private static final boolean RALLY_TRACE = _rallyTrace();
 	//------------------------------------------------------------------
 	// Static data
 	//------------------------------------------------------------------
@@ -193,10 +195,6 @@ public class Graphics3D {
 			currentTarget = finalG;
 			cur_width = width;
 			cur_height = height;
-			if (debugBindCount++ < 3) {
-				System.out.println("[M3G Graphics3D] bindTarget Graphics " + width + "x" + height);
-			}
-			
 			//System.out.println("bindTarget 3d ok");
 			
 		} else if (target instanceof Image2D) {
@@ -314,15 +312,6 @@ public class Graphics3D {
 	public void render(World world) {
 		integrityCheck();
 		final World finalWorld = world;
-		if (debugLastWorldHandle != world.handle) {
-			debugLastWorldHandle = world.handle;
-			debugCurrentWorldFrames = 0;
-			System.out.println("[M3G Graphics3D] new World children=" + world.getChildCount());
-		}
-		if (debugCurrentWorldFrames++ < 3) {
-			System.out.println("[M3G Graphics3D] render World frame=" + debugCurrentWorldFrames);
-		}
-		
 		/* _renderWorld(handle, finalWorld.handle); */
 		
 		Platform.executeInUIThread(
@@ -362,6 +351,16 @@ public class Graphics3D {
 		final Appearance finalAppearance = appearance;
 		final Transform finalTransform = transform;
 		final int finalScope = scope;
+		if (RALLY_TRACE && rallyImmediateTraceCount < 8) {
+			String matrix = finalTransform == null ? "null" :
+					finalTransform.traceMatrixString();
+			System.out.println("[M3G RALLY JAVA] stage=renderImmediate " +
+					"layout=row-major order=M*v transform=" + matrix +
+					" vb=" + finalVertices.handle + " ib=" +
+					finalPrimitives.handle + " app=" + finalAppearance.handle +
+					" scope=" + finalScope);
+			rallyImmediateTraceCount++;
+		}
 		
 		/* _render(handle,
 								finalVertices.handle,
@@ -641,6 +640,8 @@ public class Graphics3D {
 	// Native implementation methods
 	//------------------------------------------------------------------
 	private native static long _ctor(long hInterface);
+
+	private native static boolean _rallyTrace();
 
 	private native static void _addRef(long hObject);
 

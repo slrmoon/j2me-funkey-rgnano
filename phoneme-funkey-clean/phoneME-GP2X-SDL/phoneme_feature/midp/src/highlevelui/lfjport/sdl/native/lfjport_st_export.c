@@ -104,6 +104,8 @@ static int       PresentSourceFull;
 static int       DisplayDebug;
 static int       RefreshBoundsValid;
 static int       RefreshMinX, RefreshMinY, RefreshMaxX, RefreshMaxY;
+static const char *FrameDumpPath;
+static int       FrameDumpEnabled = -1;
 
 enum {
     PRESENT_SCALE_AUTO = 0,
@@ -125,6 +127,50 @@ typedef struct {
     int dstH;
     const char *name;
 } PresentLayout;
+
+static void frame_dump_surface(SDL_Surface *surface) {
+    FILE *fp;
+    char tmpPath[1024];
+    unsigned short *pixels;
+    int pitchPixels;
+    int x, y;
+
+    if (FrameDumpEnabled < 0) {
+        FrameDumpPath = getenv("PHONEME_FRAME_DUMP");
+        FrameDumpEnabled = (FrameDumpPath != NULL && FrameDumpPath[0] != '\0');
+    }
+    if (!FrameDumpEnabled || surface == NULL || surface->pixels == NULL) {
+        return;
+    }
+    if (snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", FrameDumpPath) >= (int)sizeof(tmpPath)) {
+        return;
+    }
+
+    if (SDL_MUSTLOCK(surface) && SDL_LockSurface(surface) != 0) {
+        return;
+    }
+    fp = fopen(tmpPath, "wb");
+    if (fp != NULL) {
+        fprintf(fp, "P6\n%d %d\n255\n", surface->w, surface->h);
+        pixels = (unsigned short *)surface->pixels;
+        pitchPixels = surface->pitch / 2;
+        for (y = 0; y < surface->h; y++) {
+            for (x = 0; x < surface->w; x++) {
+                unsigned short p = pixels[y * pitchPixels + x];
+                unsigned char rgb[3];
+                rgb[0] = (unsigned char)((((p >> 11) & 0x1f) * 255) / 31);
+                rgb[1] = (unsigned char)((((p >> 5) & 0x3f) * 255) / 63);
+                rgb[2] = (unsigned char)(((p & 0x1f) * 255) / 31);
+                fwrite(rgb, 1, 3, fp);
+            }
+        }
+        fclose(fp);
+        rename(tmpPath, FrameDumpPath);
+    }
+    if (SDL_MUSTLOCK(surface)) {
+        SDL_UnlockSurface(surface);
+    }
+}
 
 typedef struct {
     const char *id;
@@ -1399,6 +1445,7 @@ void PhoneMEOverlayRefresh(void) {
     }
     SDL_UpdateRect(Native_SDL_Screen, 0, 0, 0, 0);
     SDL_Flip(Native_SDL_Screen);
+    frame_dump_surface(Native_SDL_Screen);
 }
 
 /**
@@ -1560,6 +1607,7 @@ void lfjport_refresh(int x1, int y1, int x2, int y2)
   }
   SDL_UpdateRect(Native_SDL_Screen, 0,0,0,0);
   SDL_Flip(Native_SDL_Screen);
+  frame_dump_surface(Native_SDL_Screen);
   SDL_LockSurface(Native_SDL_HScreen);
   SDL_LockSurface(Native_SDL_VScreen);
   (void)x1;
