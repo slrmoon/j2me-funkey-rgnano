@@ -20,7 +20,8 @@ CLDC_VM_FALLBACK=${CLDC_VM_FALLBACK:-}
 JDK_DIR=${JDK_DIR:-$ROOT/zulu7.24.0.1-jdk7.0.191-linux_x64}
 PACKAGE_ROOT=$MEHOME/build_output_funkey_s/opk
 STAGE=$PACKAGE_ROOT/pm
-OPK=$PACKAGE_ROOT/pm.opk
+OPK_NAME=${FUNKEY_OPK_NAME:-pm}
+OPK=$PACKAGE_ROOT/$OPK_NAME.opk
 HELLO_SRC=$ROOT/packaging/funkey-s/HelloMidlet.java
 NOKIA_STUB_SRC=$ROOT/packaging/funkey-s/nokia-stubs
 HELLO_BUILD=$PACKAGE_ROOT/hello-build
@@ -36,6 +37,12 @@ BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
 RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
 M3G_RENDERER=${FUNKEY_M3G_RENDERER:-ngl}
 M3G_TRACE=${FUNKEY_M3G_TRACE:-0}
+M3G_DUMP_IMAGES=${FUNKEY_M3G_DUMP_IMAGES:-}
+M3G_DUMP_DIR=${FUNKEY_M3G_DUMP_DIR:-/mnt/FunKey/.pm}
+M3G_DISABLE_CULL=${FUNKEY_M3G_DISABLE_CULL:-}
+M3G_HIGHLIGHT=${FUNKEY_M3G_HIGHLIGHT:-}
+M3G_RALLY_TRACE=${FUNKEY_M3G_RALLY_TRACE:-}
+M3G_REFLECT_X=${FUNKEY_M3G_REFLECT_X:-}
 
 if [ "$BUNDLE_MIDLET" = "1" ]; then
     RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
@@ -300,6 +307,12 @@ LAUNCH_SRC=$ROOT/packaging/funkey-s/pm-launch.c
 if [ -f "$LAUNCH_SRC" ]; then
     "$FUNKEY_CC" -Os -s \
         -I"$SYSROOT/usr/include/SDL" \
+        "-DFUNKEY_M3G_DUMP_IMAGES=\"$M3G_DUMP_IMAGES\"" \
+        "-DFUNKEY_M3G_DUMP_DIR=\"$M3G_DUMP_DIR\"" \
+        "-DFUNKEY_M3G_DISABLE_CULL=\"$M3G_DISABLE_CULL\"" \
+        "-DFUNKEY_M3G_HIGHLIGHT=\"$M3G_HIGHLIGHT\"" \
+        "-DFUNKEY_M3G_RALLY_TRACE=\"$M3G_RALLY_TRACE\"" \
+        "-DFUNKEY_M3G_REFLECT_X=\"$M3G_REFLECT_X\"" \
         "$LAUNCH_SRC" \
         -o "$STAGE/pm" \
         -lSDL -lSDL_gfx -lm
@@ -386,6 +399,12 @@ fi
 export MIDP_HOME="$APP_DIR"
 export FUNKEY_M3G_RENDERER='__M3G_RENDERER__'
 export M3G_NGL_TRACE='__M3G_TRACE__'
+export M3G_DUMP_IMAGES='__M3G_DUMP_IMAGES__'
+export M3G_DUMP_DIR='__M3G_DUMP_DIR__'
+export M3G_IMMEDIATE_DISABLE_CULL='__M3G_DISABLE_CULL__'
+export M3G_IMMEDIATE_HIGHLIGHT='__M3G_HIGHLIGHT__'
+export M3G_RALLY_TRACE='__M3G_RALLY_TRACE__'
+export M3G_RALLY_REFLECT_X='__M3G_REFLECT_X__'
 export PHONEME_TIMIDITY_SYNTHETIC="${PHONEME_TIMIDITY_SYNTHETIC:-1}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
 if [ "${PHONEME_DEBUG_LOGS:-0}" = "1" ]; then
@@ -512,10 +531,22 @@ EOF
 escaped_heap_arg=$(printf '%s' "$RUNMIDLET_HEAP_ARG" | sed "s/'/'\\\\''/g")
 escaped_m3g_renderer=$(printf '%s' "$M3G_RENDERER" | sed 's/[\/&]/\\&/g')
 escaped_m3g_trace=$(printf '%s' "$M3G_TRACE" | sed 's/[\/&]/\\&/g')
+escaped_m3g_dump_images=$(printf '%s' "$M3G_DUMP_IMAGES" | sed 's/[\/&]/\\&/g')
+escaped_m3g_dump_dir=$(printf '%s' "$M3G_DUMP_DIR" | sed 's/[\/&]/\\&/g')
+escaped_m3g_disable_cull=$(printf '%s' "$M3G_DISABLE_CULL" | sed 's/[\/&]/\\&/g')
+escaped_m3g_highlight=$(printf '%s' "$M3G_HIGHLIGHT" | sed 's/[\/&]/\\&/g')
+escaped_m3g_rally_trace=$(printf '%s' "$M3G_RALLY_TRACE" | sed 's/[\/&]/\\&/g')
+escaped_m3g_reflect_x=$(printf '%s' "$M3G_REFLECT_X" | sed 's/[\/&]/\\&/g')
 sed -i "s|__RUNMIDLET_HEAP_ARG__|$escaped_heap_arg|" "$STAGE/r.sh"
 sed -i "s|__RUNTIME_ONLY__|$RUNTIME_ONLY|g" "$STAGE/r.sh"
 sed -i "s|__M3G_RENDERER__|$escaped_m3g_renderer|g" "$STAGE/r.sh"
 sed -i "s|__M3G_TRACE__|$escaped_m3g_trace|g" "$STAGE/r.sh"
+sed -i "s|__M3G_DUMP_IMAGES__|$escaped_m3g_dump_images|g" "$STAGE/r.sh"
+sed -i "s|__M3G_DUMP_DIR__|$escaped_m3g_dump_dir|g" "$STAGE/r.sh"
+sed -i "s|__M3G_DISABLE_CULL__|$escaped_m3g_disable_cull|g" "$STAGE/r.sh"
+sed -i "s|__M3G_HIGHLIGHT__|$escaped_m3g_highlight|g" "$STAGE/r.sh"
+sed -i "s|__M3G_RALLY_TRACE__|$escaped_m3g_rally_trace|g" "$STAGE/r.sh"
+sed -i "s|__M3G_REFLECT_X__|$escaped_m3g_reflect_x|g" "$STAGE/r.sh"
 chmod +x "$STAGE/r.sh"
 
 cat > "$STAGE/pm.funkey-s.desktop" <<EOF

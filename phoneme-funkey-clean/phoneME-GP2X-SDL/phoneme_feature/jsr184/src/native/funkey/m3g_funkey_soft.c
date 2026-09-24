@@ -167,16 +167,28 @@ static long g_ngl_trace_world;
 static int g_ngl_trace_frame;
 static int g_ngl_trace_immediate;
 static int g_render_node_transform_trace_count;
-#define FUNKEY_IMMEDIATE_TRACE_FRAMES 8
-#define FUNKEY_IMMEDIATE_TRACE_MESHES 24
-typedef struct {
-    long vertices;
-    long indices;
-    long appearance;
-} FunKeyImmediateTraceMesh;
+#define FUNKEY_IMMEDIATE_TRACE_FRAMES 3
+#define FUNKEY_IMMEDIATE_TRACE_MESHES 8
 static int g_immediate_trace_frame = -1;
+static int g_frame_direct_calls;
+static int g_frame_node_calls;
+static int g_frame_immediate_selected;
+static int g_frame_immediate_skipped;
+static int g_immediate_trace_capture;
+static int g_immediate_trace_candidate = 1;
+static int g_immediate_trace_auto_remaining;
+static int g_immediate_trace_done;
+static int g_frame_matrices_logged;
+static int g_last_camera_valid;
+static float g_last_camera_matrix[16];
+static float g_last_view_matrix[16];
+static int g_bind_trace_count;
 static int g_immediate_trace_mesh_count;
-static FunKeyImmediateTraceMesh g_immediate_trace_meshes[FUNKEY_IMMEDIATE_TRACE_MESHES];
+static int g_rally_core_trace_count;
+static long g_dumped_image_handles[16];
+static int g_dumped_image_count;
+
+static FunKeyM3GObject *funkey_m3g_object(long handle);
 
 static int
 funkey_m3g_ngl_trace_enabled(void) {
@@ -184,7 +196,13 @@ funkey_m3g_ngl_trace_enabled(void) {
     if (value != 0) {
         return value[0] != '\0' && value[0] != '0';
     }
-    return 1;
+    return 0;
+}
+
+static int
+funkey_m3g_rally_trace_enabled(void) {
+    const char *value = getenv("M3G_RALLY_TRACE");
+    return value != 0 && value[0] != '\0' && value[0] != '0';
 }
 
 static void
@@ -199,38 +217,271 @@ funkey_m3g_trace_float_matrix(const char *tag, const float *matrix) {
 }
 
 static void
-funkey_m3g_immediate_trace_frame(void) {
-    if (g_immediate_trace_frame < FUNKEY_IMMEDIATE_TRACE_FRAMES) {
-        ++g_immediate_trace_frame;
-        g_immediate_trace_mesh_count = 0;
+funkey_m3g_trace_immediate_core_matrix(const float *source,
+                                       const M3GMatrix *core,
+                                       long vertices, long indices,
+                                       long appearance) {
+    float core_rows[16];
+    float identity[16];
+    int i;
+    if (!funkey_m3g_rally_trace_enabled() || g_rally_core_trace_count >= 8) {
+        return;
     }
+    for (i = 0; i < 16; ++i) identity[i] = 0.0f;
+    identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
+    m3gGetMatrixRows(core, core_rows);
+    fprintf(stderr,
+            "[M3G RALLY CORE] stage=core renderImmediate "
+            "sourceLayout=row-major coreLayout=row-major order=M*v "
+            "vb=%ld ib=%ld app=%ld source=",
+            vertices, indices, appearance);
+    for (i = 0; i < 16; ++i) {
+        fprintf(stderr, "%s%g", i == 0 ? "" : ",", source != 0 ?
+                source[i] : identity[i]);
+    }
+    fprintf(stderr, " core=");
+    for (i = 0; i < 16; ++i) {
+        fprintf(stderr, "%s%g", i == 0 ? "" : ",", core_rows[i]);
+    }
+    fprintf(stderr, "\n");
+    ++g_rally_core_trace_count;
+}
+
+static int
+funkey_m3g_dump_image_selected(long image) {
+    const char *value = getenv("M3G_DUMP_IMAGES");
+    char *end;
+    long item;
+    if (value == 0 || value[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(value, "all") == 0) {
+        return 1;
+    }
+    while (*value != '\0') {
+        while (*value == ',' || *value == ' ' || *value == '\t') ++value;
+        item = strtol(value, &end, 10);
+        if (end == value) {
+            while (*value != '\0' && *value != ',') ++value;
+            continue;
+        }
+        if (item == image) return 1;
+        value = end;
+    }
+    return 0;
+}
+
+static int
+funkey_m3g_png_chunk(FILE *file, const char type[4],
+                     const unsigned char *data, size_t size) {
+    unsigned char header[4];
+    unsigned char type_data[4];
+    uLong crc;
+    header[0] = (unsigned char)((size >> 24) & 0xffU);
+    header[1] = (unsigned char)((size >> 16) & 0xffU);
+    header[2] = (unsigned char)((size >> 8) & 0xffU);
+    header[3] = (unsigned char)(size & 0xffU);
+    memcpy(type_data, type, sizeof(type_data));
+    crc = crc32(0L, Z_NULL, 0);
+    crc = crc32(crc, type_data, sizeof(type_data));
+    if (data != 0 && size > 0) crc = crc32(crc, data, (uInt)size);
+    if (fwrite(header, 1, sizeof(header), file) != sizeof(header) ||
+            fwrite(type_data, 1, sizeof(type_data), file) != sizeof(type_data) ||
+            (data != 0 && size > 0 && fwrite(data, 1, size, file) != size)) {
+        return 0;
+    }
+    header[0] = (unsigned char)((crc >> 24) & 0xffU);
+    header[1] = (unsigned char)((crc >> 16) & 0xffU);
+    header[2] = (unsigned char)((crc >> 8) & 0xffU);
+    header[3] = (unsigned char)(crc & 0xffU);
+    return fwrite(header, 1, sizeof(header), file) == sizeof(header);
+}
+
+static void
+funkey_m3g_dump_image_png(long image_handle) {
+    FunKeyM3GObject *obj;
+    M3Guint *argb;
+    unsigned char *raw;
+    unsigned char *compressed;
+    unsigned char ihdr[13];
+    size_t raw_size;
+    uLongf compressed_size;
+    size_t pixels;
+    int width;
+    int height;
+    int x;
+    int y;
+    int i;
+    char path[256];
+    const char *dir;
+    FILE *file;
+    static const unsigned char signature[8] = {
+        137, 80, 78, 71, 13, 10, 26, 10
+    };
+    if (!funkey_m3g_dump_image_selected(image_handle) ||
+            g_dumped_image_count >= 16) return;
+    for (i = 0; i < g_dumped_image_count; ++i) {
+        if (g_dumped_image_handles[i] == image_handle) return;
+    }
+    obj = funkey_m3g_object(image_handle);
+    if (obj == 0 || obj->core == 0 ||
+            obj->class_id != FUNKEY_M3G_CLASS_IMAGE_2D) return;
+    width = m3gGetWidth((M3GImage)obj->core);
+    height = m3gGetHeight((M3GImage)obj->core);
+    if (width <= 0 || height <= 0) return;
+    pixels = (size_t)width * (size_t)height;
+    raw_size = (size_t)height * ((size_t)width * 4U + 1U);
+    argb = (M3Guint *)malloc(pixels * sizeof(*argb));
+    raw = (unsigned char *)malloc(raw_size);
+    compressed = (unsigned char *)malloc(compressBound((uLong)raw_size));
+    if (argb == 0 || raw == 0 || compressed == 0) {
+        free(argb);
+        free(raw);
+        free(compressed);
+        return;
+    }
+    m3gGetImageARGB((M3GImage)obj->core, argb);
+    for (y = 0; y < height; ++y) {
+        size_t row = (size_t)y * ((size_t)width * 4U + 1U);
+        raw[row] = 0;
+        for (x = 0; x < width; ++x) {
+            unsigned int color = argb[y * width + x];
+            raw[row + 1U + (size_t)x * 4U + 0U] = (unsigned char)((color >> 24) & 0xffU);
+            raw[row + 1U + (size_t)x * 4U + 1U] = (unsigned char)((color >> 16) & 0xffU);
+            raw[row + 1U + (size_t)x * 4U + 2U] = (unsigned char)((color >> 8) & 0xffU);
+            raw[row + 1U + (size_t)x * 4U + 3U] = (unsigned char)(color & 0xffU);
+        }
+    }
+    compressed_size = compressBound((uLong)raw_size);
+    if (compress2(compressed, &compressed_size, raw, (uLong)raw_size,
+                  Z_BEST_SPEED) != Z_OK) {
+        free(argb);
+        free(raw);
+        free(compressed);
+        return;
+    }
+    dir = getenv("M3G_DUMP_DIR");
+    if (dir == 0 || dir[0] == '\0') dir = getenv("MIDP_HOME");
+    if (dir == 0 || dir[0] == '\0') dir = "/mnt/FunKey/.pm";
+    snprintf(path, sizeof(path), "%s/m3g-image-%ld.png", dir, image_handle);
+    file = fopen(path, "wb");
+    if (file == 0) {
+        free(argb);
+        free(raw);
+        free(compressed);
+        return;
+    }
+    memset(ihdr, 0, sizeof(ihdr));
+    ihdr[0] = (unsigned char)((width >> 24) & 0xff);
+    ihdr[1] = (unsigned char)((width >> 16) & 0xff);
+    ihdr[2] = (unsigned char)((width >> 8) & 0xff);
+    ihdr[3] = (unsigned char)(width & 0xff);
+    ihdr[4] = (unsigned char)((height >> 24) & 0xff);
+    ihdr[5] = (unsigned char)((height >> 16) & 0xff);
+    ihdr[6] = (unsigned char)((height >> 8) & 0xff);
+    ihdr[7] = (unsigned char)(height & 0xff);
+    ihdr[8] = 8;
+    ihdr[9] = 6;
+    if (fwrite(signature, 1, sizeof(signature), file) != sizeof(signature) ||
+            !funkey_m3g_png_chunk(file, "IHDR", ihdr, sizeof(ihdr)) ||
+            !funkey_m3g_png_chunk(file, "IDAT", compressed, (size_t)compressed_size) ||
+            !funkey_m3g_png_chunk(file, "IEND", 0, 0)) {
+        fclose(file);
+        free(argb);
+        free(raw);
+        free(compressed);
+        return;
+    }
+    fclose(file);
+    g_dumped_image_handles[g_dumped_image_count++] = image_handle;
+    fprintf(stderr, "[M3G IMAGE DUMP] image=%ld size=%dx%d path=%s orientation=source\n",
+            image_handle, width, height, path);
+    free(argb);
+    free(raw);
+    free(compressed);
+}
+
+static void
+funkey_m3g_immediate_trace_frame(void) {
+    const char *start_value = getenv("M3G_IMMEDIATE_TRACE_START_FRAME");
+    int start = start_value != 0 && start_value[0] != '\0' ?
+                atoi(start_value) : 16;
+    if (!funkey_m3g_rally_trace_enabled()) {
+        return;
+    }
+    if (g_immediate_trace_frame >= 0) {
+        fprintf(stderr,
+                "[M3G FRAME] frame=%d directCalls=%d nodeCalls=%d "
+                "capture=%d state=%s selectedImmediate=%d skippedImmediate=%d\n",
+                g_immediate_trace_frame, g_frame_direct_calls,
+                g_frame_node_calls, g_immediate_trace_capture,
+                g_immediate_trace_done ? "DONE" :
+                    (g_immediate_trace_capture ? "CAPTURE" : "IDLE"),
+                g_frame_immediate_selected, g_frame_immediate_skipped);
+    }
+    ++g_immediate_trace_frame;
+    if (g_immediate_trace_auto_remaining > 0) {
+        g_immediate_trace_capture = 1;
+        --g_immediate_trace_auto_remaining;
+    } else {
+        g_immediate_trace_capture = !g_immediate_trace_done &&
+            g_immediate_trace_frame >= start &&
+            g_immediate_trace_frame < start + FUNKEY_IMMEDIATE_TRACE_FRAMES;
+    }
+    g_immediate_trace_mesh_count = 0;
+    g_frame_direct_calls = 0;
+    g_frame_node_calls = 0;
+    g_frame_immediate_selected = 0;
+    g_frame_immediate_skipped = 0;
+    g_frame_matrices_logged = 0;
+    nglTraceImmediateFrameBegin();
 }
 
 static int
 funkey_m3g_immediate_trace_mesh(long vertices, long indices, long appearance) {
-    int i;
-    FunKeyImmediateTraceMesh *mesh;
+    if (!funkey_m3g_rally_trace_enabled()) {
+        return 0;
+    }
     if (g_immediate_trace_frame < 0) {
         g_immediate_trace_frame = 0;
     }
-    if (g_immediate_trace_frame >= FUNKEY_IMMEDIATE_TRACE_FRAMES) {
+    if (!g_immediate_trace_capture && !g_immediate_trace_candidate) {
         return 0;
-    }
-    for (i = 0; i < g_immediate_trace_mesh_count; ++i) {
-        mesh = &g_immediate_trace_meshes[i];
-        if (mesh->vertices == vertices && mesh->indices == indices &&
-                mesh->appearance == appearance) {
-            return 0;
-        }
     }
     if (g_immediate_trace_mesh_count >= FUNKEY_IMMEDIATE_TRACE_MESHES) {
+        ++g_frame_immediate_skipped;
         return 0;
     }
-    mesh = &g_immediate_trace_meshes[g_immediate_trace_mesh_count++];
-    mesh->vertices = vertices;
-    mesh->indices = indices;
-    mesh->appearance = appearance;
+    ++g_immediate_trace_mesh_count;
+    ++g_frame_immediate_selected;
     return 1;
+}
+
+static void
+funkey_m3g_trace_frame_state(M3GRenderContext ctx) {
+    if (!funkey_m3g_rally_trace_enabled() ||
+            !g_immediate_trace_capture || g_frame_matrices_logged) return;
+    if (ctx != 0) {
+        M3GMatrix camera_matrix;
+        M3GMatrix view_matrix;
+        float rows[16];
+        m3gGetViewTransform(ctx, &camera_matrix);
+        m3gGetMatrixRows(&camera_matrix, rows);
+        funkey_m3g_trace_float_matrix("[M3G FRAME CAMERA]", rows);
+        m3gCopyMatrix(&view_matrix, &camera_matrix);
+        if (m3gInvertMatrix(&view_matrix)) {
+            m3gGetMatrixRows(&view_matrix, rows);
+            funkey_m3g_trace_float_matrix("[M3G FRAME VIEW]", rows);
+        }
+    } else if (g_last_camera_valid) {
+        funkey_m3g_trace_float_matrix("[M3G FRAME CAMERA]", g_last_camera_matrix);
+        funkey_m3g_trace_float_matrix("[M3G FRAME VIEW]", g_last_view_matrix);
+    } else {
+        fprintf(stderr, "[M3G FRAME CAMERA] unavailable frame=%d\n",
+                g_immediate_trace_frame);
+    }
+    nglTraceFrameMatricesRequest(g_immediate_trace_frame);
+    g_frame_matrices_logged = 1;
 }
 
 #ifndef M_PI
@@ -3603,6 +3854,7 @@ funkey_m3g_texture_set_image(long texture, long image) {
             }
         }
         obj->texture_image = image;
+        funkey_m3g_dump_image_png(image);
     }
 }
 
@@ -5610,6 +5862,12 @@ funkey_m3g_surface_render_core_world(FunKeyM3GSurface *surface, long world) {
         m3gSetClipRect(ctx, surface->clip_x, surface->clip_y,
                        surface->clip_w, surface->clip_h);
     }
+    if (funkey_m3g_rally_trace_enabled() && g_bind_trace_count < 2) {
+        fprintf(stderr,
+                "[M3G FRAME EVENT] bindTarget context=%ld size=%dx%d stride=%d\n",
+                (long) ctx, surface->width, surface->height, surface->stride);
+        ++g_bind_trace_count;
+    }
     m3gRenderWorld(ctx, (M3GWorld) w->core);
     m3gReleaseTarget(ctx);
     m3gDeleteRef((M3GObject) ctx);
@@ -5658,6 +5916,12 @@ funkey_m3g_context_bind_surface(long context, FunKeyM3GSurface *surface) {
         m3gSetClipRect(ctx, surface->clip_x, surface->clip_y,
                        surface->clip_w, surface->clip_h);
     }
+    if (funkey_m3g_rally_trace_enabled() && g_bind_trace_count < 2) {
+        fprintf(stderr,
+                "[M3G FRAME EVENT] bindTarget context=%ld size=%dx%d stride=%d\n",
+                context, surface->width, surface->height, surface->stride);
+        ++g_bind_trace_count;
+    }
 }
 
 void
@@ -5665,6 +5929,7 @@ funkey_m3g_context_release_target(long context) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     if (ctx != 0) {
         m3gReleaseTarget(ctx);
+        nglDiagFinish();
     }
 }
 
@@ -5674,6 +5939,11 @@ funkey_m3g_context_clear(long context, long background) {
     M3GObject bg = funkey_m3g_core_object(background);
     if (ctx != 0) {
         funkey_m3g_immediate_trace_frame();
+        nglDiagFrameBegin(g_immediate_trace_frame, 0);
+        if (g_immediate_trace_capture) {
+            fprintf(stderr, "[M3G FRAME EVENT] clear frame=%d background=%ld\n",
+                    g_immediate_trace_frame, background);
+        }
         m3gClear(ctx, (M3GBackground) bg);
     }
 }
@@ -5688,6 +5958,7 @@ funkey_m3g_context_render(long context, long vertices, long indices,
     M3GObject vb = funkey_m3g_core_object(vertices);
     M3GObject ib = funkey_m3g_core_object(indices);
     M3GObject app = funkey_m3g_core_object(appearance);
+    ++g_frame_direct_calls;
     if (ctx == 0 || vb == 0 || ib == 0 || app == 0) {
         if (funkey_m3g_ngl_trace_enabled()) {
             fprintf(stderr, "[M3G NGL] render immediate skipped ctx=%ld vb=%ld ib=%ld app=%ld\n",
@@ -5695,9 +5966,15 @@ funkey_m3g_context_render(long context, long vertices, long indices,
         }
         return;
     }
-    if (transform != 0) {
-        funkey_m3g_matrix_from_float(&matrix, transform);
-        matrix_ptr = &matrix;
+    funkey_m3g_matrix_from_float(&matrix, transform);
+    if (transform != 0) matrix_ptr = &matrix;
+    funkey_m3g_trace_immediate_core_matrix(transform, &matrix,
+                                           vertices, indices, appearance);
+    if (funkey_m3g_rally_trace_enabled()) {
+        nglTraceImmediateTransform(transform);
+    }
+    if (g_immediate_trace_capture) {
+        nglDiagForceCapture();
     }
     if (funkey_m3g_immediate_trace_mesh(vertices, indices, appearance)) {
         FunKeyM3GObject *vb_obj = funkey_m3g_object(vertices);
@@ -5712,8 +5989,12 @@ funkey_m3g_context_render(long context, long vertices, long indices,
                               (unsigned long) (tex_obj != 0 ? tex_obj->texture_image : 0),
                               vb_obj != 0 ? funkey_m3g_vertex_buffer_get_vertex_count(vertices) : 0,
                               ib_obj != 0 ? ib_obj->index_count : 0,
-                              g_immediate_trace_frame);
+                              g_immediate_trace_frame,
+                              g_frame_direct_calls,
+                              !g_immediate_trace_capture);
     }
+    nglDiagSetSource(1);
+    funkey_m3g_trace_frame_state(ctx);
     if (funkey_m3g_ngl_trace_enabled() && !g_ngl_trace_immediate) {
         fprintf(stderr, "[M3G NGL] trace first immediate frame\n");
         nglTraceFrame(64, 64);
@@ -5742,6 +6023,7 @@ funkey_m3g_context_render(long context, long vertices, long indices,
     }
     m3gRender(ctx, (M3GVertexBuffer) vb, (M3GIndexBuffer) ib,
               (M3GAppearance) app, matrix_ptr, 1.0f, scope);
+    nglDiagSetSource(0);
 }
 
 void
@@ -5754,6 +6036,22 @@ funkey_m3g_context_render_node(long context, long node, const float *transform) 
     int trace_transform = funkey_m3g_ngl_trace_enabled() &&
                           g_render_node_transform_trace_count == 0;
     M3GObject n = funkey_m3g_core_object(node);
+    ++g_frame_node_calls;
+    if (funkey_m3g_rally_trace_enabled() &&
+            !g_immediate_trace_done && !g_immediate_trace_capture &&
+            g_frame_direct_calls > 0 &&
+            g_frame_node_calls == 1) {
+        nglTraceImmediateFrameFlush();
+        nglDiagForceCapture();
+        g_immediate_trace_capture = 1;
+        g_immediate_trace_candidate = 0;
+        g_immediate_trace_done = 1;
+        g_immediate_trace_auto_remaining = 2;
+        g_immediate_trace_mesh_count = 0;
+        fprintf(stderr,
+                "[M3G FRAME AUTO] arm after nodeCalls>0 frame=%d directCalls=%d\n",
+                g_immediate_trace_frame, g_frame_direct_calls);
+    }
     if (ctx == 0 || n == 0) {
         if (funkey_m3g_ngl_trace_enabled()) {
             fprintf(stderr, "[M3G NGL] render node skipped ctx=%ld node=%ld\n",
@@ -5761,6 +6059,7 @@ funkey_m3g_context_render_node(long context, long node, const float *transform) 
         }
         return;
     }
+    funkey_m3g_trace_frame_state(ctx);
     if (transform != 0) {
         if (trace_transform) {
             funkey_m3g_trace_float_matrix("[M3G RENDERNODE RAW TRANSFORM]",
@@ -5788,7 +6087,9 @@ funkey_m3g_context_render_node(long context, long node, const float *transform) 
         M3GClass cls = m3gGetClass(n);
         M3Gint subtree = (cls == M3G_CLASS_GROUP || cls == M3G_CLASS_WORLD) ?
                          m3gGetSubtreeSize((M3GNode) n) : 1;
+        nglDiagSetSource(2);
         m3gRenderNode(ctx, (M3GNode) n, matrix_ptr);
+        nglDiagSetSource(0);
         if (funkey_m3g_ngl_trace_enabled()) {
             fprintf(stderr,
                     "[M3G NODE RESULT] node=%ld class=%d subtree=%d nodes=%d culled=%d drawn=%d error=%d\n",
@@ -5825,7 +6126,9 @@ funkey_m3g_context_render_world(long context, long world) {
                 world, g_ngl_trace_frame + 1);
     }
     ++g_ngl_trace_frame;
+    nglDiagSetSource(3);
     m3gRenderWorld(ctx, (M3GWorld) w);
+    nglDiagSetSource(0);
 }
 
 int
@@ -5848,8 +6151,6 @@ void
 funkey_m3g_context_set_camera(long context, long camera, const float *transform) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     M3GMatrix matrix;
-    M3GMatrix returned;
-    float returned_rows[16];
     M3GMatrix *matrix_ptr = 0;
     M3GObject c = funkey_m3g_core_object(camera);
     if (ctx == 0 || c == 0) {
@@ -5860,32 +6161,10 @@ funkey_m3g_context_set_camera(long context, long camera, const float *transform)
         matrix_ptr = &matrix;
     }
     m3gSetCamera(ctx, (M3GCamera) c, matrix_ptr);
-    if (funkey_m3g_ngl_trace_enabled() && g_ngl_trace_frame < 16) {
-        m3gGetViewTransform(ctx, &returned);
-        m3gGetMatrixRows(&returned, returned_rows);
-        fprintf(stderr,
-                "[M3G CAMERA MATRIX] input=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g "
-                "camera=%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
-                transform != 0 ? transform[0] : 1.0f,
-                transform != 0 ? transform[1] : 0.0f,
-                transform != 0 ? transform[2] : 0.0f,
-                transform != 0 ? transform[3] : 0.0f,
-                transform != 0 ? transform[4] : 0.0f,
-                transform != 0 ? transform[5] : 1.0f,
-                transform != 0 ? transform[6] : 0.0f,
-                transform != 0 ? transform[7] : 0.0f,
-                transform != 0 ? transform[8] : 0.0f,
-                transform != 0 ? transform[9] : 0.0f,
-                transform != 0 ? transform[10] : 1.0f,
-                transform != 0 ? transform[11] : 0.0f,
-                transform != 0 ? transform[12] : 0.0f,
-                transform != 0 ? transform[13] : 0.0f,
-                transform != 0 ? transform[14] : 0.0f,
-                transform != 0 ? transform[15] : 1.0f,
-                returned_rows[0], returned_rows[1], returned_rows[2], returned_rows[3],
-                returned_rows[4], returned_rows[5], returned_rows[6], returned_rows[7],
-                returned_rows[8], returned_rows[9], returned_rows[10], returned_rows[11],
-                returned_rows[12], returned_rows[13], returned_rows[14], returned_rows[15]);
+    g_last_camera_valid = 0;
+    if (g_immediate_trace_capture) {
+        fprintf(stderr, "[M3G FRAME EVENT] setCamera frame=%d camera=%ld hasTransform=%d\n",
+                g_immediate_trace_frame, camera, transform != 0);
     }
 }
 

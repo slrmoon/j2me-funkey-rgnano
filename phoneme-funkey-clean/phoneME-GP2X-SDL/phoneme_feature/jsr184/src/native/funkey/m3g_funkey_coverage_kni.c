@@ -1604,6 +1604,12 @@ Java_javax_microedition_m3g_Transform__1traceVerbose(void) {
     KNI_ReturnBoolean(value != 0 && value[0] != '\0' && value[0] != '0');
 }
 
+KNIEXPORT KNI_RETURNTYPE_BOOLEAN
+Java_javax_microedition_m3g_Graphics3D__1rallyTrace(void) {
+    const char *value = getenv("M3G_RALLY_TRACE");
+    KNI_ReturnBoolean(value != 0 && value[0] != '\0' && value[0] != '0');
+}
+
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Transform__1setMatrix(void) {
     float m[16];

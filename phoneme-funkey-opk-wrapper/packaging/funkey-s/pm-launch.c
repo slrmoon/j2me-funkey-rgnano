@@ -28,6 +28,26 @@
 #define BIN_DIR    "/mnt/FunKey/.pm/bin"
 #define RMS_DIR    "/mnt/FunKey/.pm/rms"
 #define FAVORITES_FILE PM_DIR "/favorites.txt"
+
+#ifndef FUNKEY_M3G_DUMP_IMAGES
+#define FUNKEY_M3G_DUMP_IMAGES ""
+#endif
+#ifndef FUNKEY_M3G_DUMP_DIR
+#define FUNKEY_M3G_DUMP_DIR ""
+#endif
+#ifndef FUNKEY_M3G_DISABLE_CULL
+#define FUNKEY_M3G_DISABLE_CULL ""
+#endif
+#ifndef FUNKEY_M3G_HIGHLIGHT
+#define FUNKEY_M3G_HIGHLIGHT ""
+#endif
+#ifndef FUNKEY_M3G_RALLY_TRACE
+#define FUNKEY_M3G_RALLY_TRACE ""
+#endif
+#ifndef FUNKEY_M3G_REFLECT_X
+#define FUNKEY_M3G_REFLECT_X ""
+#endif
+
 static char java_dir[PATH_MAX] = "/mnt/java";
 
 /* ── MIDP key codes (from phoneME keymap_input.h) ───── */
@@ -1900,6 +1920,24 @@ static void launch_game(int idx) {
 
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
+    if (FUNKEY_M3G_DUMP_IMAGES[0] != '\0') {
+        setenv("M3G_DUMP_IMAGES", FUNKEY_M3G_DUMP_IMAGES, 1);
+    }
+    if (FUNKEY_M3G_DUMP_DIR[0] != '\0') {
+        setenv("M3G_DUMP_DIR", FUNKEY_M3G_DUMP_DIR, 1);
+    }
+    if (FUNKEY_M3G_DISABLE_CULL[0] != '\0') {
+        setenv("M3G_IMMEDIATE_DISABLE_CULL", FUNKEY_M3G_DISABLE_CULL, 1);
+    }
+    if (FUNKEY_M3G_HIGHLIGHT[0] != '\0') {
+        setenv("M3G_IMMEDIATE_HIGHLIGHT", FUNKEY_M3G_HIGHLIGHT, 1);
+    }
+    if (FUNKEY_M3G_RALLY_TRACE[0] != '\0') {
+        setenv("M3G_RALLY_TRACE", FUNKEY_M3G_RALLY_TRACE, 1);
+    }
+    if (FUNKEY_M3G_REFLECT_X[0] != '\0') {
+        setenv("M3G_RALLY_REFLECT_X", FUNKEY_M3G_REFLECT_X, 1);
+    }
     setenv("PHONEME_RMS_HOME", rms_home, 1);
     setenv("PHONEME_HEAP_MB", "16", 1);
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
