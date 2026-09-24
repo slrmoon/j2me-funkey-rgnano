@@ -58,5 +58,5 @@ ifeq ($(TARGET_CPU), arm)
     LIBS += -lfloat
   endif
 else
-  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_mixer -lSDL_gfx -lm
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_mixer -lm
 endif
