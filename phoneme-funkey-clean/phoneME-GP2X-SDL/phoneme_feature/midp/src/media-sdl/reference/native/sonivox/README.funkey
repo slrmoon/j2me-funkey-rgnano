@@ -1,0 +1,15 @@
+Sonivox EAS (Embedded Audio Synthesis), from https://github.com/pedrolcl/sonivox
+(the Android platform MIDI synthesizer), Apache License 2.0 - see LICENSE, NOTICE.
+
+Only the synthesizer is used: fkaudio parses every format itself and feeds
+EAS through its interactive MIDI stream API (one stream = one virtual synth
+per player).
+
+FunKey changes:
+  eas_options.h  build configuration: mono 22050 Hz, wavetable + FM + hybrid
+                 engines, DLS/SF2 banks, 64 voices, 16 streams
+  eas_mixer.c    SynthMasterGain: 64-bit gain product and a soft knee; the
+                 32-bit product wrapped around on dense songs (crackles)
+
+wt_22khz.c and wt_200k_samples.c are #included by wt_200k_G.c and must not be
+compiled on their own.

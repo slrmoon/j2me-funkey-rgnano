@@ -1941,7 +1941,6 @@ static void launch_game(int idx) {
     setenv("PHONEME_RMS_HOME", rms_home, 1);
     setenv("PHONEME_HEAP_MB", "16", 1);
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
-    setenv("PHONEME_TIMIDITY_SYNTHETIC", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
