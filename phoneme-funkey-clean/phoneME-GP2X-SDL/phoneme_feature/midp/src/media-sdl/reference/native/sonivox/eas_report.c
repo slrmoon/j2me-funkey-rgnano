@@ -43,7 +43,7 @@ static int severityLevel = 9999;
 
 /* debug file */
 static FILE *debugFile = NULL;
-int flush = 0;
+static int flush = 0;   /* FunKey: was a global with a generic name */
 
 /* structure should have an #include for each error message header file */
 S_DEBUG_MESSAGES debugMessages[] =

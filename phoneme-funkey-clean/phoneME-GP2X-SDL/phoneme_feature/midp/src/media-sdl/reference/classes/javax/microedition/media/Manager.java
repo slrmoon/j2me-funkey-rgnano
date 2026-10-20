@@ -145,7 +145,10 @@ public final class Manager {
                 String path = l.startsWith("resource:") ? l.substring(9) : l;
                 if (path.startsWith("//")) path = path.substring(1);
                 if (!path.startsWith("/")) path = "/" + path;
-                in = Manager.class.getResourceAsStream(path);
+                /* no class literal: javac -target 1.4 turns it into a
+                 * helper calling Throwable.initCause, absent in CLDC; the
+                 * lookup of an absolute path does not depend on the class */
+                in = "".getClass().getResourceAsStream(path);
                 if (in == null) throw new IOException("Resource not found: " + path);
             } else {
                 in = Connector.openInputStream(l);
