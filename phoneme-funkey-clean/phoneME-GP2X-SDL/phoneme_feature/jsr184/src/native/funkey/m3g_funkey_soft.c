@@ -151,6 +151,7 @@ typedef struct FunKeyM3GObject {
     float light_spot_angle;
     float light_spot_exponent;
     float light_attenuation[3];
+    long core_hash_next;  /* next handle in g_core_hash bucket */
 } FunKeyM3GObject;
 
 static FunKeyM3GObject g_objects[FUNKEY_M3G_MAX_OBJECTS];
@@ -189,6 +190,59 @@ static long g_dumped_image_handles[16];
 static int g_dumped_image_count;
 
 static FunKeyM3GObject *funkey_m3g_object(long handle);
+
+/*
+ * core pointer -> handle index. Every write of obj->core goes through
+ * funkey_m3g_set_core so lookups never need to scan all handles; getters
+ * such as Mesh.getAppearance/Group.getChild hit this on every call.
+ */
+#define FUNKEY_M3G_CORE_BUCKETS 4096
+static long g_core_hash[FUNKEY_M3G_CORE_BUCKETS];
+
+static unsigned int
+funkey_m3g_core_bucket(M3GObject core) {
+    uintptr_t v = (uintptr_t) core;
+    return (unsigned int) ((v >> 4) ^ (v >> 16)) & (FUNKEY_M3G_CORE_BUCKETS - 1);
+}
+
+static void
+funkey_m3g_core_unlink(long handle) {
+    FunKeyM3GObject *obj = &g_objects[handle];
+    long *link;
+    if (obj->core == 0) return;
+    link = &g_core_hash[funkey_m3g_core_bucket(obj->core)];
+    while (*link != 0) {
+        if (*link == handle) {
+            *link = obj->core_hash_next;
+            obj->core_hash_next = 0;
+            return;
+        }
+        link = &g_objects[*link].core_hash_next;
+    }
+}
+
+/* The handle owns exactly one reference to its core object: m3gCreate*
+ * returns objects with a zero refcount, so without this the core freed
+ * an object as soon as e.g. a Group child was detached, leaving the handle
+ * dangling (use-after-free on release). */
+static void
+funkey_m3g_set_core(FunKeyM3GObject *obj, M3GObject core) {
+    long handle = (long) (obj - g_objects);
+    M3GObject old = obj->core;
+    unsigned int bucket;
+    if (core != 0) {
+        m3gAddRef(core);
+    }
+    funkey_m3g_core_unlink(handle);
+    obj->core = core;
+    if (old != 0) {
+        m3gDeleteRef(old);
+    }
+    if (core == 0) return;
+    bucket = funkey_m3g_core_bucket(core);
+    obj->core_hash_next = g_core_hash[bucket];
+    g_core_hash[bucket] = handle;
+}
 
 static int
 funkey_m3g_ngl_trace_enabled(void) {
@@ -531,9 +585,7 @@ funkey_m3g_free_object(FunKeyM3GObject *obj) {
     if (obj->keyframe_values != 0) {
         free(obj->keyframe_values);
     }
-    if (obj->core != 0) {
-        m3gDeleteRef(obj->core);
-    }
+    funkey_m3g_set_core(obj, 0);
     memset(obj, 0, sizeof(*obj));
 }
 
@@ -559,7 +611,8 @@ funkey_m3g_find_core_handle(M3GObject core) {
     if (core == 0) {
         return 0;
     }
-    for (i = 1; i < FUNKEY_M3G_MAX_OBJECTS; ++i) {
+    for (i = g_core_hash[funkey_m3g_core_bucket(core)]; i != 0;
+            i = g_objects[i].core_hash_next) {
         if (g_objects[i].alive && g_objects[i].core == core) {
             return i;
         }
@@ -700,11 +753,10 @@ funkey_m3g_wrap_core_object(M3GObject core) {
     handle = funkey_m3g_alloc_handle();
     obj = funkey_m3g_object(handle);
     if (obj != 0) {
-        obj->core = core;
+        funkey_m3g_set_core(obj, core);
         obj->core_interface = m3gGetObjectInterface(core);
         obj->class_id = (int) m3gGetClass(core);
         obj->user_id = m3gGetUserID(core);
-        m3gAddRef(core);
     }
     return handle;
 }
@@ -750,10 +802,7 @@ funkey_m3g_sync_core_image_rows(FunKeyM3GObject *obj, int row_first,
         if (image == 0) {
             return 0;
         }
-        if (obj->core != 0) {
-            m3gDeleteRef(obj->core);
-        }
-        obj->core = (M3GObject) image;
+        funkey_m3g_set_core(obj, (M3GObject) image);
         obj->core_interface = m3g;
         row_first = 0;
         row_count = obj->image_height;
@@ -818,7 +867,7 @@ funkey_m3g_create_loader(long interface_handle) {
         obj->class_id = FUNKEY_M3G_CLASS_LOADER;
         obj->core_interface = m3g;
         if (m3g != 0) {
-            obj->core = (M3GObject) m3gCreateLoader(m3g);
+            funkey_m3g_set_core(obj, (M3GObject) m3gCreateLoader(m3g));
         }
     }
     return handle;
@@ -836,43 +885,43 @@ funkey_m3g_create_object(int class_id) {
         if (m3g != 0) {
             switch (class_id) {
             case FUNKEY_M3G_CLASS_ANIMATION_CONTROLLER:
-                obj->core = (M3GObject) m3gCreateAnimationController(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateAnimationController(m3g));
                 break;
             case FUNKEY_M3G_CLASS_APPEARANCE:
-                obj->core = (M3GObject) m3gCreateAppearance(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateAppearance(m3g));
                 break;
             case FUNKEY_M3G_CLASS_BACKGROUND:
-                obj->core = (M3GObject) m3gCreateBackground(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateBackground(m3g));
                 break;
             case FUNKEY_M3G_CLASS_CAMERA:
-                obj->core = (M3GObject) m3gCreateCamera(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateCamera(m3g));
                 break;
             case FUNKEY_M3G_CLASS_COMPOSITING_MODE:
-                obj->core = (M3GObject) m3gCreateCompositingMode(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateCompositingMode(m3g));
                 break;
             case FUNKEY_M3G_CLASS_FOG:
-                obj->core = (M3GObject) m3gCreateFog(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateFog(m3g));
                 break;
             case FUNKEY_M3G_CLASS_GROUP:
-                obj->core = (M3GObject) m3gCreateGroup(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateGroup(m3g));
                 break;
             case FUNKEY_M3G_CLASS_LIGHT:
-                obj->core = (M3GObject) m3gCreateLight(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateLight(m3g));
                 break;
             case FUNKEY_M3G_CLASS_MATERIAL:
-                obj->core = (M3GObject) m3gCreateMaterial(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateMaterial(m3g));
                 break;
             case FUNKEY_M3G_CLASS_POLYGON_MODE:
-                obj->core = (M3GObject) m3gCreatePolygonMode(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreatePolygonMode(m3g));
                 break;
             case FUNKEY_M3G_CLASS_RENDER_CONTEXT:
-                obj->core = (M3GObject) m3gCreateContext(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateContext(m3g));
                 break;
             case FUNKEY_M3G_CLASS_VERTEX_BUFFER:
-                obj->core = (M3GObject) m3gCreateVertexBuffer(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateVertexBuffer(m3g));
                 break;
             case FUNKEY_M3G_CLASS_WORLD:
-                obj->core = (M3GObject) m3gCreateWorld(m3g);
+                funkey_m3g_set_core(obj, (M3GObject) m3gCreateWorld(m3g));
                 break;
             default:
                 break;
@@ -1081,8 +1130,7 @@ funkey_m3g_loader_set_external_refs(long loader, const long *refs, int count) {
              * null refs, so keep this whole load on the Java fallback path.
              */
             fprintf(stderr, "[M3G Loader] external refs are fallback-only, disabling native loader\n");
-            m3gDeleteRef(obj->core);
-            obj->core = 0;
+            funkey_m3g_set_core(obj, 0);
             return;
         }
         core_refs[i] = (M3Gulong) (uintptr_t) core_ref;
@@ -2047,10 +2095,10 @@ funkey_m3g_animation_track_init(long track, long sequence, int property) {
         M3GObject core_sequence = funkey_m3g_core_object(sequence);
         if (obj->core == 0 && obj->core_interface != 0 &&
                 core_sequence != 0) {
-            obj->core = (M3GObject)
+            funkey_m3g_set_core(obj, (M3GObject)
                 m3gCreateAnimationTrack(obj->core_interface,
                                         (M3GKeyframeSequence) core_sequence,
-                                        property);
+                                        property));
         }
         obj->track_sequence = sequence;
         obj->track_property = property;
@@ -2109,9 +2157,9 @@ funkey_m3g_keyframe_init(long sequence, int keyframes, int components,
         return 0;
     }
     if (obj->core == 0 && obj->core_interface != 0) {
-        obj->core = (M3GObject)
+        funkey_m3g_set_core(obj, (M3GObject)
             m3gCreateKeyframeSequence(obj->core_interface, keyframes,
-                                      components, interpolation);
+                                      components, interpolation));
     }
     if (obj->keyframe_times != 0) {
         free(obj->keyframe_times);
@@ -2681,8 +2729,7 @@ funkey_m3g_vertex_array_init(long handle, int vertices,
     obj->component_count = components;
     obj->component_type = component_size;
     if (obj->core != 0) {
-        m3gDeleteRef(obj->core);
-        obj->core = 0;
+        funkey_m3g_set_core(obj, 0);
     }
     if (vertices > 0 && components >= 2) {
         m3g = obj->core_interface != 0 ? obj->core_interface :
@@ -2692,7 +2739,7 @@ funkey_m3g_vertex_array_init(long handle, int vertices,
                                     component_size == 1 ? M3G_BYTE : M3G_SHORT) :
                0;
         if (core != 0) {
-            obj->core = (M3GObject) core;
+            funkey_m3g_set_core(obj, (M3GObject) core);
             obj->core_interface = m3g;
         }
     }
@@ -3136,10 +3183,7 @@ funkey_m3g_index_buffer_init_strips(long handle, int first_index,
     }
     free(core_lengths);
     if (core != 0) {
-        if (obj->core != 0) {
-            m3gDeleteRef(obj->core);
-        }
-        obj->core = (M3GObject) core;
+        funkey_m3g_set_core(obj, (M3GObject) core);
         obj->core_interface = m3g;
     }
     return 1;
@@ -3231,10 +3275,7 @@ funkey_m3g_mesh_init(long mesh, long vertices, const long *triangles,
                                           core_appearances, submesh_count);
             }
             if (core_mesh != 0) {
-                if (obj->core != 0) {
-                    m3gDeleteRef(obj->core);
-                }
-                obj->core = (M3GObject) core_mesh;
+                funkey_m3g_set_core(obj, (M3GObject) core_mesh);
                 obj->core_interface = m3g;
             }
         }
@@ -3357,10 +3398,7 @@ funkey_m3g_morphing_mesh_init(long mesh, long vertices,
                                                   submesh_count, target_count);
             }
             if (core_mesh != 0) {
-                if (obj->core != 0) {
-                    m3gDeleteRef(obj->core);
-                }
-                obj->core = (M3GObject) core_mesh;
+                funkey_m3g_set_core(obj, (M3GObject) core_mesh);
                 obj->core_interface = m3g;
             }
         }
@@ -3473,10 +3511,7 @@ funkey_m3g_skinned_mesh_init(long mesh, long vertices,
                                                  core_skeleton);
             }
             if (core_mesh != 0) {
-                if (obj->core != 0) {
-                    m3gDeleteRef(obj->core);
-                }
-                obj->core = (M3GObject) core_mesh;
+                funkey_m3g_set_core(obj, (M3GObject) core_mesh);
                 obj->core_interface = m3g;
             }
         }
@@ -3556,10 +3591,7 @@ funkey_m3g_sprite_init(long sprite, int scaled, long image,
                         (M3GAppearance) funkey_m3g_core_object(appearance)) :
         0;
     if (core_sprite != 0) {
-        if (obj->core != 0) {
-            m3gDeleteRef(obj->core);
-        }
-        obj->core = (M3GObject) core_sprite;
+        funkey_m3g_set_core(obj, (M3GObject) core_sprite);
         obj->core_interface = m3g;
     }
     return 1;
@@ -3830,7 +3862,7 @@ funkey_m3g_texture_create_core(FunKeyM3GObject *obj, M3GImage image) {
     if (texture == 0) {
         return 0;
     }
-    obj->core = (M3GObject) texture;
+    funkey_m3g_set_core(obj, (M3GObject) texture);
     obj->core_interface = m3g;
 
     m3gSetFiltering(texture, obj->texture_level_filter,
@@ -5909,7 +5941,7 @@ funkey_m3g_context_core(long context) {
         ctx->core_interface = ctx->core_interface != 0 ? ctx->core_interface :
                               funkey_m3g_ensure_core_interface();
         if (ctx->core_interface != 0) {
-            ctx->core = (M3GObject) m3gCreateContext(ctx->core_interface);
+            funkey_m3g_set_core(ctx, (M3GObject) m3gCreateContext(ctx->core_interface));
         }
     }
     return (M3GRenderContext) ctx->core;
