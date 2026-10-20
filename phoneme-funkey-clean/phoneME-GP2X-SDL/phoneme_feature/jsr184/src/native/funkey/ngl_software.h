@@ -154,6 +154,13 @@ typedef struct {
     NGLArray normal;
     NGLTexture textures[NGL_SW_MAX_TEXTURES];
     GLuint bound_texture[NGL_SW_TEXTURE_UNITS];
+    /* Resolved slot for bound_texture[]; NULL means "look it up again". */
+    NGLTexture *bound_ptr[NGL_SW_TEXTURE_UNITS];
+    /* Per-draw transformed vertex cache (NGLVertex is declared later). */
+    void *vcache;
+    unsigned int *vcache_stamp;
+    int vcache_cap;
+    unsigned int vcache_draw;
     GLenum tex_env_mode[NGL_SW_TEXTURE_UNITS];
     unsigned int tex_env_color[NGL_SW_TEXTURE_UNITS];
     int trace_draw_budget;
@@ -707,10 +714,12 @@ static NGLTexture *ngl_sw_bound_texture(int unit) {
     if (unit < 0 || unit >= NGL_SW_TEXTURE_UNITS) {
         return NULL;
     }
-    if (ngl_sw.bound_texture[unit] == 0) {
-        return &ngl_sw.textures[unit];
+    if (ngl_sw.bound_ptr[unit] == NULL) {
+        ngl_sw.bound_ptr[unit] = ngl_sw.bound_texture[unit] == 0 ?
+                                 &ngl_sw.textures[unit] :
+                                 ngl_sw_texture(ngl_sw.bound_texture[unit]);
     }
-    return ngl_sw_texture(ngl_sw.bound_texture[unit]);
+    return ngl_sw.bound_ptr[unit];
 }
 
 static void ngl_sw_diag_dump_texture(GLuint id, const NGLTexture *t) {
@@ -875,8 +884,9 @@ static unsigned int ngl_sw_texel(NGLTexture *t, float s, float tt) {
                                             fx - (float)x0);
         return ngl_sw_lerp_texel(a, b, fy - (float)y0);
     }
-    x = (int)(s * (float)(t->width - 1) + 0.5f);
-    y = (int)(tt * (float)(t->height - 1) + 0.5f);
+    /* GL nearest sampling: texel i covers [i/w, (i+1)/w). */
+    x = (int)floorf(s * (float)t->width);
+    y = (int)floorf(tt * (float)t->height);
     if (x < 0) x = 0;
     if (x >= t->width) x = t->width - 1;
     if (y < 0) y = 0;
@@ -1448,6 +1458,7 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     int x, y;
     int scx0, scy0, scx1, scy1;
     float depth_offset = 0.0f;
+    NGLTexture *tex_unit[NGL_SW_TEXTURE_UNITS];
     if (ngl_sw.pixels == NULL || ngl_sw.width <= 0 || ngl_sw.height <= 0) {
         return;
     }
@@ -1536,6 +1547,14 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
         depth_offset = ngl_sw.polygon_offset_factor * slope +
                        ngl_sw.polygon_offset_units / 65535.0f;
     }
+    {
+        int unit;
+        for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+            NGLTexture *t = ngl_sw.texture_2d[unit] ? ngl_sw_bound_texture(unit) : NULL;
+            tex_unit[unit] = (t != NULL && t->argb != NULL &&
+                              t->width > 0 && t->height > 0) ? t : NULL;
+        }
+    }
     minx = (int)floorf(fminf(ax, fminf(bx, cx)));
     maxx = (int)ceilf(fmaxf(ax, fmaxf(bx, cx)));
     miny = (int)floorf(fminf(ay, fminf(by, cy)));
@@ -1605,10 +1624,8 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
             {
                 int unit;
                 for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
-                    NGLTexture *tex = ngl_sw.texture_2d[unit] ?
-                                      ngl_sw_bound_texture(unit) :
-                                      NULL;
-                    if (tex != NULL && tex->argb != NULL) {
+                    NGLTexture *tex = tex_unit[unit];
+                    if (tex != NULL) {
                         float u = 0.0f;
                         float v = 0.0f;
                         unsigned int texel;
@@ -1705,6 +1722,55 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     for (i = 1; i + 1 < count; ++i) {
         ngl_sw_raster_tri(input[0], input[i], input[i + 1]);
     }
+}
+
+/*
+ * Strips reference every vertex ~3 times; transforming and lighting it once
+ * per draw instead of once per triangle is the main geometry saving. The
+ * transform depends only on state that is fixed for the duration of a draw.
+ */
+static void ngl_sw_vcache_begin(void) {
+    if (++ngl_sw.vcache_draw == 0) {
+        if (ngl_sw.vcache_stamp != NULL) {
+            memset(ngl_sw.vcache_stamp, 0,
+                   (size_t)ngl_sw.vcache_cap * sizeof(unsigned int));
+        }
+        ngl_sw.vcache_draw = 1;
+    }
+}
+
+static int ngl_sw_vcache_reserve(int index) {
+    int cap;
+    void *verts;
+    unsigned int *stamps;
+    if (index < ngl_sw.vcache_cap) return 1;
+    cap = ngl_sw.vcache_cap > 0 ? ngl_sw.vcache_cap : 256;
+    while (cap <= index) cap *= 2;
+    verts = realloc(ngl_sw.vcache, (size_t)cap * sizeof(NGLVertex));
+    if (verts == NULL) return 0;
+    ngl_sw.vcache = verts;
+    stamps = (unsigned int *)realloc(ngl_sw.vcache_stamp,
+                                     (size_t)cap * sizeof(unsigned int));
+    if (stamps == NULL) return 0;
+    memset(stamps + ngl_sw.vcache_cap, 0,
+           (size_t)(cap - ngl_sw.vcache_cap) * sizeof(unsigned int));
+    ngl_sw.vcache_stamp = stamps;
+    ngl_sw.vcache_cap = cap;
+    return 1;
+}
+
+static void ngl_sw_fetch_vertex(int index, NGLVertex *out) {
+    NGLVertex *cache;
+    if (index < 0 || !ngl_sw_vcache_reserve(index)) {
+        ngl_sw_transform_vertex(index, out);
+        return;
+    }
+    cache = (NGLVertex *)ngl_sw.vcache;
+    if (ngl_sw.vcache_stamp[index] != ngl_sw.vcache_draw) {
+        ngl_sw_transform_vertex(index, &cache[index]);
+        ngl_sw.vcache_stamp[index] = ngl_sw.vcache_draw;
+    }
+    *out = cache[index];
 }
 
 static int ngl_sw_index(GLenum type, const GLvoid *indices, int i) {
@@ -1859,6 +1925,7 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
                     (reflect_stage == 2 ? "view" : "projection"));
         }
     }
+    ngl_sw_vcache_begin();
     for (i = 0; i + 2 < count; ++i) {
         int ia = indices != NULL ? ngl_sw_index(type, indices, i) : first + i;
         int ib = indices != NULL ? ngl_sw_index(type, indices, i + 1) : first + i + 1;
@@ -1866,6 +1933,12 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         NGLVertex a, b, c;
         if ((i & 1) != 0) {
             int t = ia; ia = ib; ib = t;
+        }
+        /* Strip stitching produces degenerate triangles; they rasterize
+         * nothing, so skip them unless a diagnostic wants the counters. */
+        if ((ia == ib || ib == ic || ia == ic) &&
+                !collect_trace && !ngl_sw.diag_capture_active) {
+            continue;
         }
         if (scene_trace && i == 0) {
             float p0[4], p1[4], p2[4];
@@ -1916,9 +1989,9 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
                     ngl_sw.projection[12], ngl_sw.projection[13],
                     ngl_sw.projection[14], ngl_sw.projection[15]);
         }
-        ngl_sw_transform_vertex(ia, &a);
-        ngl_sw_transform_vertex(ib, &b);
-        ngl_sw_transform_vertex(ic, &c);
+        ngl_sw_fetch_vertex(ia, &a);
+        ngl_sw_fetch_vertex(ib, &b);
+        ngl_sw_fetch_vertex(ic, &c);
         if (immediate_trace && i == 0) {
             ngl_sw_rally_trace_geometry(&a, &b, &c);
         }
@@ -2550,7 +2623,7 @@ static inline void glTexEnvfv(GLenum target, GLenum pname, const GLfloat *params
 }
 static inline void glTexEnvx(GLenum target, GLenum pname, GLfixed param) { int unit = ngl_sw_texture_unit(ngl_sw.active_texture); (void)target; if (unit >= 0 && pname == GL_TEXTURE_ENV_MODE) ngl_sw.tex_env_mode[unit] = (GLenum)param; }
 static inline void glTexParameteri(GLenum target, GLenum pname, GLint param) { glTexParameterx(target, pname, param); }
-static inline void glBindTexture(GLenum target, GLuint texture) { int unit = ngl_sw_texture_unit(ngl_sw.active_texture); (void)target; if (unit >= 0) { ngl_sw.bound_texture[unit] = texture; ngl_sw_bound_texture(unit); } }
+static inline void glBindTexture(GLenum target, GLuint texture) { int unit = ngl_sw_texture_unit(ngl_sw.active_texture); (void)target; if (unit >= 0) { ngl_sw.bound_texture[unit] = texture; ngl_sw.bound_ptr[unit] = NULL; ngl_sw_bound_texture(unit); } }
 static inline void glCompressedTexImage2D(GLenum target, GLint level,
                                           GLenum internalformat, GLsizei width,
                                           GLsizei height, GLint border,
@@ -2764,6 +2837,9 @@ static inline void glDeleteTextures(GLsizei n, const GLuint *textures) {
     int slot;
     int unit;
     if (textures == NULL) return;
+    for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+        ngl_sw.bound_ptr[unit] = NULL;
+    }
     for (i = 0; i < n; ++i) {
         if (textures[i] == 0) continue;
         for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
@@ -2851,6 +2927,8 @@ static inline void nglExit(void) {
     int i;
     for (i = 0; i < NGL_SW_MAX_TEXTURES; ++i) free(ngl_sw.textures[i].argb);
     free(ngl_sw.depth);
+    free(ngl_sw.vcache);
+    free(ngl_sw.vcache_stamp);
     memset(&ngl_sw, 0, sizeof(ngl_sw));
 }
 static inline void nglInitTextures(GLsizei count, const GLuint *textures) { GLsizei i; for (i = 0; i < count; ++i) ngl_sw_texture(textures[i]); }

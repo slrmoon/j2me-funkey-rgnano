@@ -6131,6 +6131,14 @@ funkey_m3g_context_render_world(long context, long world) {
     nglDiagSetSource(0);
 }
 
+void
+funkey_m3g_context_reset_lights(long context) {
+    M3GRenderContext ctx = funkey_m3g_context_core(context);
+    if (ctx != 0) {
+        m3gClearLights(ctx);
+    }
+}
+
 int
 funkey_m3g_context_add_light(long context, long light, const float *transform) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);

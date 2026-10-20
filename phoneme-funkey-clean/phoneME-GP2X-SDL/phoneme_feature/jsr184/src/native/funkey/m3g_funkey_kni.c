@@ -789,6 +789,7 @@ Java_javax_microedition_m3g_Graphics3D__1releaseImage(void) {
 
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1resetLights(void) {
+    funkey_m3g_context_reset_lights(M3G_LONG_PARAM(1));
     KNI_ReturnVoid();
 }
 
