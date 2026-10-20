@@ -167,6 +167,11 @@ struct M3GRenderContextImpl
     BackBuffer backBuffer;
 #   if defined(M3G_NGL_CONTEXT_API)
     DepthBuffer depthBuffer;
+    /* Image2D render targets: the software backend draws into this RGB565
+     * copy, which is written back into the image on release. */
+    M3Gushort *imagePixels;
+    M3Guint *imageArgb;
+    M3Gint imageCapacity;
 #   endif
 
 #   if !defined(M3G_NGL_CONTEXT_API)
@@ -306,6 +311,8 @@ static void m3gDestroyContext(/*@only@*/ Object *obj)
 
     m3gFreeObject(M3G_INTERFACE(ctx), ctx->depthBuffer.handle);
     m3gFreeObject(M3G_INTERFACE(ctx), ctx->backBuffer.handle);
+    m3gFree(M3G_INTERFACE(ctx), ctx->imagePixels);
+    m3gFree(M3G_INTERFACE(ctx), ctx->imageArgb);
     
 #   else /* !M3G_NGL_CONTEXT_API */
     
@@ -1486,8 +1493,35 @@ M3G_API void m3gBindImageTarget(M3GRenderContext hCtx, M3GImage hImage)
     /* Set up image-specific parameters */
     
 #   if defined(M3G_NGL_CONTEXT_API)
-    ctx->target.stride = m3gGetImageStride(img);
-    ctx->target.pixels = NULL;
+    {
+        /* Render into an RGB565 copy of the image (keeping its current
+         * contents, since M3G does not clear on bind). */
+        M3Gint count = img->width * img->height;
+        M3Gint i;
+        if (count > ctx->imageCapacity) {
+            m3gFree(M3G_INTERFACE(ctx), ctx->imagePixels);
+            m3gFree(M3G_INTERFACE(ctx), ctx->imageArgb);
+            ctx->imagePixels = (M3Gushort *) m3gAlloc(M3G_INTERFACE(ctx),
+                                                      count * sizeof(M3Gushort));
+            ctx->imageArgb = (M3Guint *) m3gAlloc(M3G_INTERFACE(ctx),
+                                                  count * sizeof(M3Guint));
+            ctx->imageCapacity = (ctx->imagePixels && ctx->imageArgb) ? count : 0;
+        }
+        if (ctx->imageCapacity == 0) {
+            ctx->target.pixels = NULL;  /* out of memory already raised */
+        }
+        else {
+            m3gGetImageARGB(hImage, ctx->imageArgb);
+            for (i = 0; i < count; ++i) {
+                M3Guint p = ctx->imageArgb[i];
+                ctx->imagePixels[i] = (M3Gushort)(((p >> 8) & 0xF800u) |
+                                                  ((p >> 5) & 0x07E0u) |
+                                                  ((p >> 3) & 0x001Fu));
+            }
+            ctx->target.pixels = ctx->imagePixels;
+            ctx->target.stride = img->width;
+        }
+    }
 #   endif
     
     m3gAddRef((Object*) img);
@@ -1669,6 +1703,26 @@ M3G_API void m3gReleaseTarget(M3GRenderContext context)
     if (ctx->target.type == SURFACE_IMAGE) {
         Image *img = (Image *) ctx->target.handle;
         M3G_VALIDATE_OBJECT(img);
+#       if defined(M3G_NGL_CONTEXT_API)
+        if (ctx->target.pixels != NULL && ctx->target.pixels == ctx->imagePixels) {
+            /* Write the rendered RGB back, keeping the image's alpha. */
+            M3Gint x, y;
+            for (y = 0; y < img->height; ++y) {
+                M3Guint *row = ctx->imageArgb + y * img->width;
+                const M3Gushort *src = ctx->imagePixels + y * img->width;
+                for (x = 0; x < img->width; ++x) {
+                    M3Guint p = src[x];
+                    M3Guint r = (p >> 11) & 0x1Fu, g = (p >> 5) & 0x3Fu, b = p & 0x1Fu;
+                    r = (r << 3) | (r >> 2);
+                    g = (g << 2) | (g >> 4);
+                    b = (b << 3) | (b >> 2);
+                    row[x] = (row[x] & 0xFF000000u) | (r << 16) | (g << 8) | b;
+                }
+                m3gSetImageScanline((M3GImage) img, y, M3G_TRUE, row);
+            }
+            ctx->target.pixels = NULL;
+        }
+#       endif
         m3gInvalidateImage(img);
         m3gDeleteRef((Object*) img);
     }
