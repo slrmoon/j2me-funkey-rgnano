@@ -5988,6 +5988,21 @@ funkey_m3g_context_bind_surface(long context, FunKeyM3GSurface *surface) {
     }
 }
 
+/* bindTarget's depth flag and hints: without this the depth test stayed on
+ * for bindTarget(g, false, ...), against a depth buffer nobody cleared. */
+void
+funkey_m3g_context_set_target_mode(long context, int depth, int hints) {
+    M3GRenderContext ctx = funkey_m3g_context_core(context);
+    if (ctx == 0) {
+        return;
+    }
+    m3gSetRenderBuffers(ctx, depth ? (M3G_COLOR_BUFFER_BIT | M3G_DEPTH_BUFFER_BIT)
+                                   : M3G_COLOR_BUFFER_BIT);
+    m3gSetRenderHints(ctx, (M3Gbitmask) hints &
+                      (M3G_OVERWRITE_BIT | M3G_ANTIALIAS_BIT |
+                       M3G_DITHER_BIT | M3G_TRUECOLOR_BIT));
+}
+
 int
 funkey_m3g_context_bind_image(long context, long image) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);

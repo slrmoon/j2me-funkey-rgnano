@@ -196,6 +196,12 @@ class Interface {
 		// object
 
 		Object3D obj = findObject(handle);
+		if (obj != null && obj.handle != handle) {
+			/* A collected wrapper awaiting/after native finalization; its
+			 * slot may already belong to a new object. */
+			getInstance().liveObjects.remove(new Long(handle));
+			obj = null;
+		}
 		if (obj != null) {
 			boolean match = classMatchesNative(nativeClass, obj);
 			if (!match) {

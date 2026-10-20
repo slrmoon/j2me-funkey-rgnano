@@ -344,6 +344,7 @@ void funkey_m3g_context_render_node(long context, long node,
 void funkey_m3g_context_render_world(long context, long world);
 void funkey_m3g_context_reset_lights(long context);
 int funkey_m3g_context_bind_image(long context, long image);
+void funkey_m3g_context_set_target_mode(long context, int depth, int hints);
 int funkey_m3g_context_add_light(long context, long light,
                                  const float *transform);
 void funkey_m3g_context_set_camera(long context, long camera,

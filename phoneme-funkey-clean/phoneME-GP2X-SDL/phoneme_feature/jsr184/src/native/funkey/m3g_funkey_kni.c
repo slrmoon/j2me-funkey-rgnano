@@ -207,6 +207,34 @@ Java_javax_microedition_m3g_Platform__1finalizeObject(void) {
     KNI_ReturnVoid();
 }
 
+/*
+ * Native finalizer for Object3D (and all subclasses): drops the reference
+ * the Java peer held on its native handle. Runs during GC, so it must not
+ * call back into Java; it only touches native state and the handle field.
+ */
+KNIEXPORT KNI_RETURNTYPE_VOID
+Java_javax_microedition_m3g_Object3D_finalize(void) {
+    jfieldID handle_field;
+    jlong handle;
+    KNI_StartHandles(2);
+    KNI_DeclareHandle(self);
+    KNI_DeclareHandle(clazz);
+    KNI_GetThisPointer(self);
+    KNI_FindClass("javax/microedition/m3g/Object3D", clazz);
+    if (!KNI_IsNullHandle(clazz)) {
+        handle_field = KNI_GetFieldID(clazz, "handle", "J");
+        if (handle_field != 0) {
+            handle = KNI_GetLongField(self, handle_field);
+            if (handle != 0) {
+                KNI_SetLongField(self, handle_field, (jlong) 0);
+                funkey_m3g_release((long) handle);
+            }
+        }
+    }
+    KNI_EndHandles();
+    KNI_ReturnVoid();
+}
+
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Object3D__1addRef(void) {
     funkey_m3g_add_ref(M3G_LONG_PARAM(1));
@@ -771,6 +799,10 @@ Java_javax_microedition_m3g_Graphics3D__1bindGraphics(void) {
         target_height = height;
     }
     g_legacy_renderer = m3g_renderer_is_legacy();
+    /* params: 10 = depth buffer enabled, 11 = hint bits */
+    funkey_m3g_context_set_target_mode(M3G_LONG_PARAM(1),
+                                       KNI_GetParameterAsBoolean(10),
+                                       KNI_GetParameterAsInt(11));
     funkey_m3g_surface_init(&g_surface, target_width, target_height,
                             clip_x, clip_y, clip_w, clip_h,
                             g_legacy_renderer);
@@ -787,6 +819,10 @@ Java_javax_microedition_m3g_Graphics3D__1bindGraphics(void) {
 
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1bindImage(void) {
+    /* params: 1 = context, 3 = image, 5 = depth, 6 = hint bits */
+    funkey_m3g_context_set_target_mode(M3G_LONG_PARAM(1),
+                                       KNI_GetParameterAsBoolean(5),
+                                       KNI_GetParameterAsInt(6));
     funkey_m3g_context_bind_image(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3));
     KNI_ReturnVoid();
 }

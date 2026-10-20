@@ -533,6 +533,10 @@ public class Loader {
 			objects = parseM3GObjects(fileData);
 		}
 		debug("loadM3G: returning objects=" + objects.length + " first=" + objects[0].getClass().getName());
+		/* The native loader holds a reference to every loaded object; the
+		 * objects hold their own references now, so drop the loader instead
+		 * of keeping the whole file alive forever (its finalizer never ran). */
+		registeredFinalize();
 		return objects;
 	}
 
