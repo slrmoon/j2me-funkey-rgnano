@@ -255,13 +255,23 @@ static int ngl_sw_trace_enabled(void) {
 }
 
 static int ngl_sw_verbose_trace_enabled(void) {
-	const char *value = getenv("M3G_TRACE_VERBOSE");
-    return value != NULL && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_TRACE_VERBOSE");
+        cached = (value != NULL && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static int ngl_sw_rally_trace_enabled(void) {
-    const char *value = getenv("M3G_RALLY_TRACE");
-    return value != NULL && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_RALLY_TRACE");
+        cached = (value != NULL && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static int ngl_sw_rally_reflect_stage(void) {
@@ -274,8 +284,13 @@ static int ngl_sw_rally_reflect_stage(void) {
 }
 
 static int ngl_sw_diag_flip_front_enabled(void) {
-    const char *value = getenv("M3G_VIS_FLIP_FRONT");
-    return value != NULL && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_VIS_FLIP_FRONT");
+        cached = (value != NULL && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static void ngl_sw_identity(float *m) {
@@ -375,8 +390,13 @@ static unsigned int ngl_sw_rgb565_to_argb(unsigned short p) {
 }
 
 static int ngl_sw_diag_env_enabled(void) {
-    const char *value = getenv("M3G_VIS_CAPTURE");
-    return value != NULL && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_VIS_CAPTURE");
+        cached = (value != NULL && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static void ngl_sw_diag_init(void) {
