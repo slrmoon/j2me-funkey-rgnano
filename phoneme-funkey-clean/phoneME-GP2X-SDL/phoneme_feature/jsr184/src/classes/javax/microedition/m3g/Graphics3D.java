@@ -183,16 +183,12 @@ public class Graphics3D {
 					clipX, clipY, clipW, clipH,
 					finalDepth, finalFlags, iIsProperRenderer, pixelsBuffer); */
 			
-			Platform.executeInUIThread(
-					new M3gRunnable() {
-						public void doRun() {
-							iIsImageTarget = _bindGraphics(
-									handle, finalG, width, height,
-									clipX, clipY, clipW, clipH,
-									finalDepth, finalFlags, iIsProperRenderer);
-									
-						}
-					});
+			/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		iIsImageTarget = _bindGraphics(
+				handle, finalG, width, height,
+				clipX, clipY, clipW, clipH,
+				finalDepth, finalFlags, iIsProperRenderer);
 			
 					
 					
@@ -211,12 +207,9 @@ public class Graphics3D {
 			
 			/* _bindImage(handle, imageHandle, finalDepth, finalFlags); */
 
-			Platform.executeInUIThread(
-					new M3gRunnable() {
-						public void doRun() {
-							_bindImage(handle, imageHandle, finalDepth, finalFlags);
-						}
-					});
+			/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		_bindImage(handle, imageHandle, finalDepth, finalFlags);
 			currentTarget = img;
 			
 			//System.out.println("bindTarget 2d ok");
@@ -247,12 +240,9 @@ public class Graphics3D {
 		if (currentTarget instanceof Graphics) {
 			//System.out.println("releaseTarget 3d in");
 
-			Platform.executeInUIThread(
-					new M3gRunnable() {
-						public void doRun() {
-							_releaseGraphics(handle, currentTarget, iIsImageTarget, iIsProperRenderer);
-						}
-					});
+			/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		_releaseGraphics(handle, currentTarget, iIsImageTarget, iIsProperRenderer);
 					
 			//System.out.println("releaseTarget 3d ok");
 					
@@ -261,12 +251,9 @@ public class Graphics3D {
 			
 			/* _releaseImage(handle); */
 			
-			Platform.executeInUIThread(
-					new M3gRunnable() {
-						public void doRun() {
-							_releaseImage(handle);
-						}
-					});
+			/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		_releaseImage(handle);
 					
 			//System.out.println("releaseTarget 2d ok");
 		} else {
@@ -302,12 +289,9 @@ public class Graphics3D {
 		
 		/* _clear(handle, finalBackground != null ? finalBackground.handle : 0); */
 		
-		Platform.executeInUIThread(
-				new M3gRunnable() {
-					public void doRun() {
-						_clear(handle, finalBackground != null ? finalBackground.handle : 0);
-					}
-				});
+		/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		_clear(handle, finalBackground != null ? finalBackground.handle : 0);
 	}
 
 	/**
@@ -318,12 +302,9 @@ public class Graphics3D {
 		final World finalWorld = world;
 		/* _renderWorld(handle, finalWorld.handle); */
 		
-		Platform.executeInUIThread(
-				new M3gRunnable() {
-					public void doRun() {
-						_renderWorld(handle, finalWorld.handle);
-					}
-				});
+		/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		_renderWorld(handle, finalWorld.handle);
 	}
 
 	/**
@@ -373,17 +354,14 @@ public class Graphics3D {
 								finalTransform != null ? finalTransform.matrix : null,
 								finalScope); */
 
-		Platform.executeInUIThread(
-				new M3gRunnable() {
-					public void doRun() {
-						_render(handle,
-								finalVertices.handle,
-								finalPrimitives.handle,
-								finalAppearance.handle,
-								finalTransform != null ? finalTransform.matrix : null,
-								finalScope);
-					}
-				});
+		/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		_render(handle,
+				finalVertices.handle,
+				finalPrimitives.handle,
+				finalAppearance.handle,
+				finalTransform != null ? finalTransform.matrix : null,
+				finalScope);
 	}
 
 	/**
@@ -413,20 +391,17 @@ public class Graphics3D {
 								finalNode.handle,
 								finalTransform != null ? finalTransform.matrix : null); */
 
-		Platform.executeInUIThread(
-				new M3gRunnable() {
-					public void doRun() {
-						if (shouldTraceDegenerate(finalTransform)) {
-							System.out.println("[M3G TRANSFORM TRACE] render(Node) before _renderNode id=" +
-									finalTransform.traceId() + " matrix=" +
-									finalTransform.traceMatrixString());
-							finalTransform.traceRender("before _renderNode");
-						}
-						_renderNode(handle,
-								finalNode.handle,
-								finalTransform != null ? finalTransform.matrix : null);
-					}
-				});
+		/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		if (shouldTraceDegenerate(finalTransform)) {
+			System.out.println("[M3G TRANSFORM TRACE] render(Node) before _renderNode id=" +
+					finalTransform.traceId() + " matrix=" +
+					finalTransform.traceMatrixString());
+			finalTransform.traceRender("before _renderNode");
+		}
+		_renderNode(handle,
+				finalNode.handle,
+				finalTransform != null ? finalTransform.matrix : null);
 		//System.out.println("render out");
 	}
 
@@ -626,12 +601,9 @@ public class Graphics3D {
 
 			/* iIsProperRenderer = _isProperRenderer(); */
 			
-			Platform.executeInUIThread(
-					new M3gRunnable() {
-						public void doRun() {
-							iIsProperRenderer = _isProperRenderer();
-						}
-					});
+			/* Platform.executeInUIThread ran this inline anyway; calling
+		 * directly avoids an allocation per call. */
+		iIsProperRenderer = _isProperRenderer();
 			iNativeInitialized = true;
 			
 			return true;
