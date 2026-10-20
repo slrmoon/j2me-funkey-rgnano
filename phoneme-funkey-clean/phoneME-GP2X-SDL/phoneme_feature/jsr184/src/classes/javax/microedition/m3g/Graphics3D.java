@@ -157,6 +157,10 @@ public class Graphics3D {
 			//System.out.println("bindTarget 3d in");
 			
 			final Graphics finalG = (Graphics) target;
+			/* setViewport/getViewport* coordinates are relative to the
+			 * Graphics translation, as in the Nokia reference. */
+			offsetX = finalG.getTranslateX();
+			offsetY = finalG.getTranslateY();
 			final int clipX = finalG.getClipX() + finalG.getTranslateX();
 			final int clipY = finalG.getClipY() + finalG.getTranslateY();
 			final int clipW = finalG.getClipWidth();
