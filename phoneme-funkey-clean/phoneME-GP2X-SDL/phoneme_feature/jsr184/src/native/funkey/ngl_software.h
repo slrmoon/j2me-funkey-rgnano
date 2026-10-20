@@ -61,6 +61,7 @@ typedef struct {
     GLfloat constant_attenuation;
     GLfloat linear_attenuation;
     GLfloat quadratic_attenuation;
+    GLfloat spot_cos_cutoff;  /* cos(spot_cutoff), kept in sync by glLightf */
 } NGLLight;
 
 typedef struct {
@@ -161,6 +162,10 @@ typedef struct {
     unsigned int *vcache_stamp;
     int vcache_cap;
     unsigned int vcache_draw;
+    /* Per-draw lighting setup (see ngl_sw_light_begin). */
+    float normal_matrix[9];
+    float light_dir[8][3];   /* directional: normalized direction */
+    float light_half[8][3];  /* directional: infinite-viewer half vector */
     GLenum tex_env_mode[NGL_SW_TEXTURE_UNITS];
     unsigned int tex_env_color[NGL_SW_TEXTURE_UNITS];
     int trace_draw_budget;
@@ -598,6 +603,51 @@ static int ngl_sw_light_index(GLenum light) {
     return index >= 0 && index < 8 ? index : -1;
 }
 
+/*
+ * Per-draw lighting setup: the normal matrix (inverse transpose of the
+ * modelview 3x3, as GL uses) and the per-light vectors that do not depend
+ * on the vertex. GL ES 1.x has no local viewer, so the eye direction is
+ * (0, 0, 1) and directional half vectors are constant per light.
+ */
+static void ngl_sw_light_begin(void) {
+    const float *m = ngl_sw.modelview;
+    float c00, c01, c02, c10, c11, c12, c20, c21, c22, det, k;
+    int i;
+    if (!ngl_sw.lighting) return;
+    /* M(r,k) = m[k*4+r]; cofactors of the upper 3x3. */
+    c00 = m[5] * m[10] - m[9] * m[6];
+    c01 = -(m[1] * m[10] - m[9] * m[2]);
+    c02 = m[1] * m[6] - m[5] * m[2];
+    c10 = -(m[4] * m[10] - m[8] * m[6]);
+    c11 = m[0] * m[10] - m[8] * m[2];
+    c12 = -(m[0] * m[6] - m[4] * m[2]);
+    c20 = m[4] * m[9] - m[8] * m[5];
+    c21 = -(m[0] * m[9] - m[8] * m[1]);
+    c22 = m[0] * m[5] - m[4] * m[1];
+    det = m[0] * c00 + m[4] * c01 + m[8] * c02;
+    /* Normals are renormalized later, only the sign of 1/det matters. */
+    k = det < 0.0f ? -1.0f : 1.0f;
+    ngl_sw.normal_matrix[0] = c00 * k; ngl_sw.normal_matrix[1] = c01 * k;
+    ngl_sw.normal_matrix[2] = c02 * k; ngl_sw.normal_matrix[3] = c10 * k;
+    ngl_sw.normal_matrix[4] = c11 * k; ngl_sw.normal_matrix[5] = c12 * k;
+    ngl_sw.normal_matrix[6] = c20 * k; ngl_sw.normal_matrix[7] = c21 * k;
+    ngl_sw.normal_matrix[8] = c22 * k;
+    for (i = 0; i < 8; ++i) {
+        NGLLight *light = &ngl_sw.lights[i];
+        float *l = ngl_sw.light_dir[i];
+        float *h = ngl_sw.light_half[i];
+        if (!ngl_sw.light_enabled[i] || light->position[3] != 0.0f) continue;
+        l[0] = light->position[0];
+        l[1] = light->position[1];
+        l[2] = light->position[2];
+        ngl_sw_normalize3(l);
+        h[0] = l[0];
+        h[1] = l[1];
+        h[2] = l[2] + 1.0f;
+        ngl_sw_normalize3(h);
+    }
+}
+
 static unsigned int ngl_sw_lit_color(int index, const float *eye,
                                      unsigned int base_color) {
     float normal[4];
@@ -605,12 +655,22 @@ static unsigned int ngl_sw_lit_color(int index, const float *eye,
     float material_ambient[4];
     float material_diffuse[4];
     float result[4];
+    const float *nm = ngl_sw.normal_matrix;
     int i;
-    if (!ngl_sw.lighting || !ngl_sw.normal.enabled || ngl_sw.normal.ptr == NULL) {
+    if (!ngl_sw.lighting) {
         return base_color;
     }
-    ngl_sw_vec(&ngl_sw.normal, index, normal, 3);
-    ngl_sw_transform_vec3(n, ngl_sw.modelview, normal);
+    if (ngl_sw.normal.enabled && ngl_sw.normal.ptr != NULL) {
+        ngl_sw_vec(&ngl_sw.normal, index, normal, 3);
+    } else {
+        /* GL's current normal; m3gcore never changes it. */
+        normal[0] = 0.0f;
+        normal[1] = 0.0f;
+        normal[2] = 1.0f;
+    }
+    n[0] = nm[0] * normal[0] + nm[1] * normal[1] + nm[2] * normal[2];
+    n[1] = nm[3] * normal[0] + nm[4] * normal[1] + nm[5] * normal[2];
+    n[2] = nm[6] * normal[0] + nm[7] * normal[1] + nm[8] * normal[2];
     ngl_sw_normalize3(n);
     if (ngl_sw.color_material) {
         ngl_sw_color_to_float(base_color, material_ambient);
@@ -626,70 +686,77 @@ static unsigned int ngl_sw_lit_color(int index, const float *eye,
     result[3] = material_diffuse[3];
     for (i = 0; i < 8; ++i) {
         NGLLight *light = &ngl_sw.lights[i];
-        float l[3];
+        float lbuf[3];
+        float hbuf[3];
+        const float *l;
+        const float *h;
         float attenuation = 1.0f;
         float ndotl;
         int c;
         if (!ngl_sw.light_enabled[i]) {
             continue;
         }
-        for (c = 0; c < 3; ++c) {
-            result[c] += material_ambient[c] * light->ambient[c];
-        }
         if (light->position[3] == 0.0f) {
-            l[0] = light->position[0];
-            l[1] = light->position[1];
-            l[2] = light->position[2];
-            ngl_sw_normalize3(l);
+            l = ngl_sw.light_dir[i];
+            h = ngl_sw.light_half[i];
         } else {
-            float lx = light->position[0] / light->position[3] - eye[0];
-            float ly = light->position[1] / light->position[3] - eye[1];
-            float lz = light->position[2] / light->position[3] - eye[2];
-            float dist = sqrtf(lx * lx + ly * ly + lz * lz);
-            l[0] = lx; l[1] = ly; l[2] = lz;
+            float inv_w = 1.0f / light->position[3];
+            float lx = light->position[0] * inv_w - eye[0];
+            float ly = light->position[1] * inv_w - eye[1];
+            float lz = light->position[2] * inv_w - eye[2];
+            float dist2 = lx * lx + ly * ly + lz * lz;
+            float dist = sqrtf(dist2);
             if (dist > 0.000001f) {
                 float denom = light->constant_attenuation +
                               light->linear_attenuation * dist +
-                              light->quadratic_attenuation * dist * dist;
+                              light->quadratic_attenuation * dist2;
+                float inv = 1.0f / dist;
                 if (denom > 0.000001f) attenuation = 1.0f / denom;
+                lx *= inv; ly *= inv; lz *= inv;
             }
-            ngl_sw_normalize3(l);
+            lbuf[0] = lx; lbuf[1] = ly; lbuf[2] = lz;
+            l = lbuf;
             if (light->spot_cutoff < 180.0f) {
-                float to_vertex[3];
-                float cutoff = cosf(light->spot_cutoff * 3.14159265358979323846f / 180.0f);
-                float spot;
-                to_vertex[0] = -l[0];
-                to_vertex[1] = -l[1];
-                to_vertex[2] = -l[2];
-                ngl_sw_normalize3(to_vertex);
-                spot = ngl_sw_dot3(to_vertex, light->spot_direction);
-                if (spot < cutoff) {
+                /* spot_direction is unit length (normalized on set). */
+                float spot = -(lx * light->spot_direction[0] +
+                               ly * light->spot_direction[1] +
+                               lz * light->spot_direction[2]);
+                if (spot < light->spot_cos_cutoff) {
                     attenuation = 0.0f;
                 } else if (light->spot_exponent > 0.0f) {
                     attenuation *= powf(spot, light->spot_exponent);
                 }
             }
+            hbuf[0] = lx;
+            hbuf[1] = ly;
+            hbuf[2] = lz + 1.0f;
+            ngl_sw_normalize3(hbuf);
+            h = hbuf;
+        }
+        if (attenuation <= 0.0f) {
+            continue;
+        }
+        /* GL scales the whole per-light term, ambient included, by the
+         * attenuation and spot factors. */
+        for (c = 0; c < 3; ++c) {
+            result[c] += attenuation * material_ambient[c] * light->ambient[c];
         }
         ndotl = ngl_sw_dot3(n, l);
         if (ndotl < 0.0f && ngl_sw.light_model_two_side) {
             ndotl = -ndotl;
         }
-        if (ndotl > 0.0f && attenuation > 0.0f) {
-            float v[3];
-            float h[3];
-            float spec = 0.0f;
-            v[0] = -eye[0];
-            v[1] = -eye[1];
-            v[2] = -eye[2];
-            ngl_sw_normalize3(v);
-            h[0] = l[0] + v[0];
-            h[1] = l[1] + v[1];
-            h[2] = l[2] + v[2];
-            ngl_sw_normalize3(h);
-            spec = ngl_sw_dot3(n, h);
+        if (ndotl > 0.0f) {
+            float spec = ngl_sw_dot3(n, h);
+            int has_spec = ngl_sw.material.specular[0] != 0.0f ||
+                           ngl_sw.material.specular[1] != 0.0f ||
+                           ngl_sw.material.specular[2] != 0.0f;
             if (spec < 0.0f) spec = 0.0f;
-            if (ngl_sw.material.shininess > 0.0f) {
-                spec = powf(spec, ngl_sw.material.shininess);
+            if (has_spec) {
+                /* GL: (n.h)^shininess, which is 1 for shininess 0. */
+                spec = ngl_sw.material.shininess > 0.0f ?
+                       powf(spec, ngl_sw.material.shininess) : 1.0f;
+            } else {
+                spec = 0.0f;
             }
             for (c = 0; c < 3; ++c) {
                 result[c] += attenuation *
@@ -2052,6 +2119,20 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     }
 }
 
+/* Bit n set when the vertex is outside clip plane n (same planes and
+ * epsilon as ngl_sw_clip_distance). */
+static unsigned int ngl_sw_outcode(const NGLVertex *v) {
+    unsigned int code = 0;
+    if (v->w - 0.0001f < 0.0f) code |= 1U;
+    if (v->x + v->w < 0.0f) code |= 2U;
+    if (v->w - v->x < 0.0f) code |= 4U;
+    if (v->y + v->w < 0.0f) code |= 8U;
+    if (v->w - v->y < 0.0f) code |= 16U;
+    if (v->z + v->w < 0.0f) code |= 32U;
+    if (v->w - v->z < 0.0f) code |= 64U;
+    return code;
+}
+
 static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     NGLVertex first[12];
     NGLVertex second[12];
@@ -2061,6 +2142,7 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     int count = 3;
     int plane;
     int i;
+    unsigned int clip_mask = 0x7fU;
     first[0] = a;
     first[1] = b;
     first[2] = c;
@@ -2086,7 +2168,28 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     if (ngl_sw.trace_scene_draw) {
         ++ngl_sw.trace_scene_input_triangles;
     }
+    {
+        unsigned int oa = ngl_sw_outcode(&a);
+        unsigned int ob = ngl_sw_outcode(&b);
+        unsigned int oc = ngl_sw_outcode(&c);
+        if ((oa & ob & oc) != 0 && !ngl_sw.trace_scene_draw &&
+                !ngl_sw.trace_immediate_draw) {
+            return;  /* entirely outside one plane */
+        }
+        if ((oa | ob | oc) == 0) {
+            if (ngl_sw.shade_model != GL_SMOOTH) {
+                a.color = b.color = c.color;
+            }
+            ngl_sw_raster_tri(a, b, c);  /* entirely inside: no clipping */
+            return;
+        }
+        clip_mask = oa | ob | oc;
+    }
     for (plane = 0; plane < 7 && count >= 3; ++plane) {
+        if ((clip_mask & (1U << plane)) == 0 && !ngl_sw.trace_scene_draw &&
+                !ngl_sw.trace_immediate_draw) {
+            continue;  /* no vertex crosses this plane */
+        }
         count = ngl_sw_clip_plane(input, count, output, plane);
         if (count < 3 && ngl_sw.trace_scene_draw) {
             ++ngl_sw.trace_scene_clip_reject[plane];
@@ -2310,6 +2413,7 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         }
     }
     ngl_sw_vcache_begin();
+    ngl_sw_light_begin();
     for (i = 0; i + 2 < count; ++i) {
         int ia = indices != NULL ? ngl_sw_index(type, indices, i) : first + i;
         int ib = indices != NULL ? ngl_sw_index(type, indices, i + 1) : first + i + 1;
@@ -2819,7 +2923,10 @@ static inline void glLightf(GLenum light, GLenum pname, GLfloat param) {
     if (index < 0) return;
     l = &ngl_sw.lights[index];
     if (pname == GL_SPOT_EXPONENT) l->spot_exponent = param;
-    else if (pname == GL_SPOT_CUTOFF) l->spot_cutoff = param;
+    else if (pname == GL_SPOT_CUTOFF) {
+        l->spot_cutoff = param;
+        l->spot_cos_cutoff = cosf(param * 3.14159265358979323846f / 180.0f);
+    }
     else if (pname == GL_CONSTANT_ATTENUATION) l->constant_attenuation = param;
     else if (pname == GL_LINEAR_ATTENUATION) l->linear_attenuation = param;
     else if (pname == GL_QUADRATIC_ATTENUATION) l->quadratic_attenuation = param;
@@ -3308,6 +3415,7 @@ static inline int nglInit(void *memory, unsigned memoryBytes, void *textureManag
         ngl_sw.lights[light].position[2] = 1.0f;
         ngl_sw.lights[light].spot_direction[2] = -1.0f;
         ngl_sw.lights[light].spot_cutoff = 180.0f;
+        ngl_sw.lights[light].spot_cos_cutoff = -1.0f;
         ngl_sw.lights[light].constant_attenuation = 1.0f;
         ngl_sw.lights[light].ambient[3] = 1.0f;
         ngl_sw.lights[light].diffuse[3] = 1.0f;
