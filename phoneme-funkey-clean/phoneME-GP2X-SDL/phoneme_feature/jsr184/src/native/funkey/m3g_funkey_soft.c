@@ -3804,8 +3804,15 @@ funkey_m3g_image_set(long image, int x, int y, int width, int height,
         memcpy(obj->image_pixels + dst, pixels + src, (size_t) row_bytes);
     }
     obj->image_mutable = 1;
-    /* Image2D.set touches only these rows; don't re-convert the rest. */
-    funkey_m3g_sync_core_image_rows(obj, y, height);
+    if (obj->core != 0 && obj->image_palette == 0) {
+        /* Hand the rectangle straight to the core image: converting only
+         * what changed, and leaving pixels rendered into the image (when
+         * it was a render target) outside the rectangle untouched. */
+        m3gSetSubImage((M3GImage) obj->core, x, y, width, height,
+                       row_bytes * height, pixels);
+    } else {
+        funkey_m3g_sync_core_image_rows(obj, y, height);
+    }
 }
 
 int
@@ -5979,6 +5986,20 @@ funkey_m3g_context_bind_surface(long context, FunKeyM3GSurface *surface) {
                 context, surface->width, surface->height, surface->stride);
         ++g_bind_trace_count;
     }
+}
+
+int
+funkey_m3g_context_bind_image(long context, long image) {
+    M3GRenderContext ctx = funkey_m3g_context_core(context);
+    FunKeyM3GObject *img = funkey_m3g_object(image);
+    if (ctx == 0 || img == 0 || img->class_id != FUNKEY_M3G_CLASS_IMAGE_2D) {
+        return 0;
+    }
+    if (img->core == 0 && !funkey_m3g_sync_core_image(img)) {
+        return 0;
+    }
+    m3gBindImageTarget(ctx, (M3GImage) img->core);
+    return 1;
 }
 
 void
