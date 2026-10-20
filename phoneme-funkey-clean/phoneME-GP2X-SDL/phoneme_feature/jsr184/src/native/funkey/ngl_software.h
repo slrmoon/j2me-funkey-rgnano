@@ -53,6 +53,11 @@ typedef struct NGLTextureS {
      * dropped whenever level 0 changes. */
     struct NGLTextureS *mips;
     int mip_count;
+    /* Base format components; GL texture environments take the missing
+     * ones from the fragment (e.g. REPLACE with an RGB texture keeps the
+     * fragment alpha). 0 means "has it", so zeroed slots act as RGBA. */
+    unsigned char no_color;
+    unsigned char no_alpha;
 } NGLTexture;
 
 typedef struct {
@@ -1080,7 +1085,16 @@ static unsigned int ngl_sw_modulate(unsigned int a, unsigned int b) {
                        ab * bb / 255U, aa * ba / 255U);
 }
 
-static unsigned int ngl_sw_apply_tex_env(int unit, unsigned int color,
+static void ngl_sw_texture_set_components(NGLTexture *t, GLenum format) {
+    t->no_color = format == GL_ALPHA;
+    t->no_alpha = format == GL_LUMINANCE || format == GL_RGB ||
+                  format == GL_M3G_RGB565 || format == GL_M3G_RGB8_32 ||
+                  format == GL_M3G_BGR8_32 || format == GL_PALETTE8_RGB8_OES ||
+                  format == GL_M3G_PALETTE8_RGB8_32;
+}
+
+static unsigned int ngl_sw_apply_tex_env(int unit, const NGLTexture *t,
+                                         unsigned int color,
                                          unsigned int texel) {
     unsigned int cr = (color >> 16) & 0xffU;
     unsigned int cg = (color >> 8) & 0xffU;
@@ -1094,7 +1108,13 @@ static unsigned int ngl_sw_apply_tex_env(int unit, unsigned int color,
     unsigned int eg;
     unsigned int eb;
     if (ngl_sw.tex_env_mode[unit] == GL_REPLACE) {
-        return texel;
+        unsigned int rgb = t->no_color ? (color & 0x00ffffffU) : (texel & 0x00ffffffU);
+        unsigned int a = t->no_alpha ? (color & 0xff000000U) : (texel & 0xff000000U);
+        return rgb | a;
+    }
+    if (t->no_color && ngl_sw.tex_env_mode[unit] == GL_BLEND) {
+        /* ALPHA textures: Cv = Cf, Av = Af * At */
+        return (color & 0x00ffffffU) | ((ca * ta / 255U) << 24);
     }
     if (ngl_sw.tex_env_mode[unit] == GL_ADD) {
         return ngl_sw_pack(cr + tr, cg + tg, cb + tb, ca * ta / 255U);
@@ -1825,7 +1845,7 @@ static void ngl_sw_raster_tri_ref(NGLVertex a, NGLVertex b, NGLVertex c) {
                                  w2 * c.v[unit] * cw) / denom;
                         }
                         texel = ngl_sw_texel(tex, u, v);
-                        color = ngl_sw_apply_tex_env(unit, color, texel);
+                        color = ngl_sw_apply_tex_env(unit, tex, color, texel);
                     }
                 }
             }
@@ -2234,7 +2254,7 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
                         texel = tex_nearest[unit] ? ngl_sw_texel_nearest(tex, u, v) :
                                                     ngl_sw_texel(tex, u, v);
                     }
-                    color = ngl_sw_apply_tex_env(unit, color, texel);
+                    color = ngl_sw_apply_tex_env(unit, tex, color, texel);
                 }
             }
             if (ngl_sw.alpha_test &&
@@ -3287,6 +3307,7 @@ static inline void glCompressedTexImage2D(GLenum target, GLint level,
         return;
     }
     palette_bytes = internalformat == GL_PALETTE8_RGB8_OES ? 256 * 3 : 256 * 4;
+    ngl_sw_texture_set_components(ngl_sw_bound_texture(unit), internalformat);
     if (imageSize < palette_bytes + width * height) {
         ngl_sw.error = GL_INVALID_OPERATION;
         return;
@@ -3324,7 +3345,6 @@ static inline void glCopyTexImage2D(GLenum target, GLint level, GLenum internalf
     int py;
     (void)target;
     (void)level;
-    (void)internalformat;
     (void)border;
     if (unit < 0 || width < 0 || height < 0) {
         ngl_sw.error = GL_INVALID_OPERATION;
@@ -3336,6 +3356,7 @@ static inline void glCopyTexImage2D(GLenum target, GLint level, GLenum internalf
     t->argb = NULL;
     t->width = width;
     t->height = height;
+    ngl_sw_texture_set_components(t, internalformat);
     if (width == 0 || height == 0) return;
     t->argb = (unsigned int *)malloc((size_t)width * (size_t)height *
                                      sizeof(unsigned int));
@@ -3408,6 +3429,7 @@ static inline void glTexImage2D(GLenum target, GLint level, GLint internalformat
     t->argb = NULL;
     t->width = width;
     t->height = height;
+    ngl_sw_texture_set_components(t, format);
     if (pixels == NULL || width <= 0 || height <= 0) return;
     t->argb = (unsigned int *)malloc((size_t)width * (size_t)height * sizeof(unsigned int));
     if (t->argb == NULL) { ngl_sw.error = GL_OUT_OF_MEMORY; return; }

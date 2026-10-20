@@ -390,7 +390,7 @@ KNIEXPORT KNI_RETURNTYPE_LONG
 Java_javax_microedition_m3g_AnimationTrack__1ctor(void) {
     long handle = funkey_m3g_create_object(FUNKEY_M3G_CLASS_ANIMATION_TRACK);
     funkey_m3g_animation_track_init(handle, M3G_LONG_PARAM(3),
-                                    KNI_GetParameterAsInt(4));
+                                    KNI_GetParameterAsInt(5));
     KNI_ReturnLong(handle);
 }
 
@@ -922,20 +922,25 @@ Java_javax_microedition_m3g_Loader__1getLoadedObjects(void) {
         result = funkey_m3g_loader_get_loaded_objects(M3G_LONG_PARAM(1), 0, 0);
     } else {
         int len = KNI_GetArrayLength(array);
-        long tmp[512];
+        long *tmp = len > 0 ? (long *) malloc((size_t) len * sizeof(long)) : 0;
+        jlong *out = len > 0 ? (jlong *) malloc((size_t) len * sizeof(jlong)) : 0;
         int i;
-        jlong out[512];
-        if (len > 512) {
-            len = 512;
+        result = 0;
+        if (tmp != 0 && out != 0) {
+            result = funkey_m3g_loader_get_loaded_objects(M3G_LONG_PARAM(1), tmp, len);
+            if (result > len) {
+                result = len;  /* never write past the Java array */
+            }
+            for (i = 0; i < result; ++i) {
+                out[i] = (jlong) tmp[i];
+            }
+            if (result > 0) {
+                KNI_SetRawArrayRegion(array, 0, result * (int) sizeof(jlong),
+                                      (const jbyte *) out);
+            }
         }
-        result = funkey_m3g_loader_get_loaded_objects(M3G_LONG_PARAM(1), tmp, len);
-        for (i = 0; i < result; ++i) {
-            out[i] = (jlong) tmp[i];
-        }
-        if (result > 0) {
-            KNI_SetRawArrayRegion(array, 0, result * (int) sizeof(jlong),
-                                  (const jbyte *) out);
-        }
+        free(tmp);
+        free(out);
     }
     KNI_EndHandles();
     KNI_ReturnInt(result);
@@ -958,21 +963,26 @@ Java_javax_microedition_m3g_Loader__1getObjectsWithUserParameters(void) {
                                                                 0, 0);
     } else {
         int len = KNI_GetArrayLength(array);
-        long tmp[512];
+        long *tmp = len > 0 ? (long *) malloc((size_t) len * sizeof(long)) : 0;
+        jlong *out = len > 0 ? (jlong *) malloc((size_t) len * sizeof(jlong)) : 0;
         int i;
-        jlong out[512];
-        if (len > 512) {
-            len = 512;
-        }
-        result = funkey_m3g_loader_get_objects_with_user_params(M3G_LONG_PARAM(1),
+        result = 0;
+        if (tmp != 0 && out != 0) {
+            result = funkey_m3g_loader_get_objects_with_user_params(M3G_LONG_PARAM(1),
                                                                 tmp, len);
-        for (i = 0; i < result; ++i) {
-            out[i] = (jlong) tmp[i];
+            if (result > len) {
+                result = len;  /* never write past the Java array */
+            }
+            for (i = 0; i < result; ++i) {
+                out[i] = (jlong) tmp[i];
+            }
+            if (result > 0) {
+                KNI_SetRawArrayRegion(array, 0, result * (int) sizeof(jlong),
+                                      (const jbyte *) out);
+            }
         }
-        if (result > 0) {
-            KNI_SetRawArrayRegion(array, 0, result * (int) sizeof(jlong),
-                                  (const jbyte *) out);
-        }
+        free(tmp);
+        free(out);
     }
     KNI_EndHandles();
     KNI_ReturnInt(result);

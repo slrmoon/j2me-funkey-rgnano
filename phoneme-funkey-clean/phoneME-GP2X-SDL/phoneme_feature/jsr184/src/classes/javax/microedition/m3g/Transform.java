@@ -35,11 +35,13 @@ public class Transform {
 	// First 72 bytes match m3g_math.h Matrix; last 4 carry the trace ID.
 	byte[] matrix = new byte[76];
 	private final int traceId;
-	private byte[] historyOps = new byte[HISTORY_SIZE];
-	private float[] historyBefore = new float[HISTORY_SIZE * 16];
-	private float[] historyAfter = new float[HISTORY_SIZE * 16];
-	private float[] traceBefore = new float[16];
-	private float[] traceAfter = new float[16];
+	/* Trace history, allocated only when M3G_TRACE_VERBOSE is on: games
+	 * create Transforms every frame, and these buffers were ~2.2 KB each. */
+	private byte[] historyOps;
+	private float[] historyBefore;
+	private float[] historyAfter;
+	private float[] traceBefore;
+	private float[] traceAfter;
 	private int historyCount;
 
 	//------------------------------------------------------------------
@@ -231,6 +233,7 @@ public class Transform {
 		dumpedIds[dumpCount++] = traceId;
 		System.out.println("[M3G TRANSFORM TRACE] degenerate id=" + traceId +
 				" point=" + point + " matrix=" + matrixString(current));
+		if (historyOps == null) return;
 		int count = historyCount < HISTORY_SIZE ? historyCount : HISTORY_SIZE;
 		int first = historyCount > HISTORY_SIZE ? historyCount - HISTORY_SIZE : 0;
 		for (int i = 0; i < count; ++i) {
@@ -244,6 +247,13 @@ public class Transform {
 
 	private void traceBegin(int op) {
 		if (!TRACE_VERBOSE) return;
+		if (traceBefore == null) {
+			historyOps = new byte[HISTORY_SIZE];
+			historyBefore = new float[HISTORY_SIZE * 16];
+			historyAfter = new float[HISTORY_SIZE * 16];
+			traceBefore = new float[16];
+			traceAfter = new float[16];
+		}
 		_getMatrix(matrix, traceBefore);
 	}
 

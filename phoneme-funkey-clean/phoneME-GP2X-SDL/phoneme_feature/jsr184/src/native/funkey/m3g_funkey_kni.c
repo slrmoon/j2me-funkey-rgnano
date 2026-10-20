@@ -323,30 +323,37 @@ Java_javax_microedition_m3g_Object3D__1duplicate(void) {
 
 KNIEXPORT KNI_RETURNTYPE_INT
 Java_javax_microedition_m3g_Object3D__1getReferences(void) {
-    long refs[256];
+    long *refs = 0;
+    jlong *out = 0;
     int len = 0;
     int count;
     KNI_StartHandles(1);
     KNI_DeclareHandle(array);
     KNI_GetParameterAsObject(3, array);
     if (!KNI_IsNullHandle(array)) {
+        /* Sized by the Java array: a fixed 256-entry buffer returned
+         * nothing at all for e.g. Groups with more children. */
         len = KNI_GetArrayLength(array);
-        if (len > (int) (sizeof(refs) / sizeof(refs[0]))) {
-            len = (int) (sizeof(refs) / sizeof(refs[0]));
+        if (len > 0) {
+            refs = (long *) malloc((size_t) len * sizeof(long));
+            out = (jlong *) malloc((size_t) len * sizeof(jlong));
+            if (refs == 0 || out == 0) {
+                len = 0;
+            }
         }
     }
     count = funkey_m3g_object_get_references(M3G_LONG_PARAM(1),
                                              len > 0 ? refs : 0, len);
-    if (!KNI_IsNullHandle(array) && len > 0) {
+    if (!KNI_IsNullHandle(array) && len > 0 && count <= len) {
         int i;
-        int out_count = count < len ? count : len;
-        jlong out[256];
-        for (i = 0; i < out_count; ++i) {
+        for (i = 0; i < count; ++i) {
             out[i] = (jlong) refs[i];
         }
-        KNI_SetRawArrayRegion(array, 0, out_count * (int) sizeof(jlong),
+        KNI_SetRawArrayRegion(array, 0, count * (int) sizeof(jlong),
                               (const jbyte *) out);
     }
+    free(refs);
+    free(out);
     KNI_EndHandles();
     KNI_ReturnInt(count);
 }
