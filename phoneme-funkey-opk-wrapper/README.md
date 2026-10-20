@@ -5,7 +5,6 @@ This directory contains the `OPK` packaging layer around the runtime:
 - launcher
 - JAR/JAD wrapping
 - icon + desktop entry
-- Nokia compatibility stubs
 
 It is intentionally kept separate from the runtime source tree.
 
@@ -14,7 +13,6 @@ It is intentionally kept separate from the runtime source tree.
 - `package-funkey-opk.sh`
 - `packaging/funkey-s/pm-launch.c`
 - `packaging/funkey-s/HelloMidlet.java`
-- `packaging/funkey-s/nokia-stubs/*`
 - `packaging/funkey-s/java-runtime-icon.png`
 
 ## Expected layout

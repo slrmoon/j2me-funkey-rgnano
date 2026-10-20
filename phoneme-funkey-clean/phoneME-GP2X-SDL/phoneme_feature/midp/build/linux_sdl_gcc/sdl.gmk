@@ -50,7 +50,7 @@ ifeq ($(TARGET_CPU), arm)
   OPENCORE_AMRNB_DIR := $(MIDP_DIR)/src/media-sdl/reference/native/opencore-amrnb
   EXTRA_INCLUDES += -I$(OPENCORE_AMRNB_DIR)
   EXTRA_INCLUDES += -I$(shell $(CC) -print-sysroot)/usr/include/SDL
-  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_mixer -lSDL_gfx $(SDL_MIXER_EXTRA_LIBS) -lm
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_gfx -lm
   ifneq ($(wildcard $(OPENCORE_AMRNB_DIR)/libopencore-amrnb.a),)
     LIBS += -L$(OPENCORE_AMRNB_DIR) -lopencore-amrnb
   endif
@@ -58,5 +58,5 @@ ifeq ($(TARGET_CPU), arm)
     LIBS += -lfloat
   endif
 else
-  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_mixer -lm
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lm
 endif
