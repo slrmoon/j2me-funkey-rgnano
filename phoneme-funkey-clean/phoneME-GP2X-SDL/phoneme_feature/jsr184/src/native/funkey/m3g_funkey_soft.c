@@ -192,17 +192,23 @@ static FunKeyM3GObject *funkey_m3g_object(long handle);
 
 static int
 funkey_m3g_ngl_trace_enabled(void) {
-	const char *value = getenv("M3G_TRACE_VERBOSE");
-    if (value != 0) {
-        return value[0] != '\0' && value[0] != '0';
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_TRACE_VERBOSE");
+        cached = value != 0 && value[0] != '\0' && value[0] != '0';
     }
-    return 0;
+    return cached;
 }
 
 static int
 funkey_m3g_rally_trace_enabled(void) {
-    const char *value = getenv("M3G_RALLY_TRACE");
-    return value != 0 && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_RALLY_TRACE");
+        cached = (value != 0 && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static void
@@ -709,13 +715,17 @@ funkey_m3g_core_object(long handle) {
     return obj != 0 ? obj->core : 0;
 }
 
+/* Copies rows [row_first, row_first + row_count) of the shadow image into
+ * the core image; a freshly (re)created core image always gets every row. */
 static int
-funkey_m3g_sync_core_image(FunKeyM3GObject *obj) {
+funkey_m3g_sync_core_image_rows(FunKeyM3GObject *obj, int row_first,
+                                int row_count) {
     M3GInterface m3g;
     M3GImage image;
     M3Guint *scanline;
     int x;
     int y;
+    int y_end;
     if (obj == 0 || obj->class_id != FUNKEY_M3G_CLASS_IMAGE_2D ||
             obj->image_width <= 0 || obj->image_height <= 0) {
         return 0;
@@ -745,7 +755,15 @@ funkey_m3g_sync_core_image(FunKeyM3GObject *obj) {
         }
         obj->core = (M3GObject) image;
         obj->core_interface = m3g;
+        row_first = 0;
+        row_count = obj->image_height;
     }
+    if (row_first < 0) {
+        row_count += row_first;
+        row_first = 0;
+    }
+    y_end = row_first + row_count;
+    if (y_end > obj->image_height) y_end = obj->image_height;
     if (obj->image_pixel_count > 0 && obj->image_pixels != 0) {
         scanline = (M3Guint *) malloc((size_t) obj->image_width *
                                       sizeof(M3Guint));
@@ -755,7 +773,7 @@ funkey_m3g_sync_core_image(FunKeyM3GObject *obj) {
             }
             return 0;
         }
-        for (y = 0; y < obj->image_height; ++y) {
+        for (y = row_first; y < y_end; ++y) {
             for (x = 0; x < obj->image_width; ++x) {
                 scanline[x] = funkey_m3g_image_argb(obj, x, y);
             }
@@ -764,6 +782,12 @@ funkey_m3g_sync_core_image(FunKeyM3GObject *obj) {
         free(scanline);
     }
     return 1;
+}
+
+static int
+funkey_m3g_sync_core_image(FunKeyM3GObject *obj) {
+    return funkey_m3g_sync_core_image_rows(obj, 0,
+                                           obj != 0 ? obj->image_height : 0);
 }
 
 long
@@ -3748,7 +3772,8 @@ funkey_m3g_image_set(long image, int x, int y, int width, int height,
         memcpy(obj->image_pixels + dst, pixels + src, (size_t) row_bytes);
     }
     obj->image_mutable = 1;
-    funkey_m3g_sync_core_image(obj);
+    /* Image2D.set touches only these rows; don't re-convert the rest. */
+    funkey_m3g_sync_core_image_rows(obj, y, height);
 }
 
 int

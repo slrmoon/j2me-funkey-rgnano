@@ -24,20 +24,35 @@ static int g_rally_render_trace_count;
 
 static int
 m3g_renderer_is_legacy(void) {
-    const char *renderer = getenv("FUNKEY_M3G_RENDERER");
-    return renderer != 0 && strcmp(renderer, "legacy") == 0;
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *renderer = getenv("FUNKEY_M3G_RENDERER");
+        cached = (renderer != 0 && strcmp(renderer, "legacy") == 0) ? 1 : 0;
+    }
+    return cached;
 }
 
 static int
 m3g_trace_enabled(void) {
-	const char *value = getenv("M3G_TRACE_VERBOSE");
-    return value != 0 && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_TRACE_VERBOSE");
+        cached = (value != 0 && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static int
 m3g_rally_trace_enabled(void) {
-    const char *value = getenv("M3G_RALLY_TRACE");
-    return value != 0 && value[0] != '\0' && value[0] != '0';
+    /* Launch-time setting: read the environment once, not per draw. */
+    static int cached = -1;
+    if (cached < 0) {
+        const char *value = getenv("M3G_RALLY_TRACE");
+        cached = (value != 0 && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+    }
+    return cached;
 }
 
 static void
