@@ -32,9 +32,11 @@ public abstract class Object3D {
 	private Vector animTracks;
 	private Interface iInterface;
 
-	protected void finalize() {
-		doFinalize();
-	}
+	/* The CLDC VM only runs finalizers declared private native (see
+	 * ClassFileParser: has_finalizer requires is_private && is_native), so a
+	 * Java finalize() here was never called and native peers leaked until the
+	 * handle table filled up. The native side releases the peer. */
+	private native void finalize();
 
 	//------------------------------------------------------------------
 	// Constructor(s)
@@ -165,21 +167,6 @@ public abstract class Object3D {
 			animTracks = new Vector();
 		}
 		animTracks.addElement(track);
-	}
-
-	/**
-	 * Native peer finalization
-	 */
-	private void doFinalize() {
-		if (handle != 0) {
-			// finalize native peer
-			Platform.finalizeObject(handle, iInterface);
-			Interface.deregister(this, iInterface);
-
-			// reset handles
-			iInterface = null;
-			handle = 0;
-		}
 	}
 
 	// Native methods
