@@ -29,7 +29,7 @@ public class MidiPlayer {
         int slash = filename.indexOf('/');
         String path = slash >= 0 ? filename.substring(slash) : "/" + filename;
         try {
-            InputStream in = MidiPlayer.class.getResourceAsStream(path);
+            InputStream in = "".getClass().getResourceAsStream(path);
             if (in == null) return;
             try {
                 player = Manager.createPlayer(in, "audio/midi");

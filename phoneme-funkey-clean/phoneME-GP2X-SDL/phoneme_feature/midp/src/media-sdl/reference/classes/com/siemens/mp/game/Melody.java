@@ -9,6 +9,7 @@ import javax.microedition.media.Player;
 import javax.microedition.media.control.ToneControl;
 
 public class Melody extends com.siemens.mp.misc.NativeMem {
+    private static final Object LOCK = new Object();
     private static Player current;
 
     private final byte[] sequence;
@@ -20,7 +21,7 @@ public class Melody extends com.siemens.mp.misc.NativeMem {
     }
 
     public void play() {
-        synchronized (Melody.class) {
+        synchronized (LOCK) {
             stop();
             if (sequence == null) return;
             try {
@@ -37,7 +38,7 @@ public class Melody extends com.siemens.mp.misc.NativeMem {
     }
 
     public static void stop() {
-        synchronized (Melody.class) {
+        synchronized (LOCK) {
             if (current != null) {
                 current.close();
                 current = null;

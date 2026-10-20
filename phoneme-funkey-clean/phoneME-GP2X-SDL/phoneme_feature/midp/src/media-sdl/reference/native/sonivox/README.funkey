@@ -8,6 +8,7 @@ per player).
 FunKey changes:
   eas_options.h  build configuration: mono 22050 Hz, wavetable + FM + hybrid
                  engines, DLS/SF2 banks, 64 voices, 16 streams
+  eas_report.c   "flush" made static (generic global name)
   eas_mixer.c    SynthMasterGain: 64-bit gain product and a soft knee; the
                  32-bit product wrapped around on dense songs (crackles)
 
