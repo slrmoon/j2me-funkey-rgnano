@@ -1076,18 +1076,23 @@ funkey_m3g_loader_decode(long loader, int bytes, const unsigned char *data) {
 int
 funkey_m3g_loader_get_loaded_objects(long loader, long *objects, int count) {
     FunKeyM3GObject *obj = funkey_m3g_object(loader);
-    M3Gulong core_objects[512];
+    M3Gulong *core_objects;
     int total;
     int i;
     int out_count = 0;
     if (obj == 0 || obj->core == 0) {
         return 0;
     }
+    /* m3gGetLoadedObjects writes every root object; never into a
+     * fixed-size buffer (used to be 512 entries on the stack). */
     total = m3gGetLoadedObjects((M3GLoader) obj->core, 0);
-    if (total > (int) (sizeof(core_objects) / sizeof(core_objects[0]))) {
-        total = (int) (sizeof(core_objects) / sizeof(core_objects[0]));
+    if (total <= 0) {
+        return 0;
     }
-    memset(core_objects, 0, sizeof(core_objects));
+    core_objects = (M3Gulong *) calloc((size_t) total, sizeof(M3Gulong));
+    if (core_objects == 0) {
+        return 0;
+    }
     m3gGetLoadedObjects((M3GLoader) obj->core, core_objects);
     for (i = 0; i < total; ++i) {
         M3GObject core_obj = (M3GObject) (uintptr_t) core_objects[i];
@@ -1106,6 +1111,7 @@ funkey_m3g_loader_get_loaded_objects(long loader, long *objects, int count) {
             out_count++;
         }
     }
+    free(core_objects);
     return out_count;
 }
 
@@ -1143,27 +1149,27 @@ int
 funkey_m3g_loader_get_objects_with_user_params(long loader, long *objects,
                                                int count) {
     FunKeyM3GObject *obj = funkey_m3g_object(loader);
-    M3Gulong core_objects[512];
+    M3Gulong *core_objects;
     int total;
+    int all;
     int i;
     if (obj == 0 || obj->core == 0) {
         return 0;
     }
-    total = m3gGetObjectsWithUserParameters((M3GLoader) obj->core, 0);
-    if (objects == 0 || count <= 0) {
-        return total;
+    all = m3gGetObjectsWithUserParameters((M3GLoader) obj->core, 0);
+    if (objects == 0 || count <= 0 || all <= 0) {
+        return all;
     }
-    if (total > (int) (sizeof(core_objects) / sizeof(core_objects[0]))) {
-        total = (int) (sizeof(core_objects) / sizeof(core_objects[0]));
+    core_objects = (M3Gulong *) calloc((size_t) all, sizeof(M3Gulong));
+    if (core_objects == 0) {
+        return 0;
     }
-    if (total > count) {
-        total = count;
-    }
-    memset(core_objects, 0, sizeof(core_objects));
     m3gGetObjectsWithUserParameters((M3GLoader) obj->core, core_objects);
+    total = all < count ? all : count;
     for (i = 0; i < total; ++i) {
         objects[i] = funkey_m3g_wrap_core_object((M3GObject) (uintptr_t) core_objects[i]);
     }
+    free(core_objects);
     return total;
 }
 
@@ -3220,14 +3226,36 @@ funkey_m3g_index_buffer_init_implicit(long handle, int first,
 int
 funkey_m3g_index_buffer_get_count(long handle) {
     FunKeyM3GObject *obj = funkey_m3g_object(handle);
-    return obj != 0 ? obj->index_count : 0;
+    if (obj == 0) {
+        return 0;
+    }
+    if (obj->indices == 0 && obj->core != 0) {
+        /* Loaded from a .m3g file: there is no Java-side copy, ask the
+         * core (triangle-list form, like the shadow copy). */
+        return m3gGetBatchSize((M3GIndexBuffer) obj->core, 0);
+    }
+    return obj->index_count;
 }
 
 void
 funkey_m3g_index_buffer_get_indices(long handle, int *indices, int count) {
     FunKeyM3GObject *obj = funkey_m3g_object(handle);
     int copy_count;
-    if (obj == 0 || indices == 0 || count <= 0 || obj->indices == 0) {
+    if (obj == 0 || indices == 0 || count <= 0) {
+        return;
+    }
+    if (obj->indices == 0 && obj->core != 0) {
+        int total = m3gGetBatchSize((M3GIndexBuffer) obj->core, 0);
+        int *all = total > 0 ? (int *) malloc((size_t) total * sizeof(int)) : 0;
+        if (all != 0) {
+            m3gGetBatchIndices((M3GIndexBuffer) obj->core, 0, all);
+            copy_count = count < total ? count : total;
+            memcpy(indices, all, (size_t) copy_count * sizeof(indices[0]));
+            free(all);
+        }
+        return;
+    }
+    if (obj->indices == 0) {
         return;
     }
     copy_count = count < obj->index_count ? count : obj->index_count;
