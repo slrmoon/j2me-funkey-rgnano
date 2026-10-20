@@ -820,34 +820,48 @@ static void ngl_sw_upload_pixels(NGLTexture *t, int xoffset, int yoffset,
     }
 }
 
-static unsigned int ngl_sw_texture_pixel(const NGLTexture *t, int x, int y) {
-    if (t->wrap_s == GL_REPEAT) {
-        x %= t->width;
-        if (x < 0) x += t->width;
-    } else {
-        if (x < 0) x = 0;
-        if (x >= t->width) x = t->width - 1;
-    }
-    if (t->wrap_t == GL_REPEAT) {
-        y %= t->height;
-        if (y < 0) y += t->height;
-    } else {
-        if (y < 0) y = 0;
-        if (y >= t->height) y = t->height - 1;
-    }
-    return t->argb[y * t->width + x];
+/* a*(256-f) + b*f per channel, f in [0,256]; R/B and A/G lanes are 16 bits
+ * apart so the weighted sums cannot carry into the next lane. */
+static unsigned int ngl_sw_lerp8(unsigned int a, unsigned int b, unsigned int f) {
+    unsigned int g = 256U - f;
+    unsigned int rb = (((a & 0x00ff00ffU) * g + (b & 0x00ff00ffU) * f) >> 8) & 0x00ff00ffU;
+    unsigned int ag = (((a >> 8) & 0x00ff00ffU) * g + ((b >> 8) & 0x00ff00ffU) * f) & 0xff00ff00U;
+    return rb | ag;
 }
 
-static unsigned int ngl_sw_lerp_texel(unsigned int a, unsigned int b, float f) {
-    unsigned int r = (unsigned int)((float)((a >> 16) & 0xff) +
-                                    ((float)((b >> 16) & 0xff) - (float)((a >> 16) & 0xff)) * f + 0.5f);
-    unsigned int g = (unsigned int)((float)((a >> 8) & 0xff) +
-                                    ((float)((b >> 8) & 0xff) - (float)((a >> 8) & 0xff)) * f + 0.5f);
-    unsigned int bl = (unsigned int)((float)(a & 0xff) +
-                                     ((float)(b & 0xff) - (float)(a & 0xff)) * f + 0.5f);
-    unsigned int al = (unsigned int)((float)((a >> 24) & 0xff) +
-                                     ((float)((b >> 24) & 0xff) - (float)((a >> 24) & 0xff)) * f + 0.5f);
-    return ngl_sw_pack(r, g, bl, al);
+static int ngl_sw_wrap_coord(int c, int extent, GLint wrap) {
+    if (wrap == GL_REPEAT) {
+        if ((extent & (extent - 1)) == 0) return c & (extent - 1);
+        c %= extent;
+        return c < 0 ? c + extent : c;
+    }
+    if (c < 0) return 0;
+    return c >= extent ? extent - 1 : c;
+}
+
+static unsigned int ngl_sw_texel_bilinear(const NGLTexture *t, float s, float tt) {
+    float fx = s * (float)t->width - 0.5f;
+    float fy = tt * (float)t->height - 0.5f;
+    int x0 = (int)fx;
+    int y0 = (int)fy;
+    unsigned int wx, wy;
+    int x1, y1;
+    const unsigned int *r0;
+    const unsigned int *r1;
+    if (fx < (float)x0) --x0;
+    if (fy < (float)y0) --y0;
+    wx = (unsigned int)((fx - (float)x0) * 256.0f);
+    wy = (unsigned int)((fy - (float)y0) * 256.0f);
+    if (wx > 256U) wx = 256U;
+    if (wy > 256U) wy = 256U;
+    x1 = ngl_sw_wrap_coord(x0 + 1, t->width, t->wrap_s);
+    y1 = ngl_sw_wrap_coord(y0 + 1, t->height, t->wrap_t);
+    x0 = ngl_sw_wrap_coord(x0, t->width, t->wrap_s);
+    y0 = ngl_sw_wrap_coord(y0, t->height, t->wrap_t);
+    r0 = t->argb + y0 * t->width;
+    r1 = t->argb + y1 * t->width;
+    return ngl_sw_lerp8(ngl_sw_lerp8(r0[x0], r0[x1], wx),
+                        ngl_sw_lerp8(r1[x0], r1[x1], wx), wy);
 }
 
 static unsigned int ngl_sw_texel(NGLTexture *t, float s, float tt) {
@@ -872,17 +886,7 @@ static unsigned int ngl_sw_texel(NGLTexture *t, float s, float tt) {
         t->min_filter == GL_LINEAR ||
         t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
         t->min_filter == GL_LINEAR_MIPMAP_LINEAR) {
-        float fx = s * (float)t->width - 0.5f;
-        float fy = tt * (float)t->height - 0.5f;
-        int x0 = (int)floorf(fx);
-        int y0 = (int)floorf(fy);
-        unsigned int a = ngl_sw_lerp_texel(ngl_sw_texture_pixel(t, x0, y0),
-                                            ngl_sw_texture_pixel(t, x0 + 1, y0),
-                                            fx - (float)x0);
-        unsigned int b = ngl_sw_lerp_texel(ngl_sw_texture_pixel(t, x0, y0 + 1),
-                                            ngl_sw_texture_pixel(t, x0 + 1, y0 + 1),
-                                            fx - (float)x0);
-        return ngl_sw_lerp_texel(a, b, fy - (float)y0);
+        return ngl_sw_texel_bilinear(t, s, tt);
     }
     /* GL nearest sampling: texel i covers [i/w, (i+1)/w). */
     x = (int)floorf(s * (float)t->width);
@@ -1019,6 +1023,20 @@ static unsigned int ngl_sw_blend(unsigned int src, unsigned int dst) {
     unsigned int b;
     if (!ngl_sw.blend) {
         return src;
+    }
+    if (ngl_sw.blend_src == GL_SRC_ALPHA &&
+            ngl_sw.blend_dst == GL_ONE_MINUS_SRC_ALPHA) {
+        unsigned int a = (src >> 24) & 0xffU;
+        return ngl_sw_lerp8(dst, src, a + (a >> 7)) | 0xff000000U;
+    }
+    if (ngl_sw.blend_src == GL_ONE && ngl_sw.blend_dst == GL_ONE) {
+        unsigned int r = ((src >> 16) & 0xffU) + ((dst >> 16) & 0xffU);
+        unsigned int g = ((src >> 8) & 0xffU) + ((dst >> 8) & 0xffU);
+        unsigned int b = (src & 0xffU) + (dst & 0xffU);
+        return ngl_sw_pack(r, g, b, 255U);
+    }
+    if (ngl_sw.blend_src == GL_ONE && ngl_sw.blend_dst == GL_ZERO) {
+        return src | 0xff000000U;
     }
     sr = (src >> 16) & 0xffU;
     sg = (src >> 8) & 0xffU;
@@ -1449,7 +1467,7 @@ static int ngl_sw_clip_plane(const NGLVertex *input, int count,
     return out_count;
 }
 
-static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
+static void ngl_sw_raster_tri_ref(NGLVertex a, NGLVertex b, NGLVertex c) {
     float ax, ay, bx, by, cx, cy;
     float aw, bw, cw;
     float az, bz, cz;
@@ -1673,6 +1691,347 @@ static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     }
 }
 
+/*
+ * Fast triangle rasterizer.
+ *
+ * Screen positions are snapped to a subpixel grid and edge functions are
+ * evaluated in exact integer arithmetic, so triangles sharing an edge never
+ * leave gaps or touch a pixel twice. Attributes use plane equations driven by
+ * the integer barycentrics, which costs at most one division per pixel (none
+ * when w is constant across the triangle). Diagnostics keep using the
+ * reference rasterizer above, which also serves extreme coordinates.
+ */
+static int ngl_sw_floor_int(float f) {
+    int i = (int)f;
+    return (f < (float)i) ? i - 1 : i;
+}
+
+static int ngl_sw_is_pow2(int v) {
+    return v > 0 && (v & (v - 1)) == 0;
+}
+
+/* Nearest-filter fetch without floorf/branches on the common paths. */
+static unsigned int ngl_sw_texel_nearest(const NGLTexture *t, float s, float tt) {
+    int x = ngl_sw_floor_int(s * (float)t->width);
+    int y = ngl_sw_floor_int(tt * (float)t->height);
+    if (t->wrap_s == GL_REPEAT) {
+        if (ngl_sw_is_pow2(t->width)) x &= t->width - 1;
+        else { x %= t->width; if (x < 0) x += t->width; }
+    } else {
+        if (x < 0) x = 0;
+        if (x >= t->width) x = t->width - 1;
+    }
+    if (t->wrap_t == GL_REPEAT) {
+        if (ngl_sw_is_pow2(t->height)) y &= t->height - 1;
+        else { y %= t->height; if (y < 0) y += t->height; }
+    } else {
+        if (y < 0) y = 0;
+        if (y >= t->height) y = t->height - 1;
+    }
+    return t->argb[y * t->width + x];
+}
+
+static int ngl_sw_texture_is_nearest(const NGLTexture *t) {
+    return !(t->mag_filter == GL_LINEAR ||
+             t->min_filter == GL_LINEAR ||
+             t->min_filter == GL_LINEAR_MIPMAP_NEAREST ||
+             t->min_filter == GL_LINEAR_MIPMAP_LINEAR);
+}
+
+typedef struct {
+    float a, db, dc;  /* value = a + l1 * db + l2 * dc */
+} NGLPlane;
+
+static void ngl_sw_plane(NGLPlane *p, float va, float vb, float vc) {
+    p->a = va;
+    p->db = vb - va;
+    p->dc = vc - va;
+}
+
+#define NGL_SW_PLANE(p, l1, l2) ((p).a + (l1) * (p).db + (l2) * (p).dc)
+
+static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
+    float aw, bw, cw;
+    float fax, fay, fbx, fby, fcx, fcy;
+    float maxabs;
+    int shift, sub, half;
+    int ax, ay, bx, by, cx, cy;
+    int area;
+    float inv_area;
+    float depth_offset = 0.0f;
+    int minx, maxx, miny, maxy;
+    int scx0, scy0, scx1, scy1;
+    int a0, b0, a1, b1, a2, b2;   /* per-pixel x/y steps for e0, e1, e2 */
+    int bias0, bias1, bias2;
+    int row0, row1, row2;
+    int x, y;
+    int unit;
+    NGLTexture *tex_unit[NGL_SW_TEXTURE_UNITS];
+    int tex_nearest[NGL_SW_TEXTURE_UNITS];
+    int any_tex = 0;
+    int perspective;
+    int smooth;
+    int simple_write;
+    int rgb_mask_all;
+    float zscale, zbase;
+    NGLPlane pz, pinvw, pfog;
+    NGLPlane pu[NGL_SW_TEXTURE_UNITS], pv[NGL_SW_TEXTURE_UNITS];
+    NGLPlane pcol[4];
+    unsigned int flat_color;
+
+    if (ngl_sw.pixels == NULL || ngl_sw.width <= 0 || ngl_sw.height <= 0) {
+        return;
+    }
+    if (!(a.w > 0.0f) || !(b.w > 0.0f) || !(c.w > 0.0f)) {
+        return;
+    }
+    aw = 1.0f / a.w;
+    bw = 1.0f / b.w;
+    cw = 1.0f / c.w;
+    fax = (a.x * aw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
+    fay = (a.y * aw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
+    fbx = (b.x * bw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
+    fby = (b.y * bw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
+    fcx = (c.x * cw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
+    fcy = (c.y * cw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
+
+    /* Pick the finest subpixel grid whose edge values fit in 32 bits:
+     * |E| <= 2 * (2 * M * sub)^2 < 2^31  =>  M * sub < 16384. */
+    maxabs = fmaxf(fmaxf(fabsf(fax), fabsf(fay)),
+                   fmaxf(fmaxf(fabsf(fbx), fabsf(fby)),
+                         fmaxf(fabsf(fcx), fabsf(fcy))));
+    if (maxabs * 16.0f < 16000.0f) shift = 4;
+    else if (maxabs * 4.0f < 16000.0f) shift = 2;
+    else {
+        ngl_sw_raster_tri_ref(a, b, c);
+        return;
+    }
+    sub = 1 << shift;
+    half = sub >> 1;
+    ax = ngl_sw_floor_int(fax * (float)sub + 0.5f);
+    ay = ngl_sw_floor_int(fay * (float)sub + 0.5f);
+    bx = ngl_sw_floor_int(fbx * (float)sub + 0.5f);
+    by = ngl_sw_floor_int(fby * (float)sub + 0.5f);
+    cx = ngl_sw_floor_int(fcx * (float)sub + 0.5f);
+    cy = ngl_sw_floor_int(fcy * (float)sub + 0.5f);
+
+    /* Same orientation convention as ngl_sw_edge(a, b, c). */
+    area = (cx - ax) * (by - ay) - (cy - ay) * (bx - ax);
+    if (area == 0) {
+        return;
+    }
+    if (ngl_sw.cull_face) {
+        int front = (area > 0) == (ngl_sw.front_face == GL_CCW);
+        if ((front && ngl_sw.cull_mode == GL_FRONT) ||
+            (!front && ngl_sw.cull_mode == GL_BACK) ||
+            ngl_sw.cull_mode == GL_FRONT_AND_BACK) {
+            return;
+        }
+    }
+    if (area < 0) {
+        NGLVertex tv = b; b = c; c = tv;
+        { int t = bx; bx = cx; cx = t; }
+        { int t = by; by = cy; cy = t; }
+        { float t = bw; bw = cw; cw = t; }
+        { float t = fbx; fbx = fcx; fcx = t; }
+        { float t = fby; fby = fcy; fcy = t; }
+        area = -area;
+    }
+    inv_area = 1.0f / (float)area;
+
+    /* Depth in final 16-bit units, linear in screen space. */
+    {
+        float az = a.z * aw * 0.5f + 0.5f;
+        float bz = b.z * bw * 0.5f + 0.5f;
+        float cz = c.z * cw * 0.5f + 0.5f;
+        if (ngl_sw.polygon_offset_fill) {
+            float span_x = fmaxf(fax, fmaxf(fbx, fcx)) - fminf(fax, fminf(fbx, fcx));
+            float span_y = fmaxf(fay, fmaxf(fby, fcy)) - fminf(fay, fminf(fby, fcy));
+            float span = fmaxf(1.0f, fmaxf(span_x, span_y));
+            float slope = fmaxf(fabsf(bz - az), fabsf(cz - az)) / span;
+            depth_offset = ngl_sw.polygon_offset_factor * slope +
+                           ngl_sw.polygon_offset_units / 65535.0f;
+        }
+        zscale = (ngl_sw.depth_far - ngl_sw.depth_near) * 65535.0f;
+        zbase = (ngl_sw.depth_near + depth_offset) * 65535.0f;
+        ngl_sw_plane(&pz, zbase + az * zscale, zbase + bz * zscale,
+                     zbase + cz * zscale);
+    }
+
+    for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+        NGLTexture *t = ngl_sw.texture_2d[unit] ? ngl_sw_bound_texture(unit) : NULL;
+        tex_unit[unit] = (t != NULL && t->argb != NULL &&
+                          t->width > 0 && t->height > 0) ? t : NULL;
+        tex_nearest[unit] = tex_unit[unit] != NULL &&
+                            ngl_sw_texture_is_nearest(tex_unit[unit]);
+        if (tex_unit[unit] != NULL) any_tex = 1;
+    }
+    smooth = ngl_sw.shade_model == GL_SMOOTH &&
+             !(a.color == b.color && b.color == c.color);
+    flat_color = c.color;
+    /* Constant w (2D overlays, backgrounds, orthographic) needs no
+     * per-pixel division at all. */
+    perspective = (any_tex || smooth || ngl_sw.fog) &&
+                  !(aw == bw && bw == cw);
+
+    if (perspective) {
+        ngl_sw_plane(&pinvw, aw, bw, cw);
+    }
+    {
+        float ka = perspective ? aw : 1.0f;
+        float kb = perspective ? bw : 1.0f;
+        float kc = perspective ? cw : 1.0f;
+        for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+            if (tex_unit[unit] == NULL) continue;
+            ngl_sw_plane(&pu[unit], a.u[unit] * ka, b.u[unit] * kb, c.u[unit] * kc);
+            ngl_sw_plane(&pv[unit], a.v[unit] * ka, b.v[unit] * kb, c.v[unit] * kc);
+        }
+        if (ngl_sw.fog) {
+            ngl_sw_plane(&pfog, a.fog * ka, b.fog * kb, c.fog * kc);
+        }
+        if (smooth) {
+            int ch;
+            for (ch = 0; ch < 4; ++ch) {
+                int sh = ch == 3 ? 24 : 16 - ch * 8;
+                ngl_sw_plane(&pcol[ch],
+                             (float)((a.color >> sh) & 0xffU) * ka,
+                             (float)((b.color >> sh) & 0xffU) * kb,
+                             (float)((c.color >> sh) & 0xffU) * kc);
+            }
+        }
+    }
+    rgb_mask_all = ngl_sw.color_mask[0] && ngl_sw.color_mask[1] &&
+                   ngl_sw.color_mask[2];
+    simple_write = !ngl_sw.blend && !ngl_sw.fog &&
+                   ngl_sw.color_mask[0] && ngl_sw.color_mask[1] &&
+                   ngl_sw.color_mask[2];
+
+    /* Pixel bounds, then scissor and target. */
+    minx = (int)(((ax < bx ? (ax < cx ? ax : cx) : (bx < cx ? bx : cx))) >> shift);
+    maxx = (int)(((ax > bx ? (ax > cx ? ax : cx) : (bx > cx ? bx : cx))) >> shift) + 1;
+    miny = (int)(((ay < by ? (ay < cy ? ay : cy) : (by < cy ? by : cy))) >> shift);
+    maxy = (int)(((ay > by ? (ay > cy ? ay : cy) : (by > cy ? by : cy))) >> shift) + 1;
+    scx0 = ngl_sw.scissor_test ? ngl_sw.scissor[0] : 0;
+    scy0 = ngl_sw.scissor_test ? ngl_sw.scissor[1] : 0;
+    scx1 = scx0 + (ngl_sw.scissor_test ? ngl_sw.scissor[2] : ngl_sw.width);
+    scy1 = scy0 + (ngl_sw.scissor_test ? ngl_sw.scissor[3] : ngl_sw.height);
+    if (scx0 < 0) scx0 = 0;
+    if (scy0 < 0) scy0 = 0;
+    if (scx1 > ngl_sw.width) scx1 = ngl_sw.width;
+    if (scy1 > ngl_sw.height) scy1 = ngl_sw.height;
+    if (minx < scx0) minx = scx0;
+    if (maxx > scx1) maxx = scx1;
+    if (miny < scy0) miny = scy0;
+    if (maxy > scy1) maxy = scy1;
+    if (minx >= maxx || miny >= maxy) {
+        return;
+    }
+
+    /* e0 = edge(b, c, p) weights a; e1 = edge(c, a, p) weights b;
+     * e2 = edge(a, b, p) weights c. E(p) = (px-Px)(Qy-Py) - (py-Py)(Qx-Px). */
+    a0 = (cy - by) << shift;  b0 = -((cx - bx) << shift);
+    a1 = (ay - cy) << shift;  b1 = -((ax - cx) << shift);
+    a2 = (by - ay) << shift;  b2 = -((bx - ax) << shift);
+    bias0 = ngl_sw_top_left((float)bx, (float)by, (float)cx, (float)cy) ? 0 : -1;
+    bias1 = ngl_sw_top_left((float)cx, (float)cy, (float)ax, (float)ay) ? 0 : -1;
+    bias2 = ngl_sw_top_left((float)ax, (float)ay, (float)bx, (float)by) ? 0 : -1;
+    {
+        int px = (minx << shift) + half;
+        int py = (miny << shift) + half;
+        row0 = (px - bx) * (cy - by) - (py - by) * (cx - bx) + bias0;
+        row1 = (px - cx) * (ay - cy) - (py - cy) * (ax - cx) + bias1;
+        row2 = (px - ax) * (by - ay) - (py - ay) * (bx - ax) + bias2;
+    }
+
+    for (y = miny; y < maxy; ++y, row0 += b0, row1 += b1, row2 += b2) {
+        int e0 = row0, e1 = row1, e2 = row2;
+        int entered = 0;
+        unsigned short *dst_row = ngl_sw.pixels +
+                                  (ngl_sw.height - 1 - y) * ngl_sw.stride;
+        unsigned short *depth_row = ngl_sw.depth != NULL ?
+                                    ngl_sw.depth +
+                                    (ngl_sw.height - 1 - y) * ngl_sw.stride : NULL;
+        for (x = minx; x < maxx; ++x, e0 += a0, e1 += a1, e2 += a2) {
+            float l1, l2, zf, rw;
+            unsigned short depth_value;
+            unsigned int color;
+            if ((e0 | e1 | e2) < 0) {
+                if (entered) break;  /* triangles are convex */
+                continue;
+            }
+            entered = 1;
+            /* Undo the top-left bias for the barycentric weights. */
+            l1 = (float)(e1 - bias1) * inv_area;
+            l2 = (float)(e2 - bias2) * inv_area;
+            zf = NGL_SW_PLANE(pz, l1, l2);
+            if (zf < 0.0f) zf = 0.0f;
+            if (zf > 65535.0f) zf = 65535.0f;
+            depth_value = (unsigned short)(zf + 0.5f);
+            if (ngl_sw.depth_test && depth_row != NULL &&
+                    !ngl_sw_depth_compare(ngl_sw.depth_func, depth_value,
+                                          depth_row[x])) {
+                continue;
+            }
+            rw = perspective ? 1.0f / NGL_SW_PLANE(pinvw, l1, l2) : 1.0f;
+            if (smooth) {
+                float r = NGL_SW_PLANE(pcol[0], l1, l2) * rw;
+                float g = NGL_SW_PLANE(pcol[1], l1, l2) * rw;
+                float bl = NGL_SW_PLANE(pcol[2], l1, l2) * rw;
+                float al = NGL_SW_PLANE(pcol[3], l1, l2) * rw;
+                color = ngl_sw_pack((unsigned int)(r > 0.0f ? r + 0.5f : 0.0f),
+                                    (unsigned int)(g > 0.0f ? g + 0.5f : 0.0f),
+                                    (unsigned int)(bl > 0.0f ? bl + 0.5f : 0.0f),
+                                    (unsigned int)(al > 0.0f ? al + 0.5f : 0.0f));
+            } else {
+                color = flat_color;
+            }
+            if (any_tex) {
+                for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+                    NGLTexture *tex = tex_unit[unit];
+                    float u, v;
+                    unsigned int texel;
+                    if (tex == NULL) continue;
+                    u = NGL_SW_PLANE(pu[unit], l1, l2) * rw;
+                    v = NGL_SW_PLANE(pv[unit], l1, l2) * rw;
+                    texel = tex_nearest[unit] ? ngl_sw_texel_nearest(tex, u, v) :
+                                                ngl_sw_texel(tex, u, v);
+                    color = ngl_sw_apply_tex_env(unit, color, texel);
+                }
+            }
+            if (ngl_sw.alpha_test &&
+                    !ngl_sw_compare(ngl_sw.alpha_func,
+                                    (float)((color >> 24) & 0xffU) / 255.0f,
+                                    ngl_sw.alpha_ref)) {
+                continue;
+            }
+            if (ngl_sw.depth_test && depth_row != NULL && ngl_sw.depth_mask) {
+                depth_row[x] = depth_value;
+            }
+            if (simple_write) {
+                dst_row[x] = ngl_sw_rgb565(color);
+            } else {
+                unsigned int dst;
+                if (ngl_sw.fog) {
+                    color = ngl_sw_apply_fog(color, NGL_SW_PLANE(pfog, l1, l2) * rw);
+                }
+                dst = ngl_sw_rgb565_to_argb(dst_row[x]);
+                color = ngl_sw_blend(color, dst);
+                if (!rgb_mask_all) color = ngl_sw_apply_color_mask(color, dst);
+                dst_row[x] = ngl_sw_rgb565(color);
+            }
+        }
+    }
+}
+
+static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
+    if (ngl_sw.trace_scene_draw || ngl_sw.trace_immediate_draw ||
+            ngl_sw.trace_current_draw || ngl_sw.diag_capture_active) {
+        ngl_sw_raster_tri_ref(a, b, c);
+    } else {
+        ngl_sw_raster_tri_fast(a, b, c);
+    }
+}
+
 static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     NGLVertex first[12];
     NGLVertex second[12];
@@ -1718,6 +2077,11 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
         swap = input;
         input = output;
         output = swap;
+    }
+    if (ngl_sw.shade_model != GL_SMOOTH) {
+        /* Flat shading uses the provoking (last) vertex of the original
+         * triangle for every piece produced by clipping. */
+        for (i = 0; i < count; ++i) input[i].color = c.color;
     }
     for (i = 1; i + 1 < count; ++i) {
         ngl_sw_raster_tri(input[0], input[i], input[i + 1]);
@@ -2816,6 +3180,25 @@ static inline void glClear(GLbitfield mask) {
     if (y0 < 0) y0 = 0;
     if (x1 > ngl_sw.width) x1 = ngl_sw.width;
     if (y1 > ngl_sw.height) y1 = ngl_sw.height;
+    if (ngl_sw.color_mask[0] && ngl_sw.color_mask[1] && ngl_sw.color_mask[2]) {
+        unsigned short c565 = ngl_sw_rgb565(ngl_sw.clear_color);
+        unsigned short d16 = (unsigned short)(
+            ngl_sw_clampf(ngl_sw.clear_depth, 0.0f, 1.0f) * 65535.0f + 0.5f);
+        int do_color = (mask & GL_COLOR_BUFFER_BIT) && ngl_sw.pixels != NULL;
+        int do_depth = (mask & GL_DEPTH_BUFFER_BIT) && ngl_sw.depth != NULL;
+        for (y = y0; y < y1; ++y) {
+            int row = (ngl_sw.height - 1 - y) * ngl_sw.stride;
+            if (do_color) {
+                unsigned short *p = ngl_sw.pixels + row;
+                for (x = x0; x < x1; ++x) p[x] = c565;
+            }
+            if (do_depth) {
+                unsigned short *p = ngl_sw.depth + row;
+                for (x = x0; x < x1; ++x) p[x] = d16;
+            }
+        }
+        return;
+    }
     for (y = y0; y < y1; ++y) {
         for (x = x0; x < x1; ++x) {
             int fy = ngl_sw.height - 1 - y;
