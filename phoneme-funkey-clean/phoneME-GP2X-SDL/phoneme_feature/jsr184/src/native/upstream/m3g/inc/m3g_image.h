@@ -49,6 +49,10 @@ struct M3GImageImpl
 #   if !defined(M3G_NGL_TEXTURE_API)
     GLuint texObject;
     LargeImage *large;  /*! \internal \ */
+#   else
+    /* FunKey NGL backend texture holding this image; uploaded only when
+     * 'dirty' is set, instead of on every bind. */
+    GLuint nglTexture;
 #   endif
 
     M3GMemObject data;

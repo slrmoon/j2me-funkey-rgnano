@@ -95,6 +95,16 @@ static void m3gBindTextureObject(Image *img, M3Gbool mipmap)
     if (img == NULL || img->data == 0) {
         return;
     }
+    /* Each image keeps its own backend texture; re-converting and
+     * re-uploading it on every bind was a per-draw full-texture cost. */
+    if (img->nglTexture == 0) {
+        glGenTextures(1, &img->nglTexture);
+        img->dirty = M3G_TRUE;
+    }
+    glBindTexture(GL_TEXTURE_2D, img->nglTexture);
+    if (!img->dirty) {
+        return;
+    }
     pixels = (M3Gubyte *) m3gMapObject(M3G_INTERFACE(img), img->data);
     if (pixels != NULL) {
         glTexImage2D(GL_TEXTURE_2D, 0, m3gGetGLFormat(img->internalFormat),
@@ -102,6 +112,7 @@ static void m3gBindTextureObject(Image *img, M3Gbool mipmap)
                      m3gGetGLFormat(img->internalFormat),
                      GL_UNSIGNED_BYTE, pixels);
         m3gUnmapObject(M3G_INTERFACE(img), img->data);
+        img->dirty = M3G_FALSE;
     }
 }
 
@@ -155,6 +166,11 @@ static void m3gDestroyImage(Object *obj)
     }
     if (image->large != NULL) {
         m3gDestroyLargeImage(image);
+    }
+#   else
+    if (image->nglTexture) {
+        glDeleteTextures(1, &image->nglTexture);
+        image->nglTexture = 0;
     }
 #   endif
 
@@ -1100,6 +1116,10 @@ static M3Gbool m3gImageDuplicate(const Object *originalObj,
         
         clone = (Image*) m3gAlloc(M3G_INTERFACE(original), sizeof(*clone));
         *clone = *original;
+#       if defined(M3G_NGL_TEXTURE_API)
+        clone->nglTexture = 0;  /* never share the original's texture */
+        clone->dirty = M3G_TRUE;
+#       endif
         M3G_ASSIGN_REF(clone->copyOf, original);
     }
     

@@ -15,7 +15,8 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define NGL_SW_MAX_TEXTURES 256
+#define NGL_SW_MAX_TEXTURES 1024
+#define NGL_SW_MAX_MIP_LEVELS 12
 #define NGL_SW_STACK_DEPTH 16
 #define NGL_SW_TEXTURE_UNITS 2
 
@@ -39,7 +40,7 @@ typedef struct {
     GLboolean enabled;
 } NGLArray;
 
-typedef struct {
+typedef struct NGLTextureS {
     GLuint id;
     int width;
     int height;
@@ -48,6 +49,10 @@ typedef struct {
     GLint wrap_t;
     GLint min_filter;
     GLint mag_filter;
+    /* Box-filtered levels 1..mip_count, built on first mipmapped use and
+     * dropped whenever level 0 changes. */
+    struct NGLTextureS *mips;
+    int mip_count;
 } NGLTexture;
 
 typedef struct {
@@ -770,8 +775,26 @@ static unsigned int ngl_sw_lit_color(int index, const float *eye,
 
 static NGLTexture *ngl_sw_texture(GLuint id) {
     int i;
+    int hint;
     if (id == 0) {
         return &ngl_sw.textures[0];
+    }
+    /* Ids come from a counter, so id-modulo usually lands on the slot. */
+    hint = NGL_SW_TEXTURE_UNITS +
+           (int)(id % (GLuint)(NGL_SW_MAX_TEXTURES - NGL_SW_TEXTURE_UNITS));
+    if (ngl_sw.textures[hint].id == id) {
+        return &ngl_sw.textures[hint];
+    }
+    if (ngl_sw.textures[hint].id == 0) {
+        for (i = NGL_SW_TEXTURE_UNITS; i < NGL_SW_MAX_TEXTURES; ++i) {
+            if (ngl_sw.textures[i].id == id) return &ngl_sw.textures[i];
+        }
+        ngl_sw.textures[hint].id = id;
+        ngl_sw.textures[hint].wrap_s = GL_CLAMP_TO_EDGE;
+        ngl_sw.textures[hint].wrap_t = GL_CLAMP_TO_EDGE;
+        ngl_sw.textures[hint].min_filter = GL_NEAREST;
+        ngl_sw.textures[hint].mag_filter = GL_NEAREST;
+        return &ngl_sw.textures[hint];
     }
     for (i = NGL_SW_TEXTURE_UNITS; i < NGL_SW_MAX_TEXTURES; ++i) {
         if (ngl_sw.textures[i].id == id) {
@@ -905,6 +928,65 @@ static void ngl_sw_upload_pixels(NGLTexture *t, int xoffset, int yoffset,
                 ngl_sw_unpack_texel(p, format);
         }
     }
+}
+
+static void ngl_sw_texture_drop_mips(NGLTexture *t) {
+    int i;
+    if (t == NULL || t->mips == NULL) return;
+    for (i = 0; i < t->mip_count; ++i) free(t->mips[i].argb);
+    free(t->mips);
+    t->mips = NULL;
+    t->mip_count = 0;
+}
+
+static int ngl_sw_min_filter_is_mipmapped(GLint f) {
+    return f == GL_NEAREST_MIPMAP_NEAREST || f == GL_LINEAR_MIPMAP_NEAREST ||
+           f == GL_NEAREST_MIPMAP_LINEAR || f == GL_LINEAR_MIPMAP_LINEAR;
+}
+
+/* Builds levels 1.. by 2x2 box filtering (edge texels repeated for odd
+ * sizes). Returns the number of levels beyond the base. */
+static int ngl_sw_texture_build_mips(NGLTexture *t) {
+    int level;
+    const NGLTexture *src = t;
+    if (t->mips != NULL) return t->mip_count;
+    if (t->argb == NULL || (t->width <= 1 && t->height <= 1)) return 0;
+    t->mips = (NGLTexture *)calloc(NGL_SW_MAX_MIP_LEVELS, sizeof(NGLTexture));
+    if (t->mips == NULL) return 0;
+    for (level = 0; level < NGL_SW_MAX_MIP_LEVELS &&
+                    (src->width > 1 || src->height > 1); ++level) {
+        NGLTexture *dst = &t->mips[level];
+        int w = src->width > 1 ? src->width / 2 : 1;
+        int h = src->height > 1 ? src->height / 2 : 1;
+        int x, y;
+        dst->argb = (unsigned int *)malloc((size_t)w * (size_t)h * sizeof(unsigned int));
+        if (dst->argb == NULL) break;
+        dst->width = w;
+        dst->height = h;
+        for (y = 0; y < h; ++y) {
+            int sy0 = y * 2 < src->height ? y * 2 : src->height - 1;
+            int sy1 = sy0 + 1 < src->height ? sy0 + 1 : sy0;
+            const unsigned int *r0 = src->argb + sy0 * src->width;
+            const unsigned int *r1 = src->argb + sy1 * src->width;
+            for (x = 0; x < w; ++x) {
+                int sx0 = x * 2 < src->width ? x * 2 : src->width - 1;
+                int sx1 = sx0 + 1 < src->width ? sx0 + 1 : sx0;
+                unsigned int p[4];
+                unsigned int rb, ag;
+                p[0] = r0[sx0]; p[1] = r0[sx1]; p[2] = r1[sx0]; p[3] = r1[sx1];
+                rb = (p[0] & 0x00ff00ffU) + (p[1] & 0x00ff00ffU) +
+                     (p[2] & 0x00ff00ffU) + (p[3] & 0x00ff00ffU) + 0x00020002U;
+                ag = ((p[0] >> 8) & 0x00ff00ffU) + ((p[1] >> 8) & 0x00ff00ffU) +
+                     ((p[2] >> 8) & 0x00ff00ffU) + ((p[3] >> 8) & 0x00ff00ffU) +
+                     0x00020002U;
+                dst->argb[y * w + x] = ((rb >> 2) & 0x00ff00ffU) |
+                                       ((ag << 6) & 0xff00ff00U);
+            }
+        }
+        ++t->mip_count;
+        src = dst;
+    }
+    return t->mip_count;
 }
 
 /* a*(256-f) + b*f per channel, f in [0,256]; R/B and A/G lanes are 16 bits
@@ -1829,6 +1911,15 @@ typedef struct {
     float a, db, dc;  /* value = a + l1 * db + l2 * dc */
 } NGLPlane;
 
+/* round(log2(sqrt(rho2))) from the float exponent; rho2 > 1. */
+static int ngl_sw_mip_level(float rho2) {
+    unsigned int bits;
+    int e;
+    memcpy(&bits, &rho2, sizeof(bits));
+    e = (int)((bits >> 23) & 0xffU) - 127;  /* floor(log2(rho2)) */
+    return (e + 1) >> 1;
+}
+
 static void ngl_sw_plane(NGLPlane *p, float va, float vb, float vc) {
     p->a = va;
     p->db = vb - va;
@@ -1855,6 +1946,11 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
     int unit;
     NGLTexture *tex_unit[NGL_SW_TEXTURE_UNITS];
     int tex_nearest[NGL_SW_TEXTURE_UNITS];
+    int tex_mips[NGL_SW_TEXTURE_UNITS];
+    int tex_min_nearest[NGL_SW_TEXTURE_UNITS];
+    float dux[NGL_SW_TEXTURE_UNITS], duy[NGL_SW_TEXTURE_UNITS];
+    float dvx[NGL_SW_TEXTURE_UNITS], dvy[NGL_SW_TEXTURE_UNITS];
+    float dqx = 0.0f, dqy = 0.0f;
     int any_tex = 0;
     int perspective;
     int smooth;
@@ -1951,7 +2047,22 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
                           t->width > 0 && t->height > 0) ? t : NULL;
         tex_nearest[unit] = tex_unit[unit] != NULL &&
                             ngl_sw_texture_is_nearest(tex_unit[unit]);
-        if (tex_unit[unit] != NULL) any_tex = 1;
+        tex_mips[unit] = 0;
+        tex_min_nearest[unit] = 1;
+        if (tex_unit[unit] != NULL) {
+            NGLTexture *t = tex_unit[unit];
+            any_tex = 1;
+            if (ngl_sw_min_filter_is_mipmapped(t->min_filter)) {
+                int i;
+                tex_mips[unit] = ngl_sw_texture_build_mips(t);
+                for (i = 0; i < tex_mips[unit]; ++i) {
+                    t->mips[i].wrap_s = t->wrap_s;
+                    t->mips[i].wrap_t = t->wrap_t;
+                }
+                tex_min_nearest[unit] = t->min_filter == GL_NEAREST_MIPMAP_NEAREST ||
+                                        t->min_filter == GL_NEAREST_MIPMAP_LINEAR;
+            }
+        }
     }
     smooth = ngl_sw.shade_model == GL_SMOOTH &&
              !(a.color == b.color && b.color == c.color);
@@ -2030,6 +2141,23 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
         row2 = (px - ax) * (by - ay) - (py - ay) * (bx - ax) + bias2;
     }
 
+    /* Screen-space derivatives of the (perspective-divided) texture
+     * planes, for per-pixel mip level selection. */
+    {
+        float l1x = (float)a1 * inv_area, l2x = (float)a2 * inv_area;
+        float l1y = (float)b1 * inv_area, l2y = (float)b2 * inv_area;
+        if (perspective) {
+            dqx = pinvw.db * l1x + pinvw.dc * l2x;
+            dqy = pinvw.db * l1y + pinvw.dc * l2y;
+        }
+        for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
+            if (!tex_mips[unit]) continue;
+            dux[unit] = pu[unit].db * l1x + pu[unit].dc * l2x;
+            duy[unit] = pu[unit].db * l1y + pu[unit].dc * l2y;
+            dvx[unit] = pv[unit].db * l1x + pv[unit].dc * l2x;
+            dvy[unit] = pv[unit].db * l1y + pv[unit].dc * l2y;
+        }
+    }
     for (y = miny; y < maxy; ++y, row0 += b0, row1 += b1, row2 += b2) {
         int e0 = row0, e1 = row1, e2 = row2;
         int entered = 0;
@@ -2080,8 +2208,32 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
                     if (tex == NULL) continue;
                     u = NGL_SW_PLANE(pu[unit], l1, l2) * rw;
                     v = NGL_SW_PLANE(pv[unit], l1, l2) * rw;
-                    texel = tex_nearest[unit] ? ngl_sw_texel_nearest(tex, u, v) :
-                                                ngl_sw_texel(tex, u, v);
+                    if (tex_mips[unit]) {
+                        /* d(U/Q) = (dU - u dQ) / Q; scaled to texels. */
+                        float ux = (dux[unit] - u * dqx) * rw * (float)tex->width;
+                        float uy = (duy[unit] - u * dqy) * rw * (float)tex->width;
+                        float vx = (dvx[unit] - v * dqx) * rw * (float)tex->height;
+                        float vy = (dvy[unit] - v * dqy) * rw * (float)tex->height;
+                        float rx = ux * ux + vx * vx;
+                        float ry = uy * uy + vy * vy;
+                        float rho2 = rx > ry ? rx : ry;
+                        if (rho2 > 1.0f) {
+                            int level = ngl_sw_mip_level(rho2);
+                            const NGLTexture *lt;
+                            if (level > tex_mips[unit]) level = tex_mips[unit];
+                            lt = level > 0 ? &tex->mips[level - 1] : tex;
+                            texel = tex_min_nearest[unit] ?
+                                    ngl_sw_texel_nearest(lt, u, v) :
+                                    ngl_sw_texel_bilinear(lt, u, v);
+                        } else {
+                            texel = tex->mag_filter == GL_LINEAR ?
+                                    ngl_sw_texel_bilinear(tex, u, v) :
+                                    ngl_sw_texel_nearest(tex, u, v);
+                        }
+                    } else {
+                        texel = tex_nearest[unit] ? ngl_sw_texel_nearest(tex, u, v) :
+                                                    ngl_sw_texel(tex, u, v);
+                    }
                     color = ngl_sw_apply_tex_env(unit, color, texel);
                 }
             }
@@ -3140,6 +3292,7 @@ static inline void glCompressedTexImage2D(GLenum target, GLint level,
         return;
     }
     t = ngl_sw_bound_texture(unit);
+    ngl_sw_texture_drop_mips(t);
     free(t->argb);
     t->argb = NULL;
     t->width = width;
@@ -3178,6 +3331,7 @@ static inline void glCopyTexImage2D(GLenum target, GLint level, GLenum internalf
         return;
     }
     t = ngl_sw_bound_texture(unit);
+    ngl_sw_texture_drop_mips(t);
     free(t->argb);
     t->argb = NULL;
     t->width = width;
@@ -3222,6 +3376,7 @@ static inline void glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
         ngl_sw.error = GL_INVALID_OPERATION;
         return;
     }
+    ngl_sw_texture_drop_mips(t);
     ngl_sw_upload_pixels(t, xoffset, yoffset, width, height, format,
                          (const unsigned char *)pixels);
 }
@@ -3248,6 +3403,7 @@ static inline void glTexImage2D(GLenum target, GLint level, GLint internalformat
         --ngl_sw.trace_upload_budget;
     }
     t = ngl_sw_bound_texture(unit);
+    ngl_sw_texture_drop_mips(t);
     free(t->argb);
     t->argb = NULL;
     t->width = width;
@@ -3359,6 +3515,7 @@ static inline void glDeleteTextures(GLsizei n, const GLuint *textures) {
         }
         for (slot = 1; slot < NGL_SW_MAX_TEXTURES; ++slot) {
             if (ngl_sw.textures[slot].id == textures[i]) {
+                ngl_sw_texture_drop_mips(&ngl_sw.textures[slot]);
                 free(ngl_sw.textures[slot].argb);
                 memset(&ngl_sw.textures[slot], 0, sizeof(ngl_sw.textures[slot]));
                 break;
@@ -3436,7 +3593,10 @@ static inline int nglInit(void *memory, unsigned memoryBytes, void *textureManag
 }
 static inline void nglExit(void) {
     int i;
-    for (i = 0; i < NGL_SW_MAX_TEXTURES; ++i) free(ngl_sw.textures[i].argb);
+    for (i = 0; i < NGL_SW_MAX_TEXTURES; ++i) {
+        ngl_sw_texture_drop_mips(&ngl_sw.textures[i]);
+        free(ngl_sw.textures[i].argb);
+    }
     free(ngl_sw.depth);
     free(ngl_sw.vcache);
     free(ngl_sw.vcache_stamp);
