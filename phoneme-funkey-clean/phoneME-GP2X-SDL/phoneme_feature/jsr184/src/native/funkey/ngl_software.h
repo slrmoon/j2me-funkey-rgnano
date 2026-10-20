@@ -1467,7 +1467,12 @@ static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
     out->z = clip[2];
     out->w = clip[3];
     memcpy(out->view, mv, sizeof(out->view));
-    out->fog = fabsf(mv[2]);
+    /* GL ES fog coordinate -z_eye (signed). m3gcore's NGL sprite path draws
+     * in screen space with fog start = -finalZ/fogValue, end = 0, which
+     * only yields the intended factor with the signed coordinate; fabsf
+     * fully fogged every sprite with a positive NDC depth. Identical for
+     * ordinary geometry in front of the camera. */
+    out->fog = -mv[2];
     out->color = ngl_sw_lit_color(index, mv, ngl_sw_color(index));
     for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
         out->u[unit] = 0.0f;
@@ -1718,9 +1723,11 @@ static void ngl_sw_raster_tri_ref(NGLVertex a, NGLVertex b, NGLVertex c) {
     }
     if (ngl_sw.cull_face &&
             !(ngl_sw.trace_immediate_draw && ngl_sw.immediate_disable_cull)) {
+        /* ngl_sw_edge(a, b, c) is the negated cross product, so a
+         * counter-clockwise triangle has a negative area here. */
         int front = ((ngl_sw.diag_capture_active &&
                       (ngl_sw.diag_mode == 4 || ngl_sw_diag_flip_front_enabled())) ?
-                     (area < 0.0f) : (area > 0.0f)) ==
+                     (area > 0.0f) : (area < 0.0f)) ==
                     (ngl_sw.front_face == GL_CCW);
         if ((front && ngl_sw.cull_mode == GL_FRONT) ||
             (!front && ngl_sw.cull_mode == GL_BACK)) {
@@ -2024,7 +2031,10 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
         return;
     }
     if (ngl_sw.cull_face) {
-        int front = (area > 0) == (ngl_sw.front_face == GL_CCW);
+        /* area is the negated cross product: counter-clockwise < 0. Using
+         * > 0 here culled every front face (all Sprite3Ds vanished, meshes
+         * showed their back faces). */
+        int front = (area < 0) == (ngl_sw.front_face == GL_CCW);
         if ((front && ngl_sw.cull_mode == GL_FRONT) ||
             (!front && ngl_sw.cull_mode == GL_BACK) ||
             ngl_sw.cull_mode == GL_FRONT_AND_BACK) {
