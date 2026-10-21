@@ -1,0 +1,38 @@
+<!ELEMENT configuration (properties | constants | localized_strings | skin | rawimage)*>
+<!ELEMENT properties (property)+>
+<!ELEMENT property EMPTY>
+<!ATTLIST property
+        Key      CDATA                          #REQUIRED
+        Value    CDATA                          #REQUIRED
+        Scope    (system | internal)            "internal"
+        Callout  CDATA                          #IMPLIED
+        Comment  CDATA                          #IMPLIED
+>
+
+<!ELEMENT localized_strings (localized_string)*>
+<!ATTLIST localized_strings
+    Package     CDATA                           #REQUIRED
+    Name        CDATA                           #REQUIRED
+    KeysClass   CDATA                           #REQUIRED
+    Scope       (protected | public)            "public"
+    Comment     CDATA                           #IMPLIED
+>
+<!ELEMENT localized_string EMPTY>
+<!ATTLIST localized_string
+        Key         CDATA                   #REQUIRED
+        KeyValue    CDATA                   #IMPLIED
+        Value       CDATA                   #REQUIRED
+>
+
+<!ELEMENT constants (constant_class)*>
+<!ELEMENT constant_class (constant)*>
+<!ATTLIST constant_class
+    Package  CDATA                          #REQUIRED
+    Name     CDATA                          #REQUIRED
+    Scope    (protected | public)           "public"
+    Comment  CDATA                          #IMPLIED
+    KeysValuesProvider (true | false)       "false"
+    AutoValue  (true | false)               "false"
+    JavaOnly   (true | false)               "false"
+    NativeOnly (true | false)               "false"
+>

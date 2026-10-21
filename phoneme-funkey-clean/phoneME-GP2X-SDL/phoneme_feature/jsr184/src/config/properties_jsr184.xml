@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE configuration SYSTEM "configuration.dtd">
+<configuration>
+  <properties>
+    <property Key="microedition.m3g.version"
+              Value="1.1"
+              Scope="system"
+              Comment="M3G version number."/>
+  </properties>
+</configuration>
