@@ -33,36 +33,188 @@ Based on the upstream phoneME-GP2X-SDL source at:
 3. Create a `java` folder in the root of the SD card
 4. Put your `.jar` files into that `java/` folder
 
-## Scaling setup
+## Features
 
-Press **START** on a game in the launcher to pre-configure scaling before launching. You can also adjust settings during gameplay — press **Power** to open the overlay menu.
+- **MIDP 2.0 / CLDC 1.1** runtime (phoneME) with a game browser launcher.
+- **3D: JSR 184 (M3G)** on a software OpenGL ES 1.x renderer written for the
+  FunKey (single Cortex-A7, RGB565): integer rasterizer, texture cache, fog,
+  lighting, sprites, render-to-texture. See [3D (M3G)](#3d-m3g).
+- **Sound: MMAPI (JSR 135)** on a new audio engine with the handset MIDI synth
+  (Sonivox EAS), all common phone formats and the vendor sound APIs.
+  See [Sound](#sound).
+- **Scaling** for every phone resolution, with sharp / smooth filtering and a
+  movable view for cropped modes. See [Scaling](#scaling).
+- **In-game menu** (Power button) that freezes the game while open.
 
-### 1. Set original resolution first
+## In-game menu
 
-Pick the game's native screen size. If this is wrong, Fit/Fill/Stretch will produce distorted results. **After changing the original resolution, restart the game for it to take effect.**
+Press **Power** during a game. The game and its sound are **frozen** while
+the menu is open and continue exactly where they were when it closes. The
+menu is translucent, so the frozen picture stays visible behind it.
 
-| If the game looks... | Resolution is probably wrong |
+| Page | What is there |
 |---|---|
-| Stretched, cropped, too small, off-center, or UI is outside the screen | Try a different original resolution |
+| **Resume** | back to the game |
+| **Display** | Screen, Zoom, Size, Filter, FPS, Adjust view — see [Scaling](#scaling) |
+| **Controls** | key profile and per-button bindings |
+| **Sound** | Volume, MIDI synth — see [Sound](#sound) |
+| **Exit** | save and quit to the launcher |
 
-**Starting points for old J2ME games:**
+D-pad moves and changes values, **A** selects, **B** goes back.
+All settings are saved **per game** (`/mnt/FunKey/.pm/keybinds/<game>.cfg`)
+and are also available from the launcher: press **START** on a game.
 
-| Orientation | Try these first |
+## Scaling
+
+The FunKey screen is 240×240. J2ME games were made for many phone screens,
+so the picture usually has to be scaled, cropped or both.
+
+### 1. Size — the game's own resolution
+
+Pick the screen size the game was made for. Everything else depends on it.
+**Restart the game after changing it.**
+
+| Size | Typical phones |
 |---|---|
-| Portrait | 240×320 |
-| Old Nokia / Sony Ericsson | 176×208 or 176×220 |
-| Very old phones | 128×160 |
-| Landscape | 320×240 |
-| Square | 128×128 |
+| Auto | let the runtime guess from what the game draws |
+| 128×128 | very old Nokia / Siemens |
+| 128×160 | old Samsung / LG / Motorola |
+| 176×208 | Nokia S60 |
+| 176×220 | Sony Ericsson, Siemens, most "middle" phones |
+| 208×208 | Nokia S60 square |
+| Tall 240×320 | most later portrait phones |
+| Wide 320×240 | landscape phones / games |
+| Full buffer | the whole drawing buffer, no detection |
 
-### 2. Then choose scaling mode
+If the picture is stretched, cut off, too small or the UI is outside the
+screen, the size is most likely wrong.
 
-- **Fit** — game fits entirely, proportions kept. Safest mode if text, HUD, menus matter.
-- **Fill** — fills more screen, edges may crop. Try when black bars are distracting.
-- **Stretch** — forced 240×240, no proportions. Last resort only.
-- **Original** — native size, no scaling. Best for games close to 240×240.
+### 2. Screen — how the picture is placed
 
----
+| Screen | What it does | Use it for |
+|---|---|---|
+| **Auto** | Picks one of the modes below by a rule (see next table) | a good default |
+| **Fit all** | whole picture, proportions kept, black bars | text, HUD and menus must be fully visible |
+| **Crop fill** | fills the screen, proportions kept, edges cut off | bars bother you; move the view with *Adjust view* |
+| **Stretch** | forced 240×240, proportions lost | last resort |
+| **Center** | 1:1, no scaling; larger games are cut, smaller get bars | games close to 240×240 |
+| **Manual zoom** | your own zoom factor (see *Zoom*), around the area the game actually draws | fine tuning (launcher default) |
+| **Integer** | largest whole multiple that fits (2×, 3×…), else 1:1 | perfectly even pixels for small games (≤120 px) |
+
+**Auto** decides like this:
+
+| Game size | Auto result |
+|---|---|
+| 240×240 | 1:1 |
+| ≤ 120 px (a whole multiple fills ≥ 90% of the screen) | Integer |
+| filling the screen cuts ≤ 16% of the picture (128×128, 176×208, 208×208) | Crop fill |
+| anything else (176×220, 128×160, 240×320, 320×240) | Fit all |
+
+### 3. Zoom
+
+Only for **Manual zoom**. The presets depend on *Size* (for example
+150–200% for 128×128, 100–120% for 176×208, "Safe 70%" … "Full width" for
+240×320). In other modes the menu shows a hint that Zoom does nothing.
+
+### 4. Filter — how pixels are scaled
+
+| Filter | Look | Notes |
+|---|---|---|
+| **Sharp** (default) | crisp pixels of even width | at non-integer factors (e.g. 176→240 = 1.36×) each game pixel stays a clean block, only its edge is blended over one screen pixel — no "uneven pixel" shimmer when scrolling |
+| **Smooth** | soft, bilinear | photos / pre-rendered art; text gets softer |
+| **Pixel** | plain nearest neighbour (the old behaviour) | uneven pixel widths, lines may disappear when shrinking |
+
+When the picture is **shrunk** (240×320 → 180×240), Sharp and Smooth average
+the source pixels, so thin lines and small text are kept instead of dropped.
+
+### 5. Adjust view — move the picture when it is cropped
+
+In every mode that cuts something off (Crop fill, Auto when it crops,
+Center/Integer with big games, Manual zoom) you can choose which part is
+visible — for example to bring back a score line or soft-key labels.
+
+Display → **Adjust view** shows the frozen game full screen with a hint bar:
+
+- **D-pad** — move the picture (10% steps)
+- **L1 / R1** — zoom in Manual zoom mode
+- **B** — back to the center
+- **A** (or Power) — done, the position is saved for this game
+
+If the whole picture already fits, the hint says *"Whole picture fits:
+nothing to move"*.
+
+### 6. FPS
+
+Frame limit (Off / 20 / 25 / 30 / 50 / 60). 30 is the default; some games run
+too fast without a limit, heavy 3D games may feel smoother at 20–25.
+
+### Quick recipes
+
+| Game | Size | Screen | Filter |
+|---|---|---|---|
+| Nokia S40 128×128 | 128×128 | Auto / Crop fill | Sharp |
+| S60 176×208 | 176×208 | Auto (crop) + Adjust view if the soft-key line is cut | Sharp |
+| Sony Ericsson 176×220 | 176×220 | Auto (fit) or Crop fill + Adjust view | Sharp |
+| Portrait 240×320 | Tall 240×320 | Fit all for menus/text, Crop fill + Adjust view for action | Sharp |
+| Landscape 320×240 | Wide 320×240 | Fit all | Sharp |
+
+## Sound
+
+Sound is played by **fkaudio**, a small engine written for this device:
+one 22 kHz mono mixer (the FunKey has one speaker), its own parsers for
+every phone music format, and the **Sonivox EAS** synthesizer — the MIDI
+engine that shipped on many handsets and in Android — for the authentic
+phone sound.
+
+**Formats** (detected from the data; the content type a game declares is
+only a hint, games often get it wrong):
+
+| Kind | Formats |
+|---|---|
+| Music | MIDI (SMF 0/1/2, RMID), SMAF / MMF (Yamaha, incl. ADPCM voices), iMelody, Nokia OTA / Smart Messaging, RTTTL, JSR 135 tone sequences |
+| Sampled | WAV (8/16/24/32-bit, float, A-law, µ-law, IMA and MS ADPCM), AU, AMR-NB, MP3 |
+
+**APIs**: MMAPI 1.1 (`Manager`, `Player`, `PlayerListener`, Volume / MIDI /
+Tempo / Rate / Pitch / StopTime / Tone controls, `Manager.playTone`,
+`device://tone`, `device://midi`) and the vendor APIs: Nokia
+`com.nokia.mid.sound.Sound`, Samsung `com.samsung.util.AudioClip`, Siemens
+`com.siemens.mp.game.Sound / Melody / MelodyComposer` and
+`com.siemens.mp.media`, Motorola `com.motorola.midi.MidiPlayer`.
+
+Playback details: instant start (nothing is pre-rendered), exact seeking,
+gapless loops (also for MP3), many sounds at once, a soft limiter instead
+of clipping.
+
+**In-game menu → Sound**
+
+- **Volume** — 0–100%.
+- **MIDI synth** — the instrument set, applied immediately:
+  - **Hybrid** (default) — FM + small wavetable at 22 kHz, the typical phone sound
+  - **Wavetable** — sampled instruments, fuller
+  - **FM** — pure FM, the oldest phones
+
+Advanced (environment variables in `r.sh`):
+
+| Variable | Meaning |
+|---|---|
+| `PHONEME_SYNTH` | `hybrid` / `wavetable` / `fm` (normally set from the menu) |
+| `PHONEME_SOUNDBANK` | path to your own DLS or SF2 bank; `lib/soundbank.dls` / `.sf2` in the runtime folder is picked up automatically |
+| `PHONEME_MIDI_GAIN` | MIDI loudness, 50–100 (default 90) |
+| `PHONEME_AUDIO_BUFFER` | output buffer in samples (default 1024 ≈ 46 ms); lower = less latency, more risk of crackles |
+| `PHONEME_AUDIO_TRACE` | print the audio device setup to the log |
+
+## 3D (M3G)
+
+JSR 184 games run on a software renderer made for this device (no GPU):
+the Nokia M3G core on a custom OpenGL ES 1.x rasterizer that draws straight
+into the 16-bit screen buffer. It supports textures (with a per-image cache
+and mipmaps), lighting, fog, sprites, alpha blending, depth test, culling,
+`.m3g` files, animation and rendering into images. Native objects are
+released when the game drops them (finalizers), so long sessions do not
+run out of memory.
+
+Heavy 3D games depend on CPU speed; if a game is slow, try a lower FPS
+limit and the *Pixel* filter (cheapest).
 
 ## Repository structure
 
@@ -71,7 +223,7 @@ This export is split into two parts:
 - `phoneme-funkey-clean`
   Cleaned runtime source tree with FunKey-specific build scripts.
 - `phoneme-funkey-opk-wrapper`
-  `OPK` packaging layer, launcher, icon, Nokia compatibility stubs, and JAR/JAD wrapper logic.
+  `OPK` packaging layer, launcher, icon and JAR/JAD wrapper logic.
 
 Intentionally not included:
 
@@ -178,11 +330,25 @@ Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funk
 
 ## Known issues
 
-- **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may require tweaking `PHONEME_KEY_PROFILE` and `PHONEME_ENABLE_GP2X_KEYS` env vars inside `r.sh`.
-- **No 3D** — JSR 184 (M3G) is not supported. 3D J2ME games will not run.
+- **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may need a different key profile (in-game menu → Controls, or `PHONEME_KEY_PROFILE` in `r.sh`).
+- **3D speed** — complex M3G scenes are CPU-bound on the single Cortex-A7.
+- **Not supported**: Motorola `com.motorola.game` (GameScreen API), Mobile XMF music, video, camera/recording.
 
 ## Debugging
 
 After launching a game, the runtime writes a log to:
 
 `/mnt/FunKey/.pm/runmidlet.log`
+
+Useful switches for the log (set in `r.sh`): `PHONEME_AUDIO_TRACE=1`
+(audio device), `PHONEME_DISPLAY_DEBUG=1` (chosen scaling layout),
+`M3G_TRACE_VERBOSE=1` (3D).
+
+## Third-party components
+
+| Component | License | Used for |
+|---|---|---|
+| [Sonivox EAS](https://github.com/pedrolcl/sonivox) | Apache 2.0 | MIDI synthesizer |
+| [minimp3](https://github.com/lieff/minimp3) | CC0 | MP3 decoding |
+| opencore-amr | Apache 2.0 | AMR-NB decoding |
+| Nokia M3G core (from phoneME) | EPL 1.0 | 3D scene graph |
