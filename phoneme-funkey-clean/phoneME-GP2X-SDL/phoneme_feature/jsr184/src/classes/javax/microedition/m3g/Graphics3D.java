@@ -14,7 +14,6 @@
  * Description:
  *
  */
- 
 
 package javax.microedition.m3g;
 
@@ -24,13 +23,6 @@ import java.util.Vector;
 import javax.microedition.lcdui.Graphics;
 
 public class Graphics3D {
-	private static int debugBindCount;
-	private static long debugLastWorldHandle;
-	private static int debugCurrentWorldFrames;
-	private static int transformTraceLastId = -1;
-	private static String transformTraceLastMatrix;
-	private static int rallyImmediateTraceCount;
-	private static final boolean RALLY_TRACE = _rallyTrace();
 	//------------------------------------------------------------------
 	// Static data
 	//------------------------------------------------------------------
@@ -141,11 +133,9 @@ public class Graphics3D {
 		
 		integrityCheck();
 		if (currentTarget != null) {
-			//System.out.println("bindTarget IllegalStateException");
 			throw new IllegalStateException();
 		}
 		if (target == null) {
-			//System.out.println("bindTarget NullPointerException");
 			throw new NullPointerException();
 		}
 
@@ -153,9 +143,7 @@ public class Graphics3D {
 		final boolean finalDepth = depth;
 		
 		if (target instanceof Graphics) {
-			
-			//System.out.println("bindTarget 3d in");
-			
+
 			final Graphics finalG = (Graphics) target;
 			/* setViewport/getViewport* coordinates are relative to the
 			 * Graphics translation, as in the Nokia reference. */
@@ -183,47 +171,33 @@ public class Graphics3D {
 					clipX, clipY, clipW, clipH,
 					finalDepth, finalFlags, iIsProperRenderer, pixelsBuffer); */
 			
-			/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
 		iIsImageTarget = _bindGraphics(
 				handle, finalG, width, height,
 				clipX, clipY, clipW, clipH,
 				finalDepth, finalFlags, iIsProperRenderer);
-			
-					
-					
+
 			currentTarget = finalG;
 			cur_width = width;
 			cur_height = height;
-			//System.out.println("bindTarget 3d ok");
 			
 		} else if (target instanceof Image2D) {
-			//System.out.println("bindTarget 2d in");
 			
 			Image2D img = (Image2D) target;
 
 			offsetX = offsetY = 0;
 			final long imageHandle = img.handle;
-			
-			/* _bindImage(handle, imageHandle, finalDepth, finalFlags); */
 
-			/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
 		_bindImage(handle, imageHandle, finalDepth, finalFlags);
 			currentTarget = img;
-			
-			//System.out.println("bindTarget 2d ok");
-			
+
 		} else {
 			
-			//System.out.println("bindTarget IllegalArgumentException2");
 			throw new IllegalArgumentException();
 		}
 
 		hints = flags;
 		depthEnabled = depth;
 		
-		//System.out.println("bindTarget");
 	}
 
 	/**
@@ -232,39 +206,23 @@ public class Graphics3D {
 	public void releaseTarget() {
 		integrityCheck();
 		if (currentTarget == null) {
-			
-			//System.out.println("releaseTarget null");
-			
+
 			return;
 		}
 		if (currentTarget instanceof Graphics) {
-			//System.out.println("releaseTarget 3d in");
 
-			/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
 		_releaseGraphics(handle, currentTarget, iIsImageTarget, iIsProperRenderer);
-					
-			//System.out.println("releaseTarget 3d ok");
-					
+
 		} else if (currentTarget instanceof Image2D) {
-			//System.out.println("releaseTarget 2d in");
-			
-			/* _releaseImage(handle); */
-			
-			/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
+
 		_releaseImage(handle);
 					
-			//System.out.println("releaseTarget 2d ok");
 		} else {
-			
-			
-			//System.out.println("releaseTarget Error");
+
 			throw new Error();
 		}
 		currentTarget = null;
 		
-		//System.out.println("releaseTarget");
 	}
 	
 	/**
@@ -286,11 +244,7 @@ public class Graphics3D {
 	public void clear(Background background) {
 		integrityCheck();
 		final Background finalBackground = background;
-		
-		/* _clear(handle, finalBackground != null ? finalBackground.handle : 0); */
-		
-		/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
+
 		_clear(handle, finalBackground != null ? finalBackground.handle : 0);
 	}
 
@@ -300,10 +254,7 @@ public class Graphics3D {
 	public void render(World world) {
 		integrityCheck();
 		final World finalWorld = world;
-		/* _renderWorld(handle, finalWorld.handle); */
 		
-		/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
 		_renderWorld(handle, finalWorld.handle);
 	}
 
@@ -336,26 +287,7 @@ public class Graphics3D {
 		final Appearance finalAppearance = appearance;
 		final Transform finalTransform = transform;
 		final int finalScope = scope;
-		if (RALLY_TRACE && rallyImmediateTraceCount < 8) {
-			String matrix = finalTransform == null ? "null" :
-					finalTransform.traceMatrixString();
-			System.out.println("[M3G RALLY JAVA] stage=renderImmediate " +
-					"layout=row-major order=M*v transform=" + matrix +
-					" vb=" + finalVertices.handle + " ib=" +
-					finalPrimitives.handle + " app=" + finalAppearance.handle +
-					" scope=" + finalScope);
-			rallyImmediateTraceCount++;
-		}
-		
-		/* _render(handle,
-								finalVertices.handle,
-								finalPrimitives.handle,
-								finalAppearance.handle,
-								finalTransform != null ? finalTransform.matrix : null,
-								finalScope); */
 
-		/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
 		_render(handle,
 				finalVertices.handle,
 				finalPrimitives.handle,
@@ -368,7 +300,6 @@ public class Graphics3D {
 	 *
 	 */
 	public void render(Node node, Transform transform) {
-		//System.out.println("render in");
 		
 		if (!(node instanceof Mesh
 				|| node instanceof Sprite3D
@@ -380,43 +311,11 @@ public class Graphics3D {
 
 		final Node finalNode = node;
 		final Transform finalTransform = transform;
-		if (shouldTraceDegenerate(finalTransform)) {
-			System.out.println("[M3G TRANSFORM TRACE] render(Node) call id=" +
-					finalTransform.traceId() + " matrix=" +
-					finalTransform.traceMatrixString());
-			finalTransform.traceRender("render(Node) call");
-		}
-		
-		/* _renderNode(handle,
-								finalNode.handle,
-								finalTransform != null ? finalTransform.matrix : null); */
 
-		/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
-		if (shouldTraceDegenerate(finalTransform)) {
-			System.out.println("[M3G TRANSFORM TRACE] render(Node) before _renderNode id=" +
-					finalTransform.traceId() + " matrix=" +
-					finalTransform.traceMatrixString());
-			finalTransform.traceRender("before _renderNode");
-		}
 		_renderNode(handle,
 				finalNode.handle,
 				finalTransform != null ? finalTransform.matrix : null);
-		//System.out.println("render out");
 	}
-
-	private static boolean shouldTraceDegenerate(Transform transform) {
-		if (transform == null || !transform.traceIsDegenerate()) return false;
-		String matrix = transform.traceMatrixString();
-		if (transform.traceId() == transformTraceLastId &&
-				matrix.equals(transformTraceLastMatrix)) {
-			return false;
-		}
-		transformTraceLastId = transform.traceId();
-		transformTraceLastMatrix = matrix;
-		return true;
-	}
-
 
 	public void setCamera(Camera camera, Transform transform) {
 		integrityCheck();
@@ -574,13 +473,11 @@ public class Graphics3D {
 
 	private void integrityCheck() {
 		if (iInterface == null) {
-			//System.out.println("iInterface null");
 			throw new RuntimeException("Graphics3D closed");
 		}
 		if (!iNativeInitialized) {
 			// If native interface cannot be initialized we cannot recover from it
 			if (!initNativePeer()) {
-				//System.out.println("initNativePeer null");
 				throw new Error("UI thread not available");
 			}
 		}
@@ -598,11 +495,8 @@ public class Graphics3D {
 		if (iInterface.isFullyInitialized() && Platform.uiThreadAvailable()) {
 			handle = _ctor(Interface.getHandle());
 
-
 			/* iIsProperRenderer = _isProperRenderer(); */
 			
-			/* Platform.executeInUIThread ran this inline anyway; calling
-		 * directly avoids an allocation per call. */
 		iIsProperRenderer = _isProperRenderer();
 			iNativeInitialized = true;
 			
@@ -616,8 +510,6 @@ public class Graphics3D {
 	// Native implementation methods
 	//------------------------------------------------------------------
 	private native static long _ctor(long hInterface);
-
-	private native static boolean _rallyTrace();
 
 	private native static void _addRef(long hObject);
 

@@ -1,9 +1,7 @@
 /*
- * Initial phoneME KNI bridge for JSR-184.
- *
- * This file is intentionally small: it proves the native binding shape used by
- * phoneME before the full Nokia M3G core is wired behind it. Native method
- * groups should be added here in narrow, testable batches.
+ * KNI bridge for JSR-184 (M3G): Graphics3D target binding and rendering,
+ * plus the object methods not covered by m3g_funkey_coverage_kni.c. The
+ * work is done by m3g_funkey_soft.c on top of the Nokia M3G core.
  */
 
 #include <kni.h>
@@ -19,58 +17,6 @@
 #include "m3g_funkey_soft.h"
 
 static FunKeyM3GSurface g_surface;
-static int g_legacy_renderer;
-static int g_rally_render_trace_count;
-
-static int
-m3g_renderer_is_legacy(void) {
-    /* Launch-time setting: read the environment once, not per draw. */
-    static int cached = -1;
-    if (cached < 0) {
-        const char *renderer = getenv("FUNKEY_M3G_RENDERER");
-        cached = (renderer != 0 && strcmp(renderer, "legacy") == 0) ? 1 : 0;
-    }
-    return cached;
-}
-
-static int
-m3g_trace_enabled(void) {
-    /* Launch-time setting: read the environment once, not per draw. */
-    static int cached = -1;
-    if (cached < 0) {
-        const char *value = getenv("M3G_TRACE_VERBOSE");
-        cached = (value != 0 && value[0] != '\0' && value[0] != '0') ? 1 : 0;
-    }
-    return cached;
-}
-
-static int
-m3g_rally_trace_enabled(void) {
-    /* Launch-time setting: read the environment once, not per draw. */
-    static int cached = -1;
-    if (cached < 0) {
-        const char *value = getenv("M3G_RALLY_TRACE");
-        cached = (value != 0 && value[0] != '\0' && value[0] != '0') ? 1 : 0;
-    }
-    return cached;
-}
-
-static void
-m3g_trace_immediate_matrix(const float *matrix, int vb, int ib, int app) {
-    if (!m3g_rally_trace_enabled() || g_rally_render_trace_count >= 8) {
-        return;
-    }
-    fprintf(stderr,
-            "[M3G RALLY KNI] stage=KNI renderImmediate layout=row-major "
-            "order=M*v vb=%d ib=%d app=%d matrix="
-            "%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
-            vb, ib, app,
-            matrix[0], matrix[1], matrix[2], matrix[3],
-            matrix[4], matrix[5], matrix[6], matrix[7],
-            matrix[8], matrix[9], matrix[10], matrix[11],
-            matrix[12], matrix[13], matrix[14], matrix[15]);
-    ++g_rally_render_trace_count;
-}
 
 #define M3G_LONG_PARAM(index) ((long) KNI_GetParameterAsLong(index))
 
@@ -127,51 +73,6 @@ m3g_read_matrix_param(int param, float *matrix) {
         matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f;
     }
     KNI_EndHandles();
-}
-
-static int
-m3g_read_transform_trace_id_param(int param) {
-    int trace_id = 0;
-    KNI_StartHandles(1);
-    KNI_DeclareHandle(array);
-    KNI_GetParameterAsObject(param, array);
-    if (!KNI_IsNullHandle(array) && KNI_GetArrayLength(array) >= 76) {
-        KNI_GetRawArrayRegion(array, 72, 4, (jbyte *) &trace_id);
-    }
-    KNI_EndHandles();
-    return trace_id;
-}
-
-static int
-m3g_matrix_is_degenerate(const float *matrix) {
-    int i;
-    static const int basis[] = { 0, 1, 2, 4, 5, 6, 8, 9, 10 };
-    for (i = 0; i < 9; ++i) {
-        float value = matrix[basis[i]];
-        if (value < -0.000001f || value > 0.000001f) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static void
-m3g_trace_render_node_matrix(int trace_id, const float *matrix) {
-    static int count;
-    if (!m3g_trace_enabled()) {
-        return;
-    }
-    if (count < 4 && m3g_matrix_is_degenerate(matrix)) {
-        fprintf(stderr,
-                "[M3G TRANSFORM TRACE] KNI renderNode id=%d matrix="
-                "%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
-                trace_id,
-                matrix[0], matrix[1], matrix[2], matrix[3],
-                matrix[4], matrix[5], matrix[6], matrix[7],
-                matrix[8], matrix[9], matrix[10], matrix[11],
-                matrix[12], matrix[13], matrix[14], matrix[15]);
-        ++count;
-    }
 }
 
 static void
@@ -805,22 +706,14 @@ Java_javax_microedition_m3g_Graphics3D__1bindGraphics(void) {
         target_width = width;
         target_height = height;
     }
-    g_legacy_renderer = m3g_renderer_is_legacy();
     /* params: 10 = depth buffer enabled, 11 = hint bits */
     funkey_m3g_context_set_target_mode(M3G_LONG_PARAM(1),
                                        KNI_GetParameterAsBoolean(10),
                                        KNI_GetParameterAsInt(11));
     funkey_m3g_surface_init(&g_surface, target_width, target_height,
-                            clip_x, clip_y, clip_w, clip_h,
-                            g_legacy_renderer);
+                            clip_x, clip_y, clip_w, clip_h);
     funkey_m3g_surface_bind_pixels(&g_surface, pixels, stride);
     funkey_m3g_context_bind_surface(M3G_LONG_PARAM(1), &g_surface);
-    if (m3g_trace_enabled()) {
-        fprintf(stderr, "[M3G renderer] backend=%s target=%dx%d stride=%d clip=%d,%d %dx%d image=%d\n",
-                g_legacy_renderer ? "legacy" : "ngl", target_width,
-                target_height, stride, clip_x, clip_y, clip_w, clip_h,
-                image_target);
-    }
     KNI_ReturnBoolean(image_target ? KNI_TRUE : KNI_FALSE);
 }
 
@@ -855,15 +748,7 @@ Java_javax_microedition_m3g_Graphics3D__1resetLights(void) {
 
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1clear(void) {
-    long background = M3G_LONG_PARAM(3);
-    unsigned int argb = 0xff000000U;
-    if (background != 0) {
-        argb = funkey_m3g_background_get_color(background);
-    }
-    if (g_legacy_renderer) {
-        funkey_m3g_surface_clear(&g_surface, argb);
-    }
-    funkey_m3g_context_clear(M3G_LONG_PARAM(1), background);
+    funkey_m3g_context_clear(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3));
     KNI_ReturnVoid();
 }
 
@@ -871,10 +756,6 @@ KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1render(void) {
     float matrix[16];
     m3g_read_matrix_param(9, matrix);
-    m3g_trace_immediate_matrix(matrix,
-                               (int)M3G_LONG_PARAM(3),
-                               (int)M3G_LONG_PARAM(5),
-                               (int)M3G_LONG_PARAM(7));
     funkey_m3g_context_render(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3),
                               M3G_LONG_PARAM(5), M3G_LONG_PARAM(7),
                               matrix, KNI_GetParameterAsInt(10));
@@ -885,24 +766,14 @@ KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1renderNode(void) {
     float matrix[16];
     m3g_read_matrix_param(5, matrix);
-    m3g_trace_render_node_matrix(m3g_read_transform_trace_id_param(5), matrix);
-    if (g_legacy_renderer) {
-        funkey_m3g_surface_render_node(&g_surface, M3G_LONG_PARAM(3));
-    } else {
-        funkey_m3g_context_render_node(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3),
-                                       matrix);
-    }
+    funkey_m3g_context_render_node(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3),
+                                   matrix);
     KNI_ReturnVoid();
 }
 
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Graphics3D__1renderWorld(void) {
-    long world = M3G_LONG_PARAM(3);
-    if (g_legacy_renderer) {
-        funkey_m3g_surface_render_world(&g_surface, world);
-    } else {
-        funkey_m3g_context_render_world(M3G_LONG_PARAM(1), world);
-    }
+    funkey_m3g_context_render_world(M3G_LONG_PARAM(1), M3G_LONG_PARAM(3));
     KNI_ReturnVoid();
 }
 

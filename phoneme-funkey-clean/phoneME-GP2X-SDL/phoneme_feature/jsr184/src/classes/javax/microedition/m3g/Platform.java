@@ -114,7 +114,6 @@ class Platform {
 	static final void finalizeObject(long handle) {
 		try {
 			final long finalHandle = handle;
-			/* _finalizeObject(finalHandle); */
 			executeInUIThread(
 					new M3gRunnable() {
 						void doRun() {
@@ -133,7 +132,6 @@ class Platform {
 	static final void finalizeObject(long handle, Interface aInterface) {
 		try {
 			final long finalHandle = handle;
-			/* _finalizeObject(finalHandle); */
 			executeInUIThread(
 					new M3gRunnable() {
 						public void doRun() {
@@ -144,7 +142,6 @@ class Platform {
 			// do nothing
 		}
 	}
-
 
 	//------------------------------------------------------------------
 	// Private methods

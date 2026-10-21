@@ -221,14 +221,7 @@ static M3Gbool m3gGroupSetupRender(Node *self,
                         M3G_BEGIN_PROFILE(M3G_INTERFACE(group),
                                           M3G_PROFILE_SETUP_TRANSFORMS);
                         m3gGetCompositeNodeTransform(child, &cs.toCamera);
-                        m3gTraceTransformMatrix("[M3G CHILD COMPOSITE]",
-                                                &cs.toCamera);
-                        m3gTraceTransformMatrix("[M3G PARENT TOCAMERA]",
-                                                &s->toCamera);
                         m3gPreMultiplyMatrix(&cs.toCamera, &s->toCamera);
-                        m3gTraceTransformMatrix(
-                            "[M3G CHILD TOCAMERA AFTER PREMULTIPLY]",
-                            &cs.toCamera);
                         M3G_END_PROFILE(M3G_INTERFACE(group),
                                         M3G_PROFILE_SETUP_TRANSFORMS);
                         

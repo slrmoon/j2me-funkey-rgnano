@@ -342,7 +342,7 @@ After launching a game, the runtime writes a log to:
 
 Useful switches for the log (set in `r.sh`): `PHONEME_AUDIO_TRACE=1`
 (audio device), `PHONEME_DISPLAY_DEBUG=1` (chosen scaling layout),
-`M3G_TRACE_VERBOSE=1` (3D).
+`PHONEME_KEY_DEBUG=1` / `PHONEME_EVENT_DEBUG=1` (input).
 
 ## Third-party components
 
