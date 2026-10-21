@@ -358,7 +358,7 @@ debug_on() {
 apply_debug_env() {
     for pair in KEYS:PHONEME_KEY_DEBUG EVENTS:PHONEME_EVENT_DEBUG \
                 DISPLAY:PHONEME_DISPLAY_DEBUG AUDIO:PHONEME_AUDIO_TRACE \
-                FPS:PHONEME_SHOW_FPS; do
+                PROFILE:PHONEME_PROFILE FPS:PHONEME_SHOW_FPS; do
         if debug_on "${pair%%:*}"; then
             export "${pair#*:}=1"
         else

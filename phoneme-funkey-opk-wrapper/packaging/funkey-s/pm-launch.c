@@ -1385,6 +1385,7 @@ static const DebugOption debug_options[] = {
     { "DISPLAY", "DISPLAY LOG", "PHONEME_DISPLAY_DEBUG", "Screen init and the",  "scaling layout",       0 },
     { "AUDIO",   "AUDIO LOG",   "PHONEME_AUDIO_TRACE",   "Audio device rate,",   "channels and buffer",  0 },
     { "LAUNCH",  "LAUNCH LOG",  "PM_LAUNCH_TRACE",       "Settings the launcher","passes to the game",   0 },
+    { "PROFILE", "PROFILER",    "PHONEME_PROFILE",       "CPU use by function,", "to the log every 10 s",0 },
     { "FPS",     "FPS COUNTER", "PHONEME_SHOW_FPS",      "Frame rate in the",    "top-left corner",      0 }
 };
 #define DEBUG_OPTION_COUNT ((int)(sizeof(debug_options) / sizeof(debug_options[0])))

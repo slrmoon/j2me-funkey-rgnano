@@ -464,6 +464,33 @@ static void print_compiled_method(unsigned long pc) {
 }
 #endif
 
+/* Profiler (MIDP lfjport_profile.c): "Class.method" of the JIT code at pc.
+ * Called from the VM thread at a safe point, never from a signal. */
+extern "C" int jvm_describe_compiled_pc(unsigned long pc, char *buf, int size) {
+#if ENABLE_COMPILER && ENABLE_APPENDED_CALLINFO
+  CompiledMethodDesc* desc =
+      (CompiledMethodDesc*) CompiledMethodCache::item_for_address((address) pc);
+  if (desc == NULL) {
+    return 0;
+  }
+  CompiledMethod::Raw cm = desc;
+  Method::Raw m = cm().method();
+  if (m.is_null()) {
+    return 0;
+  }
+  InstanceClass::Raw holder = m().holder();
+  Symbol::Raw kname = holder().name();
+  Symbol::Raw mname = m().name();
+  snprintf(buf, size, "%.*s.%.*s",
+               (int) kname().length(), (char*) kname().utf8_data(),
+               (int) mname().length(), (char*) mname().utf8_data());
+  return 1;
+#else
+  (void) pc; (void) buf; (void) size;
+  return 0;
+#endif
+}
+
 static void print_ucontext(void* context) {
 #if defined(__NetBSD__)
   ucontext_t* uc = (ucontext_t*) context;
