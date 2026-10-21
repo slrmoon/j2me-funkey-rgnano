@@ -340,27 +340,54 @@ Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funk
 
 ## Debugging
 
-Debug options are **global** (the same for every game). Open them in the
-launcher with **Y**, or in a game from the menu → **Debug**. Both edit the
-same file, `/mnt/FunKey/.pm/debug.cfg`.
+Debug options are **global** (the same for every game) and stored in
+`/mnt/FunKey/.pm/debug.cfg`. The launcher and the in-game menu edit the same
+file.
 
-| Option | Default | What it does |
+### In the launcher — press **Y**
+
+<p float="left">
+  <img src="screenshots/debug_launcher.png" width="240" />
+  <img src="screenshots/debug_log_viewer.png" width="240" />
+</p>
+
+**Left — Debug screen.** A or ◀▶ toggles an option; the two lines below the
+list explain the selected one.
+
+| Option | Default | What it writes |
 |---|---|---|
-| **Log file** | On | write the game output to `/mnt/FunKey/.pm/runmidlet.log`; the run before is kept as `runmidlet.prev.log`. Off writes nothing to the SD card |
+| **Log file** | On | game output to `.pm/runmidlet.log`; the run before is kept as `runmidlet.prev.log`. Off: nothing is written to the SD card |
 | **Key log** | Off | every button press and the phone key it maps to |
 | **Event log** | Off | key events delivered to the game |
 | **Display log** | Off | screen set-up and the chosen scaling layout |
 | **Audio log** | Off | audio device rate, channels and buffer |
 | **Launch log** | Off | all settings the launcher passes to the game |
-| **FPS counter** | Off | frames per second in the top-left corner (no log needed) |
+| **FPS counter** | Off | frames per second on screen (no log needed) |
 
-The logs need **Log file** on; the launcher marks them `On (no log)` otherwise.
-In a game, the FPS counter switches at once; the log options apply after
-**Restart game**, and the menu shows a reminder when a restart is needed.
+The logs need **Log file** on; otherwise they show as `On (no log)`.
+**Clear logs** deletes both log files.
 
-**View log** in the launcher's debug screen shows the log on the device:
-D-pad scrolls, **L1/R1** jump to the start/end, **X** switches between the
-last and the previous run. **Clear logs** deletes both files.
+**Right — View log**: the log of the last run, read on the device, opened at
+the end. D-pad scrolls, ◀▶ by page, **L1/R1** jump to the start/end,
+**X** switches to the previous run.
+
+### In a game — Power → **Debug**
+
+<p float="left">
+  <img src="screenshots/debug_ingame_menu.png" width="240" />
+  <img src="screenshots/debug_ingame_page.png" width="240" />
+  <img src="screenshots/debug_fps_counter.png" width="240" />
+</p>
+
+**Left — Restart game** (main menu) quits and starts the game again with the
+saved settings. Use it after changing the logs or **Size**.
+
+**Middle — Debug page**: the same options as in the launcher. The log
+options are read when the game starts, so the yellow reminder stays until you
+restart (the **Restart now** row does it from here).
+
+**Right — FPS counter**: switches on and off right away, no restart needed.
+It shows how many frames the game draws per second, after the FPS limit.
 
 ## Third-party components
 
