@@ -20,9 +20,9 @@ CLDC_VM_FALLBACK=${CLDC_VM_FALLBACK:-}
 JDK_DIR=${JDK_DIR:-$ROOT/zulu7.24.0.1-jdk7.0.191-linux_x64}
 PACKAGE_ROOT=$MEHOME/build_output_funkey_s/opk
 STAGE=$PACKAGE_ROOT/pm
-OPK=$PACKAGE_ROOT/pm.opk
+OPK_NAME=${FUNKEY_OPK_NAME:-pm}
+OPK=$PACKAGE_ROOT/$OPK_NAME.opk
 HELLO_SRC=$ROOT/packaging/funkey-s/HelloMidlet.java
-NOKIA_STUB_SRC=$ROOT/packaging/funkey-s/nokia-stubs
 HELLO_BUILD=$PACKAGE_ROOT/hello-build
 FUNKEY_CC=${FUNKEY_CC:-}
 APP_JAR=${FUNKEY_MIDLET_JAR:-${1:-}}
@@ -34,6 +34,14 @@ RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
 BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
 RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
+M3G_RENDERER=${FUNKEY_M3G_RENDERER:-ngl}
+M3G_TRACE=${FUNKEY_M3G_TRACE:-0}
+M3G_DUMP_IMAGES=${FUNKEY_M3G_DUMP_IMAGES:-}
+M3G_DUMP_DIR=${FUNKEY_M3G_DUMP_DIR:-/mnt/FunKey/.pm}
+M3G_DISABLE_CULL=${FUNKEY_M3G_DISABLE_CULL:-}
+M3G_HIGHLIGHT=${FUNKEY_M3G_HIGHLIGHT:-}
+M3G_RALLY_TRACE=${FUNKEY_M3G_RALLY_TRACE:-}
+M3G_REFLECT_X=${FUNKEY_M3G_REFLECT_X:-}
 
 if [ "$BUNDLE_MIDLET" = "1" ]; then
     RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
@@ -118,46 +126,6 @@ jar_has_entry() {
     "$JDK_DIR/bin/jar" tf "$1" | grep -q "^$2$"
 }
 
-inject_nokia_stubs() {
-    if [ "${FUNKEY_NOKIA_STUBS:-auto}" = "0" ]; then
-        return
-    fi
-    if [ ! -d "$NOKIA_STUB_SRC" ]; then
-        return
-    fi
-    if jar_has_entry "$STAGE/midlets/a.jar" "com/nokia/mid/sound/Sound.class"; then
-        return
-    fi
-
-    echo "Injecting Nokia compatibility stubs"
-    mkdir -p "$HELLO_BUILD/nokia-stubs/classes" "$HELLO_BUILD/nokia-stubs/verified"
-    "$JDK_DIR/bin/javac" \
-        -source 1.4 -target 1.4 \
-        -bootclasspath "$MIDP_CLASSES" \
-        -classpath "$MIDP_CLASSES" \
-        -d "$HELLO_BUILD/nokia-stubs/classes" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/sound/Sound.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/sound/SoundListener.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/ui/DeviceControl.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/ui/DirectGraphics.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/ui/DirectUtils.java"
-
-    "$PREVERIFY" \
-        -classpath "$MIDP_CLASSES:$CLDC_DIST/lib/cldc_classes.zip" \
-        -d "$HELLO_BUILD/nokia-stubs/verified" \
-        "$HELLO_BUILD/nokia-stubs/classes"
-
-    (
-        cd "$HELLO_BUILD/nokia-stubs/verified"
-        "$JDK_DIR/bin/jar" uf "$STAGE/midlets/a.jar" \
-            com/nokia/mid/sound/Sound.class \
-            com/nokia/mid/sound/SoundListener.class \
-            com/nokia/mid/ui/DeviceControl.class \
-            com/nokia/mid/ui/DirectGraphics.class \
-            com/nokia/mid/ui/DirectUtils.class \
-            com/nokia/mid/ui/DirectUtils\$DirectGraphicsImpl.class
-    )
-}
 
 if [ -z "$FUNKEY_CC" ] && command -v arm-funkey-linux-musleabihf-gcc >/dev/null 2>&1; then
     FUNKEY_CC=$(command -v arm-funkey-linux-musleabihf-gcc)
@@ -219,7 +187,6 @@ elif [ -n "$APP_JAR" ]; then
         echo "Could not infer MIDlet class. Set FUNKEY_MIDLET_MAIN=YourMidlet." >&2
         exit 1
     fi
-    inject_nokia_stubs
 else
     mkdir -p "$STAGE/midlets" "$HELLO_BUILD/classes" "$HELLO_BUILD/verified"
     BUILTIN_SRC=$HELLO_SRC
@@ -288,7 +255,7 @@ if [ -s "$TARGET_CLDC_BIN/cldc_vm" ] || { [ -n "$CLDC_VM_FALLBACK" ] && [ -s "$C
     copy_nonempty_file "$TARGET_CLDC_BIN/cldc_vm" "$STAGE/bin/cldc_vm" "$CLDC_VM_FALLBACK"
 fi
 cp -R "$MEHOME/build_output_funkey_s/midp/lib" "$STAGE/lib"
-rm -rf "$STAGE/lib/freepats"
+rm -rf "$STAGE/lib/freepats" "$STAGE/lib/soundfont"
 cp -R "$MEHOME/build_output_funkey_s/midp/appdb" "$STAGE/appdb"
 echo "Compiling SDL launcher (browser mode)"
 
@@ -298,6 +265,12 @@ LAUNCH_SRC=$ROOT/packaging/funkey-s/pm-launch.c
 if [ -f "$LAUNCH_SRC" ]; then
     "$FUNKEY_CC" -Os -s \
         -I"$SYSROOT/usr/include/SDL" \
+        "-DFUNKEY_M3G_DUMP_IMAGES=\"$M3G_DUMP_IMAGES\"" \
+        "-DFUNKEY_M3G_DUMP_DIR=\"$M3G_DUMP_DIR\"" \
+        "-DFUNKEY_M3G_DISABLE_CULL=\"$M3G_DISABLE_CULL\"" \
+        "-DFUNKEY_M3G_HIGHLIGHT=\"$M3G_HIGHLIGHT\"" \
+        "-DFUNKEY_M3G_RALLY_TRACE=\"$M3G_RALLY_TRACE\"" \
+        "-DFUNKEY_M3G_REFLECT_X=\"$M3G_REFLECT_X\"" \
         "$LAUNCH_SRC" \
         -o "$STAGE/pm" \
         -lSDL -lSDL_gfx -lm
@@ -317,8 +290,7 @@ fi
         bin/cldc_vm \
         bin/installMidlet \
         bin/listMidlets.sh \
-        bin/preverify \
-        lib/soundfont/default.sf2; do
+        bin/preverify; do
         if [ -f "$STAGE/$runtime_file" ]; then
             sha256sum "$STAGE/$runtime_file" | awk -v name="$runtime_file" '{ print $1 "  " name }'
         fi
@@ -382,7 +354,15 @@ else
     echo "appdb already exists, preserving" >> "$EARLY_LOG"
 fi
 export MIDP_HOME="$APP_DIR"
-export PHONEME_TIMIDITY_SYNTHETIC="${PHONEME_TIMIDITY_SYNTHETIC:-1}"
+export FUNKEY_M3G_RENDERER='__M3G_RENDERER__'
+export M3G_NGL_TRACE='__M3G_TRACE__'
+export M3G_DUMP_IMAGES='__M3G_DUMP_IMAGES__'
+export M3G_DUMP_DIR='__M3G_DUMP_DIR__'
+export M3G_IMMEDIATE_DISABLE_CULL='__M3G_DISABLE_CULL__'
+export M3G_IMMEDIATE_HIGHLIGHT='__M3G_HIGHLIGHT__'
+export M3G_RALLY_TRACE='__M3G_RALLY_TRACE__'
+export M3G_RALLY_REFLECT_X='__M3G_REFLECT_X__'
+export PHONEME_SYNTH="${PHONEME_SYNTH:-hybrid}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
 if [ "${PHONEME_DEBUG_LOGS:-0}" = "1" ]; then
     export PHONEME_KEY_DEBUG="${PHONEME_KEY_DEBUG:-1}"
@@ -471,6 +451,8 @@ echo "Starting phoneME FunKey runtime"
 date
 echo "APP_DIR=$APP_DIR"
 echo "MIDP_HOME=$MIDP_HOME"
+echo "FUNKEY_M3G_RENDERER=$FUNKEY_M3G_RENDERER"
+echo "M3G_NGL_TRACE=$M3G_NGL_TRACE"
 echo "PHONEME_ENABLE_GP2X_KEYS=$PHONEME_ENABLE_GP2X_KEYS"
 echo "PHONEME_KEY_PROFILE=$PHONEME_KEY_PROFILE"
 echo "RUNMIDLET_HEAP_ARG=${RUNMIDLET_HEAP_ARG:-}"
@@ -504,8 +486,24 @@ echo "$status" > "$APP_DIR/s"
 exit "$(cat "$APP_DIR/s" 2>/dev/null || echo 1)"
 EOF
 escaped_heap_arg=$(printf '%s' "$RUNMIDLET_HEAP_ARG" | sed "s/'/'\\\\''/g")
+escaped_m3g_renderer=$(printf '%s' "$M3G_RENDERER" | sed 's/[\/&]/\\&/g')
+escaped_m3g_trace=$(printf '%s' "$M3G_TRACE" | sed 's/[\/&]/\\&/g')
+escaped_m3g_dump_images=$(printf '%s' "$M3G_DUMP_IMAGES" | sed 's/[\/&]/\\&/g')
+escaped_m3g_dump_dir=$(printf '%s' "$M3G_DUMP_DIR" | sed 's/[\/&]/\\&/g')
+escaped_m3g_disable_cull=$(printf '%s' "$M3G_DISABLE_CULL" | sed 's/[\/&]/\\&/g')
+escaped_m3g_highlight=$(printf '%s' "$M3G_HIGHLIGHT" | sed 's/[\/&]/\\&/g')
+escaped_m3g_rally_trace=$(printf '%s' "$M3G_RALLY_TRACE" | sed 's/[\/&]/\\&/g')
+escaped_m3g_reflect_x=$(printf '%s' "$M3G_REFLECT_X" | sed 's/[\/&]/\\&/g')
 sed -i "s|__RUNMIDLET_HEAP_ARG__|$escaped_heap_arg|" "$STAGE/r.sh"
 sed -i "s|__RUNTIME_ONLY__|$RUNTIME_ONLY|g" "$STAGE/r.sh"
+sed -i "s|__M3G_RENDERER__|$escaped_m3g_renderer|g" "$STAGE/r.sh"
+sed -i "s|__M3G_TRACE__|$escaped_m3g_trace|g" "$STAGE/r.sh"
+sed -i "s|__M3G_DUMP_IMAGES__|$escaped_m3g_dump_images|g" "$STAGE/r.sh"
+sed -i "s|__M3G_DUMP_DIR__|$escaped_m3g_dump_dir|g" "$STAGE/r.sh"
+sed -i "s|__M3G_DISABLE_CULL__|$escaped_m3g_disable_cull|g" "$STAGE/r.sh"
+sed -i "s|__M3G_HIGHLIGHT__|$escaped_m3g_highlight|g" "$STAGE/r.sh"
+sed -i "s|__M3G_RALLY_TRACE__|$escaped_m3g_rally_trace|g" "$STAGE/r.sh"
+sed -i "s|__M3G_REFLECT_X__|$escaped_m3g_reflect_x|g" "$STAGE/r.sh"
 chmod +x "$STAGE/r.sh"
 
 cat > "$STAGE/pm.funkey-s.desktop" <<EOF

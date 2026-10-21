@@ -28,6 +28,26 @@
 #define BIN_DIR    "/mnt/FunKey/.pm/bin"
 #define RMS_DIR    "/mnt/FunKey/.pm/rms"
 #define FAVORITES_FILE PM_DIR "/favorites.txt"
+
+#ifndef FUNKEY_M3G_DUMP_IMAGES
+#define FUNKEY_M3G_DUMP_IMAGES ""
+#endif
+#ifndef FUNKEY_M3G_DUMP_DIR
+#define FUNKEY_M3G_DUMP_DIR ""
+#endif
+#ifndef FUNKEY_M3G_DISABLE_CULL
+#define FUNKEY_M3G_DISABLE_CULL ""
+#endif
+#ifndef FUNKEY_M3G_HIGHLIGHT
+#define FUNKEY_M3G_HIGHLIGHT ""
+#endif
+#ifndef FUNKEY_M3G_RALLY_TRACE
+#define FUNKEY_M3G_RALLY_TRACE ""
+#endif
+#ifndef FUNKEY_M3G_REFLECT_X
+#define FUNKEY_M3G_REFLECT_X ""
+#endif
+
 static char java_dir[PATH_MAX] = "/mnt/java";
 
 /* ── MIDP key codes (from phoneME keymap_input.h) ───── */
@@ -291,7 +311,8 @@ static const DisplayModePreset display_modes[] = {
     { "fill", "Stretch" },
     { "crop", "Crop fill" },
     { "center", "Center" },
-    { "zoom", "Manual zoom" }
+    { "zoom", "Manual zoom" },
+    { "integer", "Integer" }
 };
 
 #define DISPLAY_MODE_COUNT ((int)(sizeof(display_modes) / sizeof(display_modes[0])))
@@ -343,6 +364,9 @@ static int    source_sel = 0;
 static int    display_mode_sel = 5;
 static int    fps_limit_sel = 3;
 static int    sound_volume = 100;
+static char   synth_id[16] = "hybrid";   /* MIDI synth preset, set in the in-game menu */
+static char   filter_id[16] = "sharp";   /* scaling filter, set in the in-game menu */
+static int    pan_x, pan_y;              /* view position for cropped modes, -1000..1000 */
 static int    key_profile_sel = 0;
 static int    bind_sel   = 0;        /* selected row in settings */
 static int    bind_scroll = 0;
@@ -1323,6 +1347,9 @@ static void load_binds(const char *game_name, const char *jar_path) {
     display_mode_sel = 5;
     fps_limit_sel = 3;
     sound_volume = 100;
+    strcpy(synth_id, "hybrid");
+    strcpy(filter_id, "sharp");
+    pan_x = pan_y = 0;
     key_profile_sel = 0;
 
     if (!game_name) return;
@@ -1366,6 +1393,26 @@ static void load_binds(const char *game_name, const char *jar_path) {
             if (sound_volume > 100) sound_volume = 100;
             continue;
         }
+        if (strcmp(key, "FILTER") == 0) {
+            if (strcmp(value, "sharp") == 0 || strcmp(value, "smooth") == 0 ||
+                strcmp(value, "pixel") == 0) {
+                snprintf(filter_id, sizeof(filter_id), "%s", value);
+            }
+            continue;
+        }
+        if (strcmp(key, "PAN_X") == 0 || strcmp(key, "PAN_Y") == 0) {
+            if (val < -1000) val = -1000;
+            if (val > 1000) val = 1000;
+            if (key[4] == 'X') pan_x = val; else pan_y = val;
+            continue;
+        }
+        if (strcmp(key, "SYNTH") == 0) {
+            if (strcmp(value, "hybrid") == 0 || strcmp(value, "wavetable") == 0 ||
+                strcmp(value, "fm") == 0) {
+                snprintf(synth_id, sizeof(synth_id), "%s", value);
+            }
+            continue;
+        }
         if (strcmp(key, "PROFILE") == 0 || strcmp(key, "KEY_PROFILE") == 0) {
             key_profile_sel = find_key_profile(value);
             apply_key_profile(key_profile_sel);
@@ -1398,6 +1445,10 @@ static void save_binds(const char *game_name) {
     fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
     fprintf(f, "FPS_LIMIT=%s\n", fps_limits[fps_limit_sel].id);
     fprintf(f, "VOLUME=%d\n", sound_volume);
+    fprintf(f, "SYNTH=%s\n", synth_id);
+    fprintf(f, "FILTER=%s\n", filter_id);
+    fprintf(f, "PAN_X=%d\n", pan_x);
+    fprintf(f, "PAN_Y=%d\n", pan_y);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
 
     for (i = 0; i < BIND_COUNT; i++)
@@ -1900,10 +1951,27 @@ static void launch_game(int idx) {
 
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
+    if (FUNKEY_M3G_DUMP_IMAGES[0] != '\0') {
+        setenv("M3G_DUMP_IMAGES", FUNKEY_M3G_DUMP_IMAGES, 1);
+    }
+    if (FUNKEY_M3G_DUMP_DIR[0] != '\0') {
+        setenv("M3G_DUMP_DIR", FUNKEY_M3G_DUMP_DIR, 1);
+    }
+    if (FUNKEY_M3G_DISABLE_CULL[0] != '\0') {
+        setenv("M3G_IMMEDIATE_DISABLE_CULL", FUNKEY_M3G_DISABLE_CULL, 1);
+    }
+    if (FUNKEY_M3G_HIGHLIGHT[0] != '\0') {
+        setenv("M3G_IMMEDIATE_HIGHLIGHT", FUNKEY_M3G_HIGHLIGHT, 1);
+    }
+    if (FUNKEY_M3G_RALLY_TRACE[0] != '\0') {
+        setenv("M3G_RALLY_TRACE", FUNKEY_M3G_RALLY_TRACE, 1);
+    }
+    if (FUNKEY_M3G_REFLECT_X[0] != '\0') {
+        setenv("M3G_RALLY_REFLECT_X", FUNKEY_M3G_REFLECT_X, 1);
+    }
     setenv("PHONEME_RMS_HOME", rms_home, 1);
     setenv("PHONEME_HEAP_MB", "16", 1);
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
-    setenv("PHONEME_TIMIDITY_SYNTHETIC", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
@@ -1918,6 +1986,13 @@ static void launch_game(int idx) {
         char volume[16];
         snprintf(volume, sizeof(volume), "%d", sound_volume);
         setenv("PHONEME_SOUND_VOLUME", volume, 1);
+    }
+    setenv("PHONEME_SYNTH", synth_id, 1);
+    setenv("PHONEME_SCALE_FILTER", filter_id, 1);
+    {
+        char pan[32];
+        snprintf(pan, sizeof(pan), "%d,%d", pan_x, pan_y);
+        setenv("PHONEME_PAN", pan, 1);
     }
     {
         char ratio[16];

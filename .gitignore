@@ -9,4 +9,9 @@ zulu7.24.0.1-jdk7.0.191-linux_x64/
 
 phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output/
 phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/
+phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_x86_m3g/
 phoneme-funkey-opk-wrapper/stage/
+
+build/
+m3g_probe_results/
+m3g_ngl_probe_funkey

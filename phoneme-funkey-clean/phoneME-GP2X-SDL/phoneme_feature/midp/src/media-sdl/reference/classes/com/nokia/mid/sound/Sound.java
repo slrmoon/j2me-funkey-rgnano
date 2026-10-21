@@ -1,3 +1,10 @@
+/*
+ * Nokia UI API sound, on top of the FunKey MMAPI implementation.
+ *
+ * FORMAT_TONE data is a Nokia Smart Messaging (OTA) ringtone, FORMAT_WAV is
+ * sampled audio; in practice games pass MIDI or other formats under both,
+ * which is fine because the player detects the format from the bytes.
+ */
 package com.nokia.mid.sound;
 
 import java.io.ByteArrayInputStream;
@@ -7,6 +14,8 @@ import javax.microedition.media.Manager;
 import javax.microedition.media.MediaException;
 import javax.microedition.media.Player;
 import javax.microedition.media.PlayerListener;
+import javax.microedition.media.control.ToneControl;
+import javax.microedition.media.control.VolumeControl;
 
 public class Sound {
     public static final int FORMAT_TONE = 1;
@@ -15,36 +24,27 @@ public class Sound {
     public static final int SOUND_STOPPED = 1;
     public static final int SOUND_UNINITIALIZED = 3;
 
-    private static final short[] FREQ_TABLE = {
-        0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23,
-        24, 26, 27, 29, 30, 32, 34, 36, 38, 41, 43, 45, 48, 51, 54, 57, 60,
-        64, 68, 72, 76, 81, 85, 90, 96, 101, 107, 114, 120, 128, 135, 143,
-        152, 161, 170, 180, 191, 202, 214, 227, 240, 255, 270, 286, 303, 321,
-        340, 360, 381, 404, 428, 453, 480, 509, 539, 571, 605, 641, 679, 719,
-        762, 807, 855, 906, 960, 1017, 1078, 1142, 1210, 1282, 1358, 1438,
-        1524, 1614, 1710, 1812, 1920, 2034, 2155, 2283, 2419, 2563, 2715,
-        2876, 3047, 3228, 3420, 3624, 3839, 4067, 4309, 4565, 4837, 5125,
-        5429, 5752, 6094, 6456, 6840, 7247, 7678, 8134, 8618, 9130, 9673,
-        10249, 10858, 11504, 12188, 12912
-    };
-
     private Player player;
-    private boolean toneMode;
-    private int toneNote;
-    private int toneDuration;
-    private int state = SOUND_STOPPED;
-    private int gain = 100;
+    private int state = SOUND_UNINITIALIZED;
+    private int gain = 255;
     private SoundListener listener;
-    private PlayerListener playerListener = new PlayerListener() {
-        public void playerUpdate(Player player, String event, Object eventData) {
-            if (PlayerListener.END_OF_MEDIA.equals(event)) {
-                postEvent(SOUND_STOPPED);
+
+    private final PlayerListener events = new PlayerListener() {
+        public void playerUpdate(Player p, String event, Object data) {
+            if (p != player) return;
+            if (PlayerListener.STARTED.equals(event)) {
+                changed(SOUND_PLAYING);
+            } else if (PlayerListener.STOPPED.equals(event)
+                    || PlayerListener.STOPPED_AT_TIME.equals(event)) {
+                changed(SOUND_STOPPED);
+            } else if (PlayerListener.END_OF_MEDIA.equals(event)) {
+                if (p.getState() != Player.STARTED) changed(SOUND_STOPPED);
             }
         }
     };
 
-    public Sound(int frequency, long duration) {
-        init(frequency, duration);
+    public Sound(int freq, long duration) {
+        init(freq, duration);
     }
 
     public Sound(byte[] data, int type) {
@@ -52,172 +52,179 @@ public class Sound {
     }
 
     public static int getConcurrentSoundCount(int type) {
-        return 1;
+        return type == FORMAT_WAV ? 8 : 1;
     }
 
     public static int[] getSupportedFormats() {
-        return new int[] { FORMAT_TONE, FORMAT_WAV };
+        return new int[] {FORMAT_TONE, FORMAT_WAV};
     }
 
-    public int getGain() {
-        return gain;
+    public void init(int freq, long duration) {
+        if (duration <= 0 || freq < 0) {
+            throw new IllegalArgumentException("Bad tone " + freq + " Hz, " + duration + " ms");
+        }
+        releasePlayer();
+        try {
+            Player p = Manager.createPlayer(Manager.TONE_DEVICE_LOCATOR);
+            p.realize();
+            ToneControl tc = (ToneControl) p.getControl("ToneControl");
+            tc.setSequence(singleTone(freq == 0 ? ToneControl.SILENCE : freqToNote(freq), duration));
+            attach(p);
+        } catch (IOException e) {
+            throw new IllegalArgumentException(e.toString());
+        } catch (MediaException e) {
+            throw new IllegalArgumentException(e.toString());
+        }
+    }
+
+    public void init(byte[] data, int type) {
+        if (data == null) throw new NullPointerException();
+        if (type != FORMAT_TONE && type != FORMAT_WAV) {
+            throw new IllegalArgumentException("Unsupported format " + type);
+        }
+        releasePlayer();
+        try {
+            attach(Manager.createPlayer(new ByteArrayInputStream(data),
+                    type == FORMAT_TONE ? "audio/x-nokia-ota" : "audio/x-wav"));
+        } catch (IOException e) {
+            throw new IllegalArgumentException(e.toString());
+        } catch (MediaException e) {
+            throw new IllegalArgumentException(e.toString());
+        }
+    }
+
+    private void attach(Player p) throws MediaException {
+        p.addPlayerListener(events);
+        p.prefetch();
+        player = p;
+        applyGain();
+        changed(SOUND_STOPPED);
+    }
+
+    private void releasePlayer() {
+        if (player != null) {
+            Player p = player;
+            player = null;
+            p.close();
+        }
     }
 
     public int getState() {
         return state;
     }
 
-    public void init(int frequency, long duration) {
-        if (duration <= 0) {
-            throw new IllegalArgumentException("duration = " + duration);
-        }
-        if (frequency < 0 || frequency > FREQ_TABLE[FREQ_TABLE.length - 1]) {
-            throw new IllegalArgumentException("frequency = " + frequency);
-        }
-
-        try {
-            if (player != null) {
-                player.close();
-            }
-            player = Manager.createPlayer(Manager.TONE_DEVICE_LOCATOR);
-            toneMode = true;
-            toneNote = convertFreqToNote(frequency);
-            toneDuration = (int)duration;
-            state = SOUND_STOPPED;
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot initialize tone: " + e.toString());
-        } catch (MediaException e) {
-            throw new IllegalStateException("Cannot initialize tone: " + e.toString());
-        }
+    public int getGain() {
+        return gain;
     }
 
-    public void init(byte[] data, int type) {
-        try {
-            String mime;
-            switch (type) {
-                case FORMAT_TONE:
-                    ToneVerifier.fix(data);
-                    mime = "audio/midi";
-                    break;
-                case FORMAT_WAV:
-                    mime = "audio/x-wav";
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unsupported sound type: " + type);
-            }
-            if (player != null) {
-                player.close();
-            }
-            player = Manager.createPlayer(new ByteArrayInputStream(data), mime);
-            player.addPlayerListener(playerListener);
-            toneMode = false;
-            state = SOUND_STOPPED;
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot initialize sound: " + e.toString());
-        } catch (MediaException e) {
-            throw new IllegalStateException("Cannot initialize sound: " + e.toString());
-        }
+    public void setGain(int gain) {
+        if (gain < 0) gain = 0;
+        if (gain > 255) gain = 255;
+        this.gain = gain;
+        applyGain();
     }
 
+    private void applyGain() {
+        if (player == null) return;
+        VolumeControl vc = (VolumeControl) player.getControl("VolumeControl");
+        if (vc != null) vc.setLevel((gain * 100 + 127) / 255);
+    }
+
+    /** loop: 1..255 plays, 0 forever. */
     public void play(int loop) {
-        if (player == null) {
-            return;
-        }
+        if (loop < 0 || loop > 255) throw new IllegalArgumentException("loop = " + loop);
+        if (player == null) throw new IllegalStateException("Sound released");
         try {
-            if (toneMode) {
-                Manager.playTone(toneNote, toneDuration, gain);
-                postEvent(SOUND_PLAYING);
-                return;
-            }
-            if (loop == 0) {
-                loop = -1;
-            }
-            if (player.getState() == Player.STARTED) {
-                player.stop();
-            }
-            player.setLoopCount(loop);
+            if (player.getState() == Player.STARTED) player.stop();
+            player.setMediaTime(0);
+            player.setLoopCount(loop == 0 ? -1 : loop);
             player.start();
-            postEvent(SOUND_PLAYING);
         } catch (MediaException e) {
-            throw new IllegalStateException("Cannot play sound: " + e.toString());
+            /* keep the game running without this sound */
+        }
+    }
+
+    public void resume() {
+        if (player == null) return;
+        try {
+            player.start();
+        } catch (MediaException e) {
+            /* ignore */
+        }
+    }
+
+    public void stop() {
+        if (player == null) return;
+        try {
+            player.stop();
+        } catch (MediaException e) {
+            /* ignore */
         }
     }
 
     public void release() {
-        if (player != null) {
-            player.close();
-            player = null;
-        }
-        postEvent(SOUND_UNINITIALIZED);
+        releasePlayer();
+        changed(SOUND_UNINITIALIZED);
     }
 
-    public void resume() {
-        if (player == null) {
-            return;
-        }
-        try {
-            if (toneMode) {
-                Manager.playTone(toneNote, toneDuration, gain);
-                postEvent(SOUND_PLAYING);
-                return;
-            }
-            player.start();
-            postEvent(SOUND_PLAYING);
-        } catch (MediaException e) {
-            throw new IllegalStateException("Cannot resume sound: " + e.toString());
-        }
+    public void setSoundListener(SoundListener l) {
+        listener = l;
     }
 
-    public void setGain(int newGain) {
-        gain = newGain;
-    }
-
-    public void setSoundListener(SoundListener soundListener) {
-        listener = soundListener;
-    }
-
-    public void stop() {
-        if (player == null) {
-            return;
-        }
-        try {
-            player.stop();
-            postEvent(SOUND_STOPPED);
-        } catch (MediaException e) {
-            throw new IllegalStateException("Cannot stop sound: " + e.toString());
-        }
-    }
-
-    private void postEvent(int newState) {
-        state = newState;
-        if (listener != null) {
-            listener.soundStateChanged(this, state);
-        }
-    }
-
-    private int convertFreqToNote(int freq) {
-        int low = 0;
-        int high = FREQ_TABLE.length - 1;
-        while (low <= high) {
-            int mid = (low + high) >>> 1;
-            int midVal = FREQ_TABLE[mid];
-            if (midVal < freq) {
-                low = mid + 1;
-            } else if (midVal > freq) {
-                high = mid - 1;
-            } else {
-                return mid;
+    private void changed(int s) {
+        if (state == s) return;
+        state = s;
+        SoundListener l = listener;
+        if (l != null) {
+            try {
+                l.soundStateChanged(this, s);
+            } catch (Throwable t) {
+                /* ignore */
             }
         }
-        if (low <= 0) {
-            return 0;
+    }
+
+    /* ---------------------------------------------------------------- */
+
+    static int freqToNote(int hz) {
+        double f = 440.0;
+        int note = 69;
+        while (hz > f * 1.0293 && note < 127) {
+            f *= 1.0594630943592953;
+            note++;
         }
-        if (low >= FREQ_TABLE.length) {
-            return FREQ_TABLE.length - 1;
+        while (hz < f / 1.0293 && note > 0) {
+            f /= 1.0594630943592953;
+            note--;
         }
-        if ((freq - FREQ_TABLE[low - 1]) < (FREQ_TABLE[low] - freq)) {
-            return low - 1;
+        return note;
+    }
+
+    /* One note as a JSR-135 tone sequence: picks tempo and resolution so
+     * that a single duration value (<= 127) is as exact as possible. */
+    static byte[] singleTone(int note, long ms) {
+        long us = ms * 1000L;
+        int bestT = 30, bestRes = 64, bestU = 1;
+        long bestErr = Long.MAX_VALUE;
+        for (int res = 127; res >= 1 && bestErr > us / 200; res--) {
+            for (int t = 127; t >= 5; t--) {
+                long unit = 60000000L / ((long) t * res);
+                long u = (us + unit / 2) / unit;
+                if (u < 1 || u > 127) continue;
+                long err = Math.abs(u * unit - us);
+                if (err < bestErr) {
+                    bestErr = err;
+                    bestT = t;
+                    bestRes = res;
+                    bestU = (int) u;
+                }
+            }
         }
-        return low;
+        return new byte[] {
+            ToneControl.VERSION, 1,
+            ToneControl.TEMPO, (byte) bestT,
+            ToneControl.RESOLUTION, (byte) bestRes,
+            (byte) note, (byte) bestU
+        };
     }
 }

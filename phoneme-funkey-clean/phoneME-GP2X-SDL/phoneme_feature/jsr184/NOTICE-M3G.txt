@@ -1,0 +1,18 @@
+JSR-184 / Mobile 3D Graphics source provenance
+
+The imported M3G Java and native source files retain their original file
+headers. The M3G implementation files identify Nokia Corporation as the
+initial contributor and state that they are made available under the Eclipse
+Public License v1.0.
+
+Sources used while starting this port:
+
+- SymbianSource/oss.FCL.sf.app.JRT, javauis/m3g_qt
+- nikita36078/J2ME-Loader, app/src/main/java/javax/microedition/m3g and
+  app/src/main/cpp/m3g
+- aweigit/freej2me-miyoomini, src/javax/microedition/m3g and cpp/native/m3g,
+  used as a portability reference
+
+FunKey-specific files under src/native/funkey are new porting code for this
+repository.
+
