@@ -35,6 +35,7 @@
 
 #include "SDL.h"
 #include "midp_constants_data.h"
+#include "lfjport_scale.h"
 
 extern int characterColor(SDL_Surface *dst, Sint16 x, Sint16 y, char c,
                           Uint32 color);
@@ -138,6 +139,10 @@ static int       PresentScaleRatio;
 static int       PresentSourceWidth;
 static int       PresentSourceHeight;
 static int       PresentSourceFull;
+static int       PresentFilter = SCALE_FILTER_SHARP;
+static int       PresentPanX, PresentPanY;   /* -1000..1000, 0 = centered */
+static int       PresentSlackX, PresentSlackY; /* last frame: was there anything to pan */
+static Scaler    PresentScaler;
 static int       DisplayDebug;
 static int       RefreshBoundsValid;
 static int       RefreshMinX, RefreshMinY, RefreshMaxX, RefreshMaxY;
@@ -150,7 +155,8 @@ enum {
     PRESENT_SCALE_CENTER,
     PRESENT_SCALE_FIT,
     PRESENT_SCALE_CROP,
-    PRESENT_SCALE_ZOOM
+    PRESENT_SCALE_ZOOM,
+    PRESENT_SCALE_INTEGER
 };
 
 typedef struct {
@@ -162,6 +168,11 @@ typedef struct {
     int dstY;
     int dstW;
     int dstH;
+    /* region the visible part may move within (pan) */
+    int areaX;
+    int areaY;
+    int areaW;
+    int areaH;
     const char *name;
 } PresentLayout;
 
@@ -247,8 +258,19 @@ static const OverlayModePreset OverlayModes[] = {
     { "fill", "Stretch", PRESENT_SCALE_FILL },
     { "crop", "Crop fill", PRESENT_SCALE_CROP },
     { "center", "Center", PRESENT_SCALE_CENTER },
-    { "zoom", "Manual zoom", PRESENT_SCALE_ZOOM }
+    { "zoom", "Manual zoom", PRESENT_SCALE_ZOOM },
+    { "integer", "Integer", PRESENT_SCALE_INTEGER }
 };
+static const struct {
+    const char *id;
+    const char *label;
+    int filter;
+} OverlayFilters[] = {
+    { "sharp", "Sharp", SCALE_FILTER_SHARP },
+    { "smooth", "Smooth", SCALE_FILTER_SMOOTH },
+    { "pixel", "Pixel", SCALE_FILTER_PIXEL }
+};
+#define OVERLAY_FILTER_COUNT ((int) (sizeof(OverlayFilters) / sizeof(OverlayFilters[0])))
 static const OverlayScalePreset OverlayScales[] = {
     { "zoom-075", "75%", 750 },
     { "zoom-100", "100%", 1000 },
@@ -398,7 +420,8 @@ enum {
     OVERLAY_PAGE_MAIN = 0,
     OVERLAY_PAGE_DISPLAY,
     OVERLAY_PAGE_SOUND,
-    OVERLAY_PAGE_CONTROLS
+    OVERLAY_PAGE_CONTROLS,
+    OVERLAY_PAGE_VIEW          /* "Adjust view": move/zoom over the frozen game */
 };
 
 static int parse_screen_size(const char *text, int *width, int *height) {
@@ -492,6 +515,7 @@ static const char *present_scale_mode_name(void) {
     case PRESENT_SCALE_FIT:    return "fit";
     case PRESENT_SCALE_CROP:   return "crop";
     case PRESENT_SCALE_ZOOM:   return "zoom";
+    case PRESENT_SCALE_INTEGER: return "integer";
     default:                   return "auto";
     }
 }
@@ -520,6 +544,26 @@ static void configure_present_scale_mode(void) {
             PresentScaleMode = PRESENT_SCALE_CROP;
         } else if (strcmp(modeText, "zoom") == 0) {
             PresentScaleMode = PRESENT_SCALE_ZOOM;
+        } else if (strcmp(modeText, "integer") == 0) {
+            PresentScaleMode = PRESENT_SCALE_INTEGER;
+        }
+    }
+    {
+        const char *filterText = getenv("PHONEME_SCALE_FILTER");
+        const char *panText = getenv("PHONEME_PAN");
+        int i;
+        PresentFilter = SCALE_FILTER_SHARP;
+        for (i = 0; filterText != NULL && i < OVERLAY_FILTER_COUNT; i++) {
+            if (strcmp(filterText, OverlayFilters[i].id) == 0) PresentFilter = OverlayFilters[i].filter;
+        }
+        PresentPanX = PresentPanY = 0;
+        if (panText != NULL && sscanf(panText, "%d,%d", &PresentPanX, &PresentPanY) == 2) {
+            if (PresentPanX < -1000) PresentPanX = -1000;
+            if (PresentPanX > 1000) PresentPanX = 1000;
+            if (PresentPanY < -1000) PresentPanY = -1000;
+            if (PresentPanY > 1000) PresentPanY = 1000;
+        } else {
+            PresentPanX = PresentPanY = 0;
         }
     }
 
@@ -768,6 +812,14 @@ static void overlay_save_config(void) {
     fprintf(f, "SCALE=%s\n", overlay_current_scale()->id);
     fprintf(f, "VIEW=%s\n", OverlaySources[OverlaySourceSel].id);
     fprintf(f, "DISPLAY_MODE=%s\n", OverlayModes[OverlayModeSel].id);
+    {
+        int i;
+        for (i = 0; i < OVERLAY_FILTER_COUNT; i++) {
+            if (OverlayFilters[i].filter == PresentFilter) fprintf(f, "FILTER=%s\n", OverlayFilters[i].id);
+        }
+    }
+    fprintf(f, "PAN_X=%d\n", PresentPanX);
+    fprintf(f, "PAN_Y=%d\n", PresentPanY);
     fprintf(f, "FPS_LIMIT=%s\n", OverlayFpsLimits[OverlayFpsSel].id);
     fprintf(f, "VOLUME=%d\n", OverlayVolume);
     fprintf(f, "SYNTH=%s\n", OverlaySynths[OverlaySynthSel].id);
@@ -797,9 +849,6 @@ static void overlay_init(void) {
     OverlaySynthSel = overlay_find_synth(getenv("PHONEME_SYNTH"));
 }
 
-static int compute_fit_height_width(int srcWidth, int srcHeight) {
-    return (srcWidth * SDL_FULLHEIGHT + (srcHeight / 2)) / srcHeight;
-}
 
 static void compute_center_layout(PresentLayout *layout) {
     if (layout->srcW > SDL_FULLWIDTH) {
@@ -854,6 +903,11 @@ static void compute_crop_layout(PresentLayout *layout) {
 static void compute_zoom_layout(PresentLayout *layout) {
     int baseSrcX = layout->srcX;
     int baseSrcY = layout->srcY;
+
+    layout->areaX = layout->srcX;
+    layout->areaY = layout->srcY;
+    layout->areaW = layout->srcW;
+    layout->areaH = layout->srcH;
     int scaledWidth = (layout->srcW * PresentScaleRatio + 500) / 1000;
     int scaledHeight = (layout->srcH * PresentScaleRatio + 500) / 1000;
 
@@ -1018,8 +1072,27 @@ static void choose_zoom_source_bounds(SDL_Surface *surface, int visibleWidth,
         return;
     }
 
-    haveActive = detect_active_bounds(surface, visibleWidth, visibleHeight,
-                                      &activeX, &activeY, &activeW, &activeH);
+    /* scanning the whole frame for the content box every refresh was the
+     * most expensive part of presenting: do it twice a second at most */
+    {
+        static int cachedValid = -1, cachedX, cachedY, cachedW, cachedH;
+        static int cachedVisW, cachedVisH;
+        static Uint32 cachedTicks;
+        Uint32 now = SDL_GetTicks();
+        if (cachedValid < 0 || cachedVisW != visibleWidth || cachedVisH != visibleHeight ||
+            now - cachedTicks >= 500) {
+            cachedValid = detect_active_bounds(surface, visibleWidth, visibleHeight,
+                                               &cachedX, &cachedY, &cachedW, &cachedH);
+            cachedVisW = visibleWidth;
+            cachedVisH = visibleHeight;
+            cachedTicks = now;
+        }
+        haveActive = cachedValid;
+        activeX = cachedX;
+        activeY = cachedY;
+        activeW = cachedW;
+        activeH = cachedH;
+    }
     haveRefresh = apply_refresh_bounds(visibleWidth, visibleHeight,
                                        &refreshX, &refreshY, &refreshW, &refreshH);
 
@@ -1043,10 +1116,23 @@ static void choose_zoom_source_bounds(SDL_Surface *surface, int visibleWidth,
     }
 }
 
+static void compute_integer_layout(PresentLayout *layout) {
+    int kx = SDL_FULLWIDTH / layout->srcW, ky = SDL_FULLHEIGHT / layout->srcH;
+    int k = kx < ky ? kx : ky;
+    if (k < 1) {
+        compute_center_layout(layout);
+        layout->name = "integer-1x";
+        return;
+    }
+    layout->dstW = layout->srcW * k;
+    layout->dstH = layout->srcH * k;
+    layout->dstX = (SDL_FULLWIDTH - layout->dstW) / 2;
+    layout->dstY = (SDL_FULLHEIGHT - layout->dstH) / 2;
+    layout->name = "integer";
+}
+
 static void compute_present_layout(int visibleWidth, int visibleHeight,
                                    PresentLayout *layout) {
-    int fitWidth;
-
     layout->srcX = 0;
     layout->srcY = 0;
     layout->srcW = visibleWidth;
@@ -1055,6 +1141,10 @@ static void compute_present_layout(int visibleWidth, int visibleHeight,
     layout->dstY = 0;
     layout->dstW = SDL_FULLWIDTH;
     layout->dstH = SDL_FULLHEIGHT;
+    layout->areaX = 0;
+    layout->areaY = 0;
+    layout->areaW = visibleWidth;
+    layout->areaH = visibleHeight;
     layout->name = "fill";
 
     if (PresentScaleMode == PRESENT_SCALE_FILL) {
@@ -1077,49 +1167,59 @@ static void compute_present_layout(int visibleWidth, int visibleHeight,
         compute_zoom_layout(layout);
         return;
     }
-
-    if (visibleWidth == SDL_FULLWIDTH && visibleHeight == 320) {
-        layout->srcY = (visibleHeight - SDL_FULLHEIGHT) / 2;
-        layout->srcH = SDL_FULLHEIGHT;
-        layout->name = "crop-240x320";
+    if (PresentScaleMode == PRESENT_SCALE_INTEGER) {
+        compute_integer_layout(layout);
         return;
     }
 
-    if (visibleWidth == 176 && visibleHeight == 208) {
-        layout->srcY = (visibleHeight - visibleWidth) / 2;
-        layout->srcH = visibleWidth;
-        layout->name = "crop-176x208";
-        return;
-    }
-
-    if (visibleWidth == 176 && visibleHeight == 220) {
-        fitWidth = compute_fit_height_width(visibleWidth, visibleHeight);
-        layout->dstW = fitWidth;
-        layout->dstX = (SDL_FULLWIDTH - fitWidth) / 2;
-        layout->name = "fit-height-176x220";
-        return;
-    }
-
-    if (visibleWidth == 128 && visibleHeight == 160) {
-        fitWidth = compute_fit_height_width(visibleWidth, visibleHeight);
-        layout->dstW = fitWidth;
-        layout->dstX = (SDL_FULLWIDTH - fitWidth) / 2;
-        layout->name = "fit-height-128x160";
-        return;
-    }
-
-    if (visibleWidth == visibleHeight && visibleWidth <= 208) {
-        layout->dstW = visibleWidth;
-        layout->dstH = visibleHeight;
-        layout->dstX = (SDL_FULLWIDTH - visibleWidth) / 2;
-        layout->dstY = (SDL_FULLHEIGHT - visibleHeight) / 2;
-        layout->name = "center-square";
-        return;
-    }
-
+    /*
+     * Auto, by rule instead of a list of sizes:
+     *  - native size: 1:1
+     *  - a whole multiple filling >= 90% of the screen: integer scale
+     *  - filling the screen loses <= 16% of the long side: crop (pannable)
+     *  - otherwise: fit with bars
+     * e.g. 128x128 crop (=fit), 176x208 crop, 176x220 / 128x160 / 240x320 fit
+     */
     if (visibleWidth == SDL_FULLWIDTH && visibleHeight == SDL_FULLHEIGHT) {
         layout->name = "native";
         return;
+    }
+    {
+        int kx = SDL_FULLWIDTH / visibleWidth, ky = SDL_FULLHEIGHT / visibleHeight;
+        int k = kx < ky ? kx : ky;
+        /* fit and fill factors as 1/1000 */
+        int fitX = SDL_FULLWIDTH * 1000 / visibleWidth, fitY = SDL_FULLHEIGHT * 1000 / visibleHeight;
+        int fit = fitX < fitY ? fitX : fitY, fill = fitX > fitY ? fitX : fitY;
+        if (k >= 2 && (visibleWidth * k * 10 >= SDL_FULLWIDTH * 9 ||
+                       visibleHeight * k * 10 >= SDL_FULLHEIGHT * 9)) {
+            compute_integer_layout(layout);
+            layout->name = "auto-integer";
+        } else if ((fill - fit) * 100 <= fill * 16) {
+            compute_crop_layout(layout);
+            layout->name = "auto-crop";
+        } else {
+            compute_fit_layout(layout);
+            layout->name = "auto-fit";
+        }
+    }
+}
+
+/* moves the visible window inside its area: pan -1000 (left/top) .. 1000 */
+static void apply_pan(PresentLayout *layout) {
+    int slack;
+    slack = layout->areaW - layout->srcW;
+    PresentSlackX = slack > 0;
+    if (slack > 0) {
+        layout->srcX = layout->areaX + slack / 2 + (PresentPanX * slack) / 2000;
+        if (layout->srcX < layout->areaX) layout->srcX = layout->areaX;
+        if (layout->srcX > layout->areaX + slack) layout->srcX = layout->areaX + slack;
+    }
+    slack = layout->areaH - layout->srcH;
+    PresentSlackY = slack > 0;
+    if (slack > 0) {
+        layout->srcY = layout->areaY + slack / 2 + (PresentPanY * slack) / 2000;
+        if (layout->srcY < layout->areaY) layout->srcY = layout->areaY;
+        if (layout->srcY > layout->areaY + slack) layout->srcY = layout->areaY + slack;
     }
 }
 
@@ -1169,15 +1269,52 @@ static void overlay_draw_main(void) {
     }
 }
 
+static const char *overlay_filter_label(void) {
+    int i;
+    for (i = 0; i < OVERLAY_FILTER_COUNT; i++) {
+        if (OverlayFilters[i].filter == PresentFilter) return OverlayFilters[i].label;
+    }
+    return OverlayFilters[0].label;
+}
+
 static void overlay_draw_display(void) {
     overlay_draw_row(54, "Screen", OverlayModes[OverlayModeSel].label, OverlayRow == 0);
     overlay_draw_row(70, "Zoom", overlay_current_scale()->label, OverlayRow == 1);
     overlay_draw_row(86, "Size", OverlaySources[OverlaySourceSel].label, OverlayRow == 2);
-    overlay_draw_row(102, "FPS", OverlayFpsLimits[OverlayFpsSel].label, OverlayRow == 3);
+    overlay_draw_row(102, "Filter", overlay_filter_label(), OverlayRow == 3);
+    overlay_draw_row(118, "FPS", OverlayFpsLimits[OverlayFpsSel].label, OverlayRow == 4);
+    overlay_draw_row(134, "Adjust view", ">", OverlayRow == 5);
     if (OverlayResolutionChanged) {
-        stringColor(Native_SDL_Screen, 18, 126, "Restart game for new", 0xffd060ff);
-        stringColor(Native_SDL_Screen, 18, 138, "resolution to apply", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 158, "Restart game for new", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 170, "resolution to apply", 0xffd060ff);
+    } else if (OverlayRow == 1 && PresentScaleMode != PRESENT_SCALE_ZOOM) {
+        stringColor(Native_SDL_Screen, 18, 158, "Zoom works in", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 170, "Manual zoom mode", 0x9aaab0ff);
+    } else if (OverlayRow == 5) {
+        stringColor(Native_SDL_Screen, 18, 158, "Move the picture when", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 170, "it is cropped (HUD cut)", 0x9aaab0ff);
     }
+}
+
+/* Adjust view: the frozen game full screen, a hint bar, nothing else */
+static void overlay_draw_view(void) {
+    char line[40];
+    /* keep the hint away from the edge being looked at */
+    int y0 = PresentPanY > 0 ? 0 : SDL_FULLHEIGHT - 44;
+    boxColor(Native_SDL_Screen, 0, y0, SDL_FULLWIDTH - 1, SDL_FULLHEIGHT - 1, 0x000000b0);
+    if (PresentSlackX || PresentSlackY) {
+        snprintf(line, sizeof(line), "D-pad: move  X %+d%% Y %+d%%",
+                 PresentPanX / 10, PresentPanY / 10);
+        stringColor(Native_SDL_Screen, 6, y0 + 4, line, 0xffffffff);
+    } else {
+        stringColor(Native_SDL_Screen, 6, y0 + 4, "Whole picture fits:", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 6, y0 + 14, "nothing to move", 0xffd060ff);
+    }
+    if (PresentScaleMode == PRESENT_SCALE_ZOOM) {
+        snprintf(line, sizeof(line), "L1/R1: zoom %s", overlay_current_scale()->label);
+        stringColor(Native_SDL_Screen, 6, y0 + (PresentSlackX || PresentSlackY ? 14 : 24), line, 0x9aaab0ff);
+    }
+    stringColor(Native_SDL_Screen, 6, y0 + 34, "B: center  A: done", 0x7df9ffff);
 }
 
 static void overlay_draw_sound(void) {
@@ -1225,6 +1362,10 @@ static void overlay_draw_controls(void) {
 
 static void overlay_draw(void) {
     if (!OverlayVisible) return;
+    if (OverlayPage == OVERLAY_PAGE_VIEW) {
+        overlay_draw_view();
+        return;
+    }
 
     /* the frozen game stays visible under a dimmed, translucent panel */
     boxColor(Native_SDL_Screen, 0, 0, SDL_FULLWIDTH - 1, SDL_FULLHEIGHT - 1,
@@ -1260,7 +1401,17 @@ static void overlay_adjust_selected(int direction) {
             overlay_set_source_index(OverlaySourceSel + direction);
             OverlayResolutionChanged = 1;
         }
-        else if (OverlayRow == 3) overlay_set_fps_index(OverlayFpsSel + direction);
+        else if (OverlayRow == 3) {
+            int i, cur = 0;
+            for (i = 0; i < OVERLAY_FILTER_COUNT; i++) if (OverlayFilters[i].filter == PresentFilter) cur = i;
+            cur = (cur + direction + OVERLAY_FILTER_COUNT) % OVERLAY_FILTER_COUNT;
+            PresentFilter = OverlayFilters[cur].filter;
+        }
+        else if (OverlayRow == 4) overlay_set_fps_index(OverlayFpsSel + direction);
+        else if (OverlayRow == 5) {
+            OverlayPage = OVERLAY_PAGE_VIEW;
+            return;
+        }
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
         if (OverlayRow == 0) overlay_set_volume(OverlayVolume + direction * 5);
@@ -1276,7 +1427,7 @@ static void overlay_adjust_selected(int direction) {
 
 static int overlay_row_count(void) {
     if (OverlayPage == OVERLAY_PAGE_MAIN) return 5;
-    if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 4;
+    if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 6;
     if (OverlayPage == OVERLAY_PAGE_SOUND) return 2;
     if (OverlayPage == OVERLAY_PAGE_CONTROLS) return OVERLAY_PHONE_COUNT + OVERLAY_CONTROL_ROW_OFFSET;
     return 1;
@@ -1290,6 +1441,12 @@ static void overlay_back(void) {
     if (OverlayPage == OVERLAY_PAGE_MAIN) {
         OverlayVisible = 0;
         overlay_save_config();
+        return;
+    }
+    if (OverlayPage == OVERLAY_PAGE_VIEW) {
+        overlay_save_config();
+        OverlayPage = OVERLAY_PAGE_DISPLAY;
+        OverlayRow = 5;
         return;
     }
     OverlayPage = OVERLAY_PAGE_MAIN;
@@ -1371,6 +1528,24 @@ int PhoneMEOverlayHandleSDLEvent(SDL_Event *event) {
         return 1;
     }
 
+    if (OverlayPage == OVERLAY_PAGE_VIEW) {
+        const int step = 100;   /* 10 presses from the center to an edge */
+        if (key == SDLK_u || key == SDLK_UP) PresentPanY -= step;
+        else if (key == SDLK_d || key == SDLK_DOWN) PresentPanY += step;
+        else if (key == SDLK_l || key == SDLK_LEFT) PresentPanX -= step;
+        else if (key == SDLK_r || key == SDLK_RIGHT) PresentPanX += step;
+        else if (key == SDLK_b) PresentPanX = PresentPanY = 0;
+        else if ((key == SDLK_n || key == SDLK_m) && PresentScaleMode == PRESENT_SCALE_ZOOM)
+            overlay_set_scale_index(OverlayScaleSel + (key == SDLK_m ? 1 : -1));
+        else if (key == SDLK_a || key == SDLK_RETURN || key == SDLK_SPACE ||
+                 key == SDLK_q || key == SDLK_ESCAPE)
+            overlay_back();
+        if (PresentPanX < -1000) PresentPanX = -1000;
+        if (PresentPanX > 1000) PresentPanX = 1000;
+        if (PresentPanY < -1000) PresentPanY = -1000;
+        if (PresentPanY > 1000) PresentPanY = 1000;
+        return 1;
+    }
     if (key == SDLK_q || key == SDLK_ESCAPE) {
         overlay_back();
         return 1;
@@ -1469,8 +1644,6 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
     int srcPitchPixels;
     int dstPitchPixels;
     int visibleWidth, visibleHeight;
-    int dstX, dstY;
-    int srcX, srcY;
     PresentLayout layout;
     static int lastSrcW = -1, lastSrcH = -1;
     static int lastDstX = -1, lastDstY = -1, lastDstW = -1, lastDstH = -1;
@@ -1499,6 +1672,7 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
         choose_zoom_source_bounds(visibleSurface, visibleWidth, visibleHeight,
                                   &layout);
     }
+    apply_pan(&layout);
     if (DisplayDebug &&
         (lastSrcW != layout.srcW || lastSrcH != layout.srcH ||
         lastDstX != layout.dstX || lastDstY != layout.dstY ||
@@ -1517,7 +1691,28 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
         lastDstH = layout.dstH;
         lastName = layout.name;
     }
-    SDL_FillRect(Native_SDL_Screen, NULL, 0);
+    /* clear only the bars around the picture */
+    {
+        SDL_Rect r;
+        if (layout.dstY > 0) {
+            r.x = 0; r.y = 0; r.w = SDL_FULLWIDTH; r.h = (Uint16) layout.dstY;
+            SDL_FillRect(Native_SDL_Screen, &r, 0);
+        }
+        if (layout.dstY + layout.dstH < SDL_FULLHEIGHT) {
+            r.x = 0; r.y = (Sint16) (layout.dstY + layout.dstH);
+            r.w = SDL_FULLWIDTH; r.h = (Uint16) (SDL_FULLHEIGHT - layout.dstY - layout.dstH);
+            SDL_FillRect(Native_SDL_Screen, &r, 0);
+        }
+        if (layout.dstX > 0) {
+            r.x = 0; r.y = (Sint16) layout.dstY; r.w = (Uint16) layout.dstX; r.h = (Uint16) layout.dstH;
+            SDL_FillRect(Native_SDL_Screen, &r, 0);
+        }
+        if (layout.dstX + layout.dstW < SDL_FULLWIDTH) {
+            r.x = (Sint16) (layout.dstX + layout.dstW); r.y = (Sint16) layout.dstY;
+            r.w = (Uint16) (SDL_FULLWIDTH - layout.dstX - layout.dstW); r.h = (Uint16) layout.dstH;
+            SDL_FillRect(Native_SDL_Screen, &r, 0);
+        }
+    }
     SDL_LockSurface(Native_SDL_Screen);
 
     srcPixels = (unsigned short *)visibleSurface->pixels;
@@ -1525,13 +1720,11 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
     srcPitchPixels = visibleSurface->pitch / 2;
     dstPitchPixels = Native_SDL_Screen->pitch / 2;
 
-    for (dstY = 0; dstY < layout.dstH; dstY++) {
-        srcY = layout.srcY + ((dstY * layout.srcH) / layout.dstH);
-        for (dstX = 0; dstX < layout.dstW; dstX++) {
-            srcX = layout.srcX + ((dstX * layout.srcW) / layout.dstW);
-            dstPixels[(layout.dstY + dstY) * dstPitchPixels + (layout.dstX + dstX)] =
-                srcPixels[srcY * srcPitchPixels + srcX];
-        }
+    /* tap tables are rebuilt only when the layout or the filter changes */
+    if (scale_prepare(&PresentScaler, layout.srcX, layout.srcY, layout.srcW, layout.srcH,
+                      layout.dstW, layout.dstH, PresentFilter)) {
+        scale_run(&PresentScaler, srcPixels, srcPitchPixels,
+                  dstPixels + layout.dstY * dstPitchPixels + layout.dstX, dstPitchPixels);
     }
 
     SDL_UnlockSurface(Native_SDL_Screen);
@@ -1550,7 +1743,6 @@ void PhoneMEOverlayRefresh(void) {
     } else {
         present_surface(Native_SDL_HScreen, OriginalOrientation == 1);
     }
-    SDL_UpdateRect(Native_SDL_Screen, 0, 0, 0, 0);
     SDL_Flip(Native_SDL_Screen);
     frame_dump_surface(Native_SDL_Screen);
 }
@@ -1712,7 +1904,8 @@ void lfjport_refresh(int x1, int y1, int x2, int y2)
   } else {
       present_surface(Native_SDL_HScreen, OriginalOrientation == 1);
   }
-  SDL_UpdateRect(Native_SDL_Screen, 0,0,0,0);
+  /* SDL_Flip alone pushes the frame (on a software surface it is the full
+   * update); calling SDL_UpdateRect before it copied every frame twice */
   SDL_Flip(Native_SDL_Screen);
   frame_dump_surface(Native_SDL_Screen);
   SDL_LockSurface(Native_SDL_HScreen);
