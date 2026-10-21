@@ -94,7 +94,6 @@ class Interface {
 	 */
 	private boolean iNativeInitialized = false;
 
-
 	//#ifdef RD_JAVA_OMJ
 	protected void finalize() {
 		doFinalize();
@@ -205,9 +204,6 @@ class Interface {
 		if (obj != null) {
 			boolean match = classMatchesNative(nativeClass, obj);
 			if (!match) {
-				System.out.println("[M3G PEER CACHE MISMATCH] handle=" + handle +
-						" nativeClass=" + nativeClass + " cachedClass=" +
-						obj.getClass().getName());
 				getInstance().liveObjects.remove(new Long(handle));
 				/* The old native slot has already been reused. Prevent its
 				 * eventual finalizer from releasing the new occupant. */
@@ -403,7 +399,6 @@ class Interface {
 			return false;
 		}
 	}
-
 
 	//#ifdef RD_JAVA_OMJ
 	private void doFinalize() {

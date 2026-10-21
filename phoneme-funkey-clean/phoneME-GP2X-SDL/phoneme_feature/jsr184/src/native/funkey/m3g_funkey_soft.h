@@ -20,11 +20,8 @@ typedef struct FunKeyM3GSurface {
     int clip_y;
     int clip_w;
     int clip_h;
-    unsigned int clear_argb;
     unsigned short *pixels;
     int stride;
-    float *depth;
-    int depth_count;
 } FunKeyM3GSurface;
 
 enum {
@@ -89,7 +86,6 @@ int funkey_m3g_node_get_transform_to(long handle, long target, float *matrix);
 void funkey_m3g_node_align(long handle, long reference);
 void funkey_m3g_node_set_alignment(long handle, long z_ref, int z_target,
                                    long y_ref, int y_target);
-void funkey_m3g_node_set_parent(long handle, long parent);
 void funkey_m3g_node_set_scope(long handle, int scope);
 int funkey_m3g_node_get_scope(long handle);
 void funkey_m3g_node_set_alpha(long handle, float alpha);
@@ -198,9 +194,6 @@ int funkey_m3g_index_buffer_init(long handle, const int *indices, int count);
 int funkey_m3g_index_buffer_init_strips(long handle, int first_index,
                                         const int *indices, int index_count,
                                         const int *lengths, int length_count);
-int funkey_m3g_index_buffer_init_implicit(long handle, int first,
-                                          const int *lengths,
-                                          int length_count);
 int funkey_m3g_index_buffer_get_count(long handle);
 void funkey_m3g_index_buffer_get_indices(long handle, int *indices, int count);
 
@@ -325,14 +318,9 @@ float funkey_m3g_light_get_attenuation(long light, int slot);
 void funkey_m3g_surface_init(FunKeyM3GSurface *surface,
                              int width, int height,
                              int clip_x, int clip_y,
-                             int clip_w, int clip_h,
-                             int allocate_depth);
+                             int clip_w, int clip_h);
 void funkey_m3g_surface_bind_pixels(FunKeyM3GSurface *surface,
                                     unsigned short *pixels, int stride);
-void funkey_m3g_surface_clear(FunKeyM3GSurface *surface, unsigned int argb);
-void funkey_m3g_surface_render_mesh(FunKeyM3GSurface *surface, long mesh);
-void funkey_m3g_surface_render_node(FunKeyM3GSurface *surface, long node);
-void funkey_m3g_surface_render_world(FunKeyM3GSurface *surface, long world);
 void funkey_m3g_context_bind_surface(long context, FunKeyM3GSurface *surface);
 void funkey_m3g_context_release_target(long context);
 void funkey_m3g_context_clear(long context, long background);

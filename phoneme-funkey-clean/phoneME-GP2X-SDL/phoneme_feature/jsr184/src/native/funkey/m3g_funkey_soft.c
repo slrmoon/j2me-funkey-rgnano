@@ -156,38 +156,6 @@ typedef struct FunKeyM3GObject {
 
 static FunKeyM3GObject g_objects[FUNKEY_M3G_MAX_OBJECTS];
 static M3GInterface g_core_interface;
-static int g_mesh_trace_count;
-static long g_mesh_trace_world;
-static int g_texture_set_trace_count;
-static int g_image_trace_count;
-static int g_image_set_trace_count;
-static int g_appearance_texture_trace_count;
-static int g_texcoord_trace_count;
-static int g_draw_trace_count;
-static long g_ngl_trace_world;
-static int g_ngl_trace_frame;
-static int g_ngl_trace_immediate;
-static int g_render_node_transform_trace_count;
-#define FUNKEY_IMMEDIATE_TRACE_FRAMES 3
-#define FUNKEY_IMMEDIATE_TRACE_MESHES 8
-static int g_immediate_trace_frame = -1;
-static int g_frame_direct_calls;
-static int g_frame_node_calls;
-static int g_frame_immediate_selected;
-static int g_frame_immediate_skipped;
-static int g_immediate_trace_capture;
-static int g_immediate_trace_candidate = 1;
-static int g_immediate_trace_auto_remaining;
-static int g_immediate_trace_done;
-static int g_frame_matrices_logged;
-static int g_last_camera_valid;
-static float g_last_camera_matrix[16];
-static float g_last_view_matrix[16];
-static int g_bind_trace_count;
-static int g_immediate_trace_mesh_count;
-static int g_rally_core_trace_count;
-static long g_dumped_image_handles[16];
-static int g_dumped_image_count;
 
 static FunKeyM3GObject *funkey_m3g_object(long handle);
 
@@ -242,306 +210,6 @@ funkey_m3g_set_core(FunKeyM3GObject *obj, M3GObject core) {
     bucket = funkey_m3g_core_bucket(core);
     obj->core_hash_next = g_core_hash[bucket];
     g_core_hash[bucket] = handle;
-}
-
-static int
-funkey_m3g_ngl_trace_enabled(void) {
-    static int cached = -1;
-    if (cached < 0) {
-        const char *value = getenv("M3G_TRACE_VERBOSE");
-        cached = value != 0 && value[0] != '\0' && value[0] != '0';
-    }
-    return cached;
-}
-
-static int
-funkey_m3g_rally_trace_enabled(void) {
-    /* Launch-time setting: read the environment once, not per draw. */
-    static int cached = -1;
-    if (cached < 0) {
-        const char *value = getenv("M3G_RALLY_TRACE");
-        cached = (value != 0 && value[0] != '\0' && value[0] != '0') ? 1 : 0;
-    }
-    return cached;
-}
-
-static void
-funkey_m3g_trace_float_matrix(const char *tag, const float *matrix) {
-    fprintf(stderr,
-            "%s %g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g\n",
-            tag,
-            matrix[0], matrix[1], matrix[2], matrix[3],
-            matrix[4], matrix[5], matrix[6], matrix[7],
-            matrix[8], matrix[9], matrix[10], matrix[11],
-            matrix[12], matrix[13], matrix[14], matrix[15]);
-}
-
-static void
-funkey_m3g_trace_immediate_core_matrix(const float *source,
-                                       const M3GMatrix *core,
-                                       long vertices, long indices,
-                                       long appearance) {
-    float core_rows[16];
-    float identity[16];
-    int i;
-    if (!funkey_m3g_rally_trace_enabled() || g_rally_core_trace_count >= 8) {
-        return;
-    }
-    for (i = 0; i < 16; ++i) identity[i] = 0.0f;
-    identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
-    m3gGetMatrixRows(core, core_rows);
-    fprintf(stderr,
-            "[M3G RALLY CORE] stage=core renderImmediate "
-            "sourceLayout=row-major coreLayout=row-major order=M*v "
-            "vb=%ld ib=%ld app=%ld source=",
-            vertices, indices, appearance);
-    for (i = 0; i < 16; ++i) {
-        fprintf(stderr, "%s%g", i == 0 ? "" : ",", source != 0 ?
-                source[i] : identity[i]);
-    }
-    fprintf(stderr, " core=");
-    for (i = 0; i < 16; ++i) {
-        fprintf(stderr, "%s%g", i == 0 ? "" : ",", core_rows[i]);
-    }
-    fprintf(stderr, "\n");
-    ++g_rally_core_trace_count;
-}
-
-static int
-funkey_m3g_dump_image_selected(long image) {
-    const char *value = getenv("M3G_DUMP_IMAGES");
-    char *end;
-    long item;
-    if (value == 0 || value[0] == '\0') {
-        return 0;
-    }
-    if (strcmp(value, "all") == 0) {
-        return 1;
-    }
-    while (*value != '\0') {
-        while (*value == ',' || *value == ' ' || *value == '\t') ++value;
-        item = strtol(value, &end, 10);
-        if (end == value) {
-            while (*value != '\0' && *value != ',') ++value;
-            continue;
-        }
-        if (item == image) return 1;
-        value = end;
-    }
-    return 0;
-}
-
-static int
-funkey_m3g_png_chunk(FILE *file, const char type[4],
-                     const unsigned char *data, size_t size) {
-    unsigned char header[4];
-    unsigned char type_data[4];
-    uLong crc;
-    header[0] = (unsigned char)((size >> 24) & 0xffU);
-    header[1] = (unsigned char)((size >> 16) & 0xffU);
-    header[2] = (unsigned char)((size >> 8) & 0xffU);
-    header[3] = (unsigned char)(size & 0xffU);
-    memcpy(type_data, type, sizeof(type_data));
-    crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, type_data, sizeof(type_data));
-    if (data != 0 && size > 0) crc = crc32(crc, data, (uInt)size);
-    if (fwrite(header, 1, sizeof(header), file) != sizeof(header) ||
-            fwrite(type_data, 1, sizeof(type_data), file) != sizeof(type_data) ||
-            (data != 0 && size > 0 && fwrite(data, 1, size, file) != size)) {
-        return 0;
-    }
-    header[0] = (unsigned char)((crc >> 24) & 0xffU);
-    header[1] = (unsigned char)((crc >> 16) & 0xffU);
-    header[2] = (unsigned char)((crc >> 8) & 0xffU);
-    header[3] = (unsigned char)(crc & 0xffU);
-    return fwrite(header, 1, sizeof(header), file) == sizeof(header);
-}
-
-static void
-funkey_m3g_dump_image_png(long image_handle) {
-    FunKeyM3GObject *obj;
-    M3Guint *argb;
-    unsigned char *raw;
-    unsigned char *compressed;
-    unsigned char ihdr[13];
-    size_t raw_size;
-    uLongf compressed_size;
-    size_t pixels;
-    int width;
-    int height;
-    int x;
-    int y;
-    int i;
-    char path[256];
-    const char *dir;
-    FILE *file;
-    static const unsigned char signature[8] = {
-        137, 80, 78, 71, 13, 10, 26, 10
-    };
-    if (!funkey_m3g_dump_image_selected(image_handle) ||
-            g_dumped_image_count >= 16) return;
-    for (i = 0; i < g_dumped_image_count; ++i) {
-        if (g_dumped_image_handles[i] == image_handle) return;
-    }
-    obj = funkey_m3g_object(image_handle);
-    if (obj == 0 || obj->core == 0 ||
-            obj->class_id != FUNKEY_M3G_CLASS_IMAGE_2D) return;
-    width = m3gGetWidth((M3GImage)obj->core);
-    height = m3gGetHeight((M3GImage)obj->core);
-    if (width <= 0 || height <= 0) return;
-    pixels = (size_t)width * (size_t)height;
-    raw_size = (size_t)height * ((size_t)width * 4U + 1U);
-    argb = (M3Guint *)malloc(pixels * sizeof(*argb));
-    raw = (unsigned char *)malloc(raw_size);
-    compressed = (unsigned char *)malloc(compressBound((uLong)raw_size));
-    if (argb == 0 || raw == 0 || compressed == 0) {
-        free(argb);
-        free(raw);
-        free(compressed);
-        return;
-    }
-    m3gGetImageARGB((M3GImage)obj->core, argb);
-    for (y = 0; y < height; ++y) {
-        size_t row = (size_t)y * ((size_t)width * 4U + 1U);
-        raw[row] = 0;
-        for (x = 0; x < width; ++x) {
-            unsigned int color = argb[y * width + x];
-            raw[row + 1U + (size_t)x * 4U + 0U] = (unsigned char)((color >> 24) & 0xffU);
-            raw[row + 1U + (size_t)x * 4U + 1U] = (unsigned char)((color >> 16) & 0xffU);
-            raw[row + 1U + (size_t)x * 4U + 2U] = (unsigned char)((color >> 8) & 0xffU);
-            raw[row + 1U + (size_t)x * 4U + 3U] = (unsigned char)(color & 0xffU);
-        }
-    }
-    compressed_size = compressBound((uLong)raw_size);
-    if (compress2(compressed, &compressed_size, raw, (uLong)raw_size,
-                  Z_BEST_SPEED) != Z_OK) {
-        free(argb);
-        free(raw);
-        free(compressed);
-        return;
-    }
-    dir = getenv("M3G_DUMP_DIR");
-    if (dir == 0 || dir[0] == '\0') dir = getenv("MIDP_HOME");
-    if (dir == 0 || dir[0] == '\0') dir = "/mnt/FunKey/.pm";
-    snprintf(path, sizeof(path), "%s/m3g-image-%ld.png", dir, image_handle);
-    file = fopen(path, "wb");
-    if (file == 0) {
-        free(argb);
-        free(raw);
-        free(compressed);
-        return;
-    }
-    memset(ihdr, 0, sizeof(ihdr));
-    ihdr[0] = (unsigned char)((width >> 24) & 0xff);
-    ihdr[1] = (unsigned char)((width >> 16) & 0xff);
-    ihdr[2] = (unsigned char)((width >> 8) & 0xff);
-    ihdr[3] = (unsigned char)(width & 0xff);
-    ihdr[4] = (unsigned char)((height >> 24) & 0xff);
-    ihdr[5] = (unsigned char)((height >> 16) & 0xff);
-    ihdr[6] = (unsigned char)((height >> 8) & 0xff);
-    ihdr[7] = (unsigned char)(height & 0xff);
-    ihdr[8] = 8;
-    ihdr[9] = 6;
-    if (fwrite(signature, 1, sizeof(signature), file) != sizeof(signature) ||
-            !funkey_m3g_png_chunk(file, "IHDR", ihdr, sizeof(ihdr)) ||
-            !funkey_m3g_png_chunk(file, "IDAT", compressed, (size_t)compressed_size) ||
-            !funkey_m3g_png_chunk(file, "IEND", 0, 0)) {
-        fclose(file);
-        free(argb);
-        free(raw);
-        free(compressed);
-        return;
-    }
-    fclose(file);
-    g_dumped_image_handles[g_dumped_image_count++] = image_handle;
-    fprintf(stderr, "[M3G IMAGE DUMP] image=%ld size=%dx%d path=%s orientation=source\n",
-            image_handle, width, height, path);
-    free(argb);
-    free(raw);
-    free(compressed);
-}
-
-static void
-funkey_m3g_immediate_trace_frame(void) {
-    const char *start_value = getenv("M3G_IMMEDIATE_TRACE_START_FRAME");
-    int start = start_value != 0 && start_value[0] != '\0' ?
-                atoi(start_value) : 16;
-    if (!funkey_m3g_rally_trace_enabled()) {
-        return;
-    }
-    if (g_immediate_trace_frame >= 0) {
-        fprintf(stderr,
-                "[M3G FRAME] frame=%d directCalls=%d nodeCalls=%d "
-                "capture=%d state=%s selectedImmediate=%d skippedImmediate=%d\n",
-                g_immediate_trace_frame, g_frame_direct_calls,
-                g_frame_node_calls, g_immediate_trace_capture,
-                g_immediate_trace_done ? "DONE" :
-                    (g_immediate_trace_capture ? "CAPTURE" : "IDLE"),
-                g_frame_immediate_selected, g_frame_immediate_skipped);
-    }
-    ++g_immediate_trace_frame;
-    if (g_immediate_trace_auto_remaining > 0) {
-        g_immediate_trace_capture = 1;
-        --g_immediate_trace_auto_remaining;
-    } else {
-        g_immediate_trace_capture = !g_immediate_trace_done &&
-            g_immediate_trace_frame >= start &&
-            g_immediate_trace_frame < start + FUNKEY_IMMEDIATE_TRACE_FRAMES;
-    }
-    g_immediate_trace_mesh_count = 0;
-    g_frame_direct_calls = 0;
-    g_frame_node_calls = 0;
-    g_frame_immediate_selected = 0;
-    g_frame_immediate_skipped = 0;
-    g_frame_matrices_logged = 0;
-    nglTraceImmediateFrameBegin();
-}
-
-static int
-funkey_m3g_immediate_trace_mesh(long vertices, long indices, long appearance) {
-    if (!funkey_m3g_rally_trace_enabled()) {
-        return 0;
-    }
-    if (g_immediate_trace_frame < 0) {
-        g_immediate_trace_frame = 0;
-    }
-    if (!g_immediate_trace_capture && !g_immediate_trace_candidate) {
-        return 0;
-    }
-    if (g_immediate_trace_mesh_count >= FUNKEY_IMMEDIATE_TRACE_MESHES) {
-        ++g_frame_immediate_skipped;
-        return 0;
-    }
-    ++g_immediate_trace_mesh_count;
-    ++g_frame_immediate_selected;
-    return 1;
-}
-
-static void
-funkey_m3g_trace_frame_state(M3GRenderContext ctx) {
-    if (!funkey_m3g_rally_trace_enabled() ||
-            !g_immediate_trace_capture || g_frame_matrices_logged) return;
-    if (ctx != 0) {
-        M3GMatrix camera_matrix;
-        M3GMatrix view_matrix;
-        float rows[16];
-        m3gGetViewTransform(ctx, &camera_matrix);
-        m3gGetMatrixRows(&camera_matrix, rows);
-        funkey_m3g_trace_float_matrix("[M3G FRAME CAMERA]", rows);
-        m3gCopyMatrix(&view_matrix, &camera_matrix);
-        if (m3gInvertMatrix(&view_matrix)) {
-            m3gGetMatrixRows(&view_matrix, rows);
-            funkey_m3g_trace_float_matrix("[M3G FRAME VIEW]", rows);
-        }
-    } else if (g_last_camera_valid) {
-        funkey_m3g_trace_float_matrix("[M3G FRAME CAMERA]", g_last_camera_matrix);
-        funkey_m3g_trace_float_matrix("[M3G FRAME VIEW]", g_last_view_matrix);
-    } else {
-        fprintf(stderr, "[M3G FRAME CAMERA] unavailable frame=%d\n",
-                g_immediate_trace_frame);
-    }
-    nglTraceFrameMatricesRequest(g_immediate_trace_frame);
-    g_frame_matrices_logged = 1;
 }
 
 #ifndef M_PI
@@ -1585,14 +1253,6 @@ funkey_m3g_node_set_alignment(long handle, long z_ref, int z_target,
     }
     obj->z_ref = z_ref;
     obj->y_ref = y_ref;
-}
-
-void
-funkey_m3g_node_set_parent(long handle, long parent) {
-    FunKeyM3GObject *obj = funkey_m3g_object(handle);
-    if (obj != 0) {
-        obj->parent = parent;
-    }
 }
 
 void
@@ -2969,35 +2629,6 @@ funkey_m3g_vertex_buffer_set_array(long buffer, int which, long array,
                                 bias_count);
         }
     }
-    if (funkey_m3g_ngl_trace_enabled() && which >= 3 &&
-            which < 3 + FUNKEY_M3G_NUM_TEXTURE_UNITS &&
-            g_texcoord_trace_count < 96) {
-        FunKeyM3GObject *array_obj = funkey_m3g_object(array);
-        int comps = array_obj != 0 ? funkey_m3g_vertex_array_get_component_count(array) : 0;
-        int type = array_obj != 0 ? funkey_m3g_vertex_array_get_component_type(array) : 0;
-        int count = array_obj != 0 ? funkey_m3g_vertex_array_get_vertex_count(array) : 0;
-        fprintf(stderr,
-                "[M3G TexCoords] vertexBuffer=%ld unit=%d vertexArray=%ld vertexCount=%d componentCount=%d componentType=%d scale=%g bias={%g,%g,%g}",
-                buffer, which - 3, array, count, comps, type, scale,
-                scale_bias != 0 ? scale_bias[1] : 0.0f,
-                scale_bias != 0 ? scale_bias[2] : 0.0f,
-                scale_bias != 0 ? scale_bias[3] : 0.0f);
-        if (array_obj != 0 && array_obj->components != 0 && comps >= 2 && count > 0) {
-            int samples = count < 3 ? count : 3;
-            int s;
-            fprintf(stderr, " uv=");
-            for (s = 0; s < samples; ++s) {
-                int base = s * comps;
-                float u = (float) array_obj->components[base] * scale +
-                          (scale_bias != 0 ? scale_bias[1] : 0.0f);
-                float v = (float) array_obj->components[base + 1] * scale +
-                          (scale_bias != 0 ? scale_bias[2] : 0.0f);
-                fprintf(stderr, "%s{%g,%g}", s == 0 ? "" : ",", u, v);
-            }
-        }
-        fprintf(stderr, "\n");
-        ++g_texcoord_trace_count;
-    }
 }
 
 long
@@ -3193,34 +2824,6 @@ funkey_m3g_index_buffer_init_strips(long handle, int first_index,
         obj->core_interface = m3g;
     }
     return 1;
-}
-
-int
-funkey_m3g_index_buffer_init_implicit(long handle, int first,
-                                      const int *lengths, int length_count) {
-    int total = 0;
-    int i;
-    int *indices;
-    if (length_count < 0) {
-        return 0;
-    }
-    for (i = 0; i < length_count; ++i) {
-        if (lengths[i] > 0) {
-            total += lengths[i];
-        }
-    }
-    indices = total > 0 ? (int *) malloc((size_t) total * sizeof(int)) : 0;
-    if (total > 0 && indices == 0) {
-        return 0;
-    }
-    for (i = 0; i < total; ++i) {
-        indices[i] = first + i;
-    }
-    i = funkey_m3g_index_buffer_init(handle, indices, total);
-    if (indices != 0) {
-        free(indices);
-    }
-    return i;
 }
 
 int
@@ -3743,13 +3346,6 @@ funkey_m3g_image_init(long image, int format, int width, int height,
     if (obj->image_palette == 0) {
         funkey_m3g_sync_core_image(obj);
     }
-    if (funkey_m3g_ngl_trace_enabled() && g_image_trace_count < 96) {
-        fprintf(stderr,
-                "[M3G Image2D] object=%ld core=%p format=%d width=%d height=%d mutable=%d data_size=%d palette_size=%d\n",
-                image, (void *) obj->core, format, width, height,
-                mutable_image != 0, pixel_count, obj->image_palette_count);
-        ++g_image_trace_count;
-    }
     return 1;
 }
 
@@ -3775,13 +3371,6 @@ funkey_m3g_image_init_palette(long image, int format, int width, int height,
         obj->image_palette_count = palette_count;
     }
     funkey_m3g_sync_core_image(obj);
-    if (funkey_m3g_ngl_trace_enabled() && g_image_trace_count < 96) {
-        fprintf(stderr,
-                "[M3G Image2D] object=%ld core=%p format=%d width=%d height=%d mutable=0 data_size=%d palette_size=%d\n",
-                image, (void *) obj->core, format, width, height,
-                pixel_count, palette_count);
-        ++g_image_trace_count;
-    }
     return 1;
 }
 
@@ -3794,14 +3383,6 @@ funkey_m3g_image_set(long image, int x, int y, int width, int height,
     int yy;
     if (obj == 0 || pixels == 0 || x < 0 || y < 0 || width < 0 || height < 0) {
         return;
-    }
-    if (funkey_m3g_ngl_trace_enabled() && g_image_set_trace_count < 32) {
-        fprintf(stderr,
-                "[M3G Image2D.set] object=%ld core=%p x=%d y=%d width=%d height=%d image_size=%dx%d format=%d data_size=%d\n",
-                image, (void *) obj->core, x, y, width, height,
-                obj->image_width, obj->image_height, obj->image_format,
-                pixel_count);
-        ++g_image_set_trace_count;
     }
     if (width == 0 || height == 0) {
         return;
@@ -3928,25 +3509,8 @@ funkey_m3g_texture_set_image(long texture, long image) {
         if (obj->core != 0) {
             m3gSetTextureImage((M3GTexture) obj->core,
                                (M3GImage) image_core);
-            if (funkey_m3g_ngl_trace_enabled() &&
-                    g_texture_set_trace_count < 96 && image_core != 0) {
-                FunKeyM3GObject *img = funkey_m3g_object(image);
-                fprintf(stderr,
-                        "[M3G Texture2D] object=%ld core=%p uid=%d image=%ld image_core=%p image_size=%dx%d format=%d data_size=%d blending=%d wrapS=%d wrapT=%d levelFilter=%d imageFilter=%d\n",
-                        texture, (void *) obj->core, m3gGetUserID(obj->core),
-                        image, (void *) image_core,
-                        m3gGetWidth((M3GImage) image_core),
-                        m3gGetHeight((M3GImage) image_core),
-                        (int)m3gGetFormat((M3GImage) image_core),
-                        img != 0 ? img->image_pixel_count : 0,
-                        obj->texture_blending, obj->texture_wrap_s,
-                        obj->texture_wrap_t, obj->texture_level_filter,
-                        obj->texture_image_filter);
-                ++g_texture_set_trace_count;
-            }
         }
         obj->texture_image = image;
-        funkey_m3g_dump_image_png(image);
     }
 }
 
@@ -4147,16 +3711,6 @@ funkey_m3g_appearance_set_texture(long appearance, int unit, long texture) {
     if (obj != 0 && obj->core != 0) {
         m3gSetTexture((M3GAppearance) obj->core, unit,
                       (M3GTexture) funkey_m3g_core_object(texture));
-    }
-    if (obj != 0 && funkey_m3g_ngl_trace_enabled() &&
-            g_appearance_texture_trace_count < 96) {
-        FunKeyM3GObject *tex = funkey_m3g_object(texture);
-        fprintf(stderr,
-                "[M3G Appearance] appearance=%ld core=%p unit=%d texture=%ld texture_core=%p image=%ld\n",
-                appearance, (void *) obj->core, unit, texture,
-                tex != 0 ? (void *) tex->core : 0,
-                tex != 0 ? tex->texture_image : 0);
-        ++g_appearance_texture_trace_count;
     }
 }
 
@@ -4736,35 +4290,9 @@ void
 funkey_m3g_surface_init(FunKeyM3GSurface *surface,
                         int width, int height,
                         int clip_x, int clip_y,
-                        int clip_w, int clip_h,
-                        int allocate_depth) {
-    unsigned short *pixels;
-    int stride;
-    float *depth;
-    int depth_count;
-    int requested_depth;
+                        int clip_w, int clip_h) {
     if (surface == 0) {
         return;
-    }
-
-    pixels = surface->pixels;
-    stride = surface->stride;
-    depth = surface->depth;
-    depth_count = surface->depth_count;
-    requested_depth = allocate_depth && width > 0 && height > 0 ?
-                      width * height : 0;
-    if (requested_depth != depth_count) {
-        if (depth != 0) {
-            free(depth);
-            depth = 0;
-        }
-        depth_count = 0;
-        if (requested_depth > 0) {
-            depth = (float *) malloc((size_t) requested_depth * sizeof(float));
-            if (depth != 0) {
-                depth_count = requested_depth;
-            }
-        }
     }
     surface->width = width;
     surface->height = height;
@@ -4772,11 +4300,6 @@ funkey_m3g_surface_init(FunKeyM3GSurface *surface,
     surface->clip_y = clip_y;
     surface->clip_w = clip_w;
     surface->clip_h = clip_h;
-    surface->clear_argb = 0xff000000U;
-    surface->pixels = pixels;
-    surface->stride = stride;
-    surface->depth = depth;
-    surface->depth_count = depth_count;
 }
 
 void
@@ -4787,16 +4310,6 @@ funkey_m3g_surface_bind_pixels(FunKeyM3GSurface *surface,
     }
     surface->pixels = pixels;
     surface->stride = stride;
-}
-
-static unsigned short
-funkey_m3g_argb_to_rgb565(unsigned int argb) {
-    unsigned int r = (argb >> 16) & 0xffU;
-    unsigned int g = (argb >> 8) & 0xffU;
-    unsigned int b = argb & 0xffU;
-    return (unsigned short) (((r & 0xf8U) << 8) |
-                             ((g & 0xfcU) << 3) |
-                             (b >> 3));
 }
 
 static int
@@ -4868,189 +4381,9 @@ funkey_m3g_image_argb(FunKeyM3GObject *image, int x, int y) {
     return (a << 24) | (r << 16) | (g << 8) | b;
 }
 
-static int
-funkey_m3g_wrap_texel(int coord, int extent, int wrap) {
-    if (extent <= 0) {
-        return 0;
-    }
-    if (wrap == 241) {
-        coord %= extent;
-        if (coord < 0) {
-            coord += extent;
-        }
-        return coord;
-    }
-    if (coord < 0) {
-        return 0;
-    }
-    return coord >= extent ? extent - 1 : coord;
-}
-
 static void funkey_m3g_transform_point(const float *m, float x, float y,
                                        float z, float *out);
 static void funkey_m3g_local_matrix(FunKeyM3GObject *obj, float *out);
-
-static unsigned int
-funkey_m3g_sample_texture(FunKeyM3GObject *texture, float u, float v) {
-    FunKeyM3GObject *image;
-    float texture_matrix[16];
-    float transformed[3];
-    int x;
-    int y;
-    if (texture == 0 || texture->texture_image == 0) {
-        return 0xffffffffU;
-    }
-    image = funkey_m3g_object(texture->texture_image);
-    if (image == 0 || image->image_width <= 0 || image->image_height <= 0) {
-        return 0xffffffffU;
-    }
-    /*
-     * Texture2D is Transformable: authored scenes use this transform to
-     * select atlas areas and orient textured road and vehicle geometry.
-     */
-    funkey_m3g_local_matrix(texture, texture_matrix);
-    funkey_m3g_transform_point(texture_matrix, u, v, 0.0f, transformed);
-    u = transformed[0];
-    v = transformed[1];
-    x = (int) floorf(u * (float) image->image_width);
-    y = (int) floorf((1.0f - v) * (float) image->image_height);
-    x = funkey_m3g_wrap_texel(x, image->image_width, texture->texture_wrap_s);
-    y = funkey_m3g_wrap_texel(y, image->image_height, texture->texture_wrap_t);
-    return funkey_m3g_image_argb(image, x, y);
-}
-
-static void
-funkey_m3g_put_pixel(FunKeyM3GSurface *surface, int x, int y,
-                     unsigned short color) {
-    if (surface == 0 || surface->pixels == 0 || surface->stride <= 0) {
-        return;
-    }
-    if (x < surface->clip_x || y < surface->clip_y ||
-            x >= surface->clip_x + surface->clip_w ||
-            y >= surface->clip_y + surface->clip_h ||
-            x < 0 || y < 0 || x >= surface->width || y >= surface->height) {
-        return;
-    }
-    surface->pixels[y * surface->stride + x] = color;
-}
-
-static void
-funkey_m3g_put_argb(FunKeyM3GSurface *surface, int x, int y,
-                    unsigned int argb) {
-    unsigned int alpha;
-    unsigned short dst;
-    unsigned int sr;
-    unsigned int sg;
-    unsigned int sb;
-    unsigned int dr;
-    unsigned int dg;
-    unsigned int db;
-    unsigned int out;
-    if (surface == 0 || surface->pixels == 0 || surface->stride <= 0 ||
-            x < surface->clip_x || y < surface->clip_y ||
-            x >= surface->clip_x + surface->clip_w ||
-            y >= surface->clip_y + surface->clip_h ||
-            x < 0 || y < 0 || x >= surface->width || y >= surface->height) {
-        return;
-    }
-    alpha = (argb >> 24) & 0xffU;
-    if (alpha == 0) {
-        return;
-    }
-    if (alpha == 0xffU) {
-        surface->pixels[y * surface->stride + x] =
-            funkey_m3g_argb_to_rgb565(argb);
-        return;
-    }
-    dst = surface->pixels[y * surface->stride + x];
-    sr = (argb >> 16) & 0xffU;
-    sg = (argb >> 8) & 0xffU;
-    sb = argb & 0xffU;
-    dr = ((dst >> 11) & 0x1fU) * 255U / 31U;
-    dg = ((dst >> 5) & 0x3fU) * 255U / 63U;
-    db = (dst & 0x1fU) * 255U / 31U;
-    out = 0xff000000U |
-          (((sr * alpha + dr * (255U - alpha)) / 255U) << 16) |
-          (((sg * alpha + dg * (255U - alpha)) / 255U) << 8) |
-          ((sb * alpha + db * (255U - alpha)) / 255U);
-    surface->pixels[y * surface->stride + x] =
-        funkey_m3g_argb_to_rgb565(out);
-}
-
-void
-funkey_m3g_surface_clear(FunKeyM3GSurface *surface, unsigned int argb) {
-    int x;
-    int y;
-    int i;
-    int x0;
-    int y0;
-    int x1;
-    int y1;
-    unsigned short color;
-    if (surface == 0) {
-        return;
-    }
-
-    surface->clear_argb = argb;
-    if (surface->pixels == 0 || surface->stride <= 0) {
-        return;
-    }
-    color = funkey_m3g_argb_to_rgb565(argb);
-    for (i = 0; i < surface->depth_count; ++i) {
-        surface->depth[i] = 1.0e30f;
-    }
-    x0 = surface->clip_x < 0 ? 0 : surface->clip_x;
-    y0 = surface->clip_y < 0 ? 0 : surface->clip_y;
-    x1 = surface->clip_x + surface->clip_w;
-    y1 = surface->clip_y + surface->clip_h;
-    if (x1 > surface->width) {
-        x1 = surface->width;
-    }
-    if (y1 > surface->height) {
-        y1 = surface->height;
-    }
-    for (y = y0; y < y1; ++y) {
-        for (x = x0; x < x1; ++x) {
-            surface->pixels[y * surface->stride + x] = color;
-        }
-    }
-}
-
-static void
-funkey_m3g_draw_line(FunKeyM3GSurface *surface, int x0, int y0,
-                     int x1, int y1, unsigned short color) {
-    int dx = x1 > x0 ? x1 - x0 : x0 - x1;
-    int sx = x0 < x1 ? 1 : -1;
-    int dy = y1 > y0 ? y0 - y1 : y1 - y0;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    for (;;) {
-        int e2;
-        funkey_m3g_put_pixel(surface, x0, y0, color);
-        if (x0 == x1 && y0 == y1) {
-            break;
-        }
-        e2 = 2 * err;
-        if (e2 >= dy) {
-            err += dy;
-            x0 += sx;
-        }
-        if (e2 <= dx) {
-            err += dx;
-            y0 += sy;
-        }
-    }
-}
-
-static int
-funkey_m3g_project_coord(FunKeyM3GSurface *surface, float v, int axis) {
-    float half = axis == 0 ? (float) surface->width * 0.5f
-                           : (float) surface->height * 0.5f;
-    if (v >= -1.5f && v <= 1.5f) {
-        return (int) (half + v * half);
-    }
-    return (int) (half + v);
-}
 
 typedef struct FunKeyM3GProjectedVertex {
     int x;
@@ -5062,13 +4395,6 @@ typedef struct FunKeyM3GProjectedVertex {
     int visible;
 } FunKeyM3GProjectedVertex;
 
-typedef struct FunKeyM3GCoreTexture {
-    unsigned int *argb;
-    int width;
-    int height;
-    int wrap_s;
-    int wrap_t;
-} FunKeyM3GCoreTexture;
 
 typedef struct FunKeyM3GRenderState {
     float view[16];
@@ -5103,70 +4429,6 @@ funkey_m3g_matrix_mul(float *dst, const float *a, const float *b) {
         }
     }
     memcpy(dst, out, sizeof(out));
-}
-
-static int
-funkey_m3g_matrix_invert(float *dst, const float *m) {
-    float inv[16];
-    float det;
-    int i;
-    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] -
-             m[9] * m[6] * m[15] + m[9] * m[7] * m[14] +
-             m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
-    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] +
-             m[8] * m[6] * m[15] - m[8] * m[7] * m[14] -
-             m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
-    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] -
-             m[8] * m[5] * m[15] + m[8] * m[7] * m[13] +
-             m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
-    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] +
-              m[8] * m[5] * m[14] - m[8] * m[6] * m[13] -
-              m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
-    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] +
-             m[9] * m[2] * m[15] - m[9] * m[3] * m[14] -
-             m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
-    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] -
-             m[8] * m[2] * m[15] + m[8] * m[3] * m[14] +
-             m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
-    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] +
-             m[8] * m[1] * m[15] - m[8] * m[3] * m[13] -
-             m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
-    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] -
-              m[8] * m[1] * m[14] + m[8] * m[2] * m[13] +
-              m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
-    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] -
-             m[5] * m[2] * m[15] + m[5] * m[3] * m[14] +
-             m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
-    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] +
-             m[4] * m[2] * m[15] - m[4] * m[3] * m[14] -
-             m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
-    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] -
-              m[4] * m[1] * m[15] + m[4] * m[3] * m[13] +
-              m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
-    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] +
-              m[4] * m[1] * m[14] - m[4] * m[2] * m[13] -
-              m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
-    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] +
-             m[5] * m[2] * m[11] - m[5] * m[3] * m[10] -
-             m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
-    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] -
-             m[4] * m[2] * m[11] + m[4] * m[3] * m[10] +
-             m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
-    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] +
-              m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -
-              m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
-    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] -
-              m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +
-              m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
-    det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
-    if (det > -0.000001f && det < 0.000001f) {
-        return 0;
-    }
-    det = 1.0f / det;
-    for (i = 0; i < 16; ++i) {
-        dst[i] = inv[i] * det;
-    }
-    return 1;
 }
 
 static void
@@ -5248,724 +4510,6 @@ funkey_m3g_world_matrix(long handle, float *out) {
     }
 }
 
-static void
-funkey_m3g_get_projected_vertex(FunKeyM3GSurface *surface,
-                                FunKeyM3GObject *array,
-                                int index, float scale, const float *bias,
-                                const float *model_view,
-                                const FunKeyM3GRenderState *state,
-                                FunKeyM3GProjectedVertex *out) {
-    int offset;
-    float vx = 0.0f;
-    float vy = 0.0f;
-    float vz = 0.0f;
-    float view[3];
-    float zc;
-    float fovy;
-    float aspect;
-    float ndc_x;
-    float ndc_y;
-    if (array == 0 || array->components == 0 ||
-            index < 0 || index >= array->vertex_count) {
-        out->x = surface->width / 2;
-        out->y = surface->height / 2;
-        out->z = 0.0f;
-        out->u = 0.0f;
-        out->v = 0.0f;
-        out->inv_z = 1.0f;
-        out->visible = 0;
-        return;
-    }
-    offset = index * array->component_count;
-    if (array->component_count > 0) {
-        vx = (float) array->components[offset] * scale + bias[0];
-    }
-    if (array->component_count > 1) {
-        vy = (float) array->components[offset + 1] * scale + bias[1];
-    }
-    if (array->component_count > 2) {
-        vz = (float) array->components[offset + 2] * scale + bias[2];
-    }
-    funkey_m3g_transform_point(model_view, vx, vy, vz, view);
-    zc = -view[2];
-    if (!state->has_camera) {
-        out->x = funkey_m3g_project_coord(surface, view[0], 0);
-        out->y = funkey_m3g_project_coord(surface, -view[1], 1);
-        out->z = view[2];
-        out->inv_z = 1.0f;
-        out->visible = 1;
-        return;
-    }
-    if (zc <= state->near_plane) {
-        out->visible = 0;
-        return;
-    }
-    fovy = state->fovy > 1.0f ? state->fovy : 45.0f;
-    aspect = state->aspect > 0.001f ? state->aspect :
-             surface->height != 0 ? (float) surface->width / (float) surface->height : 1.0f;
-    ndc_y = view[1] / (zc * tanf(fovy * (float) M_PI / 360.0f));
-    ndc_x = view[0] / (zc * tanf(fovy * (float) M_PI / 360.0f) * aspect);
-    out->x = (int) ((float) surface->clip_x +
-                    ((ndc_x + 1.0f) * 0.5f) * (float) surface->clip_w);
-    out->y = (int) ((float) surface->clip_y +
-                    ((1.0f - ndc_y) * 0.5f) * (float) surface->clip_h);
-    out->z = zc;
-    out->inv_z = 1.0f / zc;
-    out->visible = 1;
-}
-
-static void
-funkey_m3g_get_texcoord(FunKeyM3GObject *array, int index,
-                        const float *scale_bias,
-                        FunKeyM3GProjectedVertex *out) {
-    int offset;
-    if (array == 0 || array->components == 0 ||
-            index < 0 || index >= array->vertex_count) {
-        out->u = 0.0f;
-        out->v = 0.0f;
-        return;
-    }
-    offset = index * array->component_count;
-    out->u = (float) array->components[offset] * scale_bias[0] +
-             scale_bias[1];
-    out->v = array->component_count > 1 ?
-             (float) array->components[offset + 1] * scale_bias[0] +
-             scale_bias[2] : 0.0f;
-}
-
-static int
-funkey_m3g_min3(int a, int b, int c) {
-    int m = a < b ? a : b;
-    return m < c ? m : c;
-}
-
-static int
-funkey_m3g_max3(int a, int b, int c) {
-    int m = a > b ? a : b;
-    return m > c ? m : c;
-}
-
-static unsigned short
-funkey_m3g_mesh_color(FunKeyM3GObject *mesh, FunKeyM3GObject *vb, int submesh) {
-    unsigned int argb = vb != 0 ? vb->default_color : 0xffffffffU;
-    FunKeyM3GObject *appearance = 0;
-    FunKeyM3GObject *material = 0;
-    if (mesh != 0 && submesh >= 0 && submesh < mesh->mesh_submesh_count) {
-        appearance = funkey_m3g_object(mesh->mesh_appearances[submesh]);
-    }
-    if (appearance != 0) {
-        material = funkey_m3g_object(appearance->appearance_material);
-    }
-    if (material != 0) {
-        argb = material->material_diffuse;
-    }
-    return funkey_m3g_argb_to_rgb565(argb);
-}
-
-static void
-funkey_m3g_fill_triangle(FunKeyM3GSurface *surface,
-                         const FunKeyM3GProjectedVertex *a,
-                         const FunKeyM3GProjectedVertex *b,
-                         const FunKeyM3GProjectedVertex *c,
-                         unsigned short color,
-                         FunKeyM3GObject *texture) {
-    int x;
-    int y;
-    int min_x;
-    int min_y;
-    int max_x;
-    int max_y;
-    float area;
-    if (surface == 0 || surface->pixels == 0 || surface->stride <= 0) {
-        return;
-    }
-    area = (float) ((b->x - a->x) * (c->y - a->y) -
-                    (b->y - a->y) * (c->x - a->x));
-    if (area == 0.0f) {
-        return;
-    }
-    min_x = funkey_m3g_min3(a->x, b->x, c->x);
-    min_y = funkey_m3g_min3(a->y, b->y, c->y);
-    max_x = funkey_m3g_max3(a->x, b->x, c->x);
-    max_y = funkey_m3g_max3(a->y, b->y, c->y);
-    if (min_x < surface->clip_x) min_x = surface->clip_x;
-    if (min_y < surface->clip_y) min_y = surface->clip_y;
-    if (max_x >= surface->clip_x + surface->clip_w) {
-        max_x = surface->clip_x + surface->clip_w - 1;
-    }
-    if (max_y >= surface->clip_y + surface->clip_h) {
-        max_y = surface->clip_y + surface->clip_h - 1;
-    }
-    if (min_x < 0) min_x = 0;
-    if (min_y < 0) min_y = 0;
-    if (max_x >= surface->width) max_x = surface->width - 1;
-    if (max_y >= surface->height) max_y = surface->height - 1;
-
-    for (y = min_y; y <= max_y; ++y) {
-        for (x = min_x; x <= max_x; ++x) {
-            float px = (float) x + 0.5f;
-            float py = (float) y + 0.5f;
-            float w0 = ((b->x - px) * (c->y - py) -
-                        (b->y - py) * (c->x - px)) / area;
-            float w1 = ((c->x - px) * (a->y - py) -
-                        (c->y - py) * (a->x - px)) / area;
-            float w2 = 1.0f - w0 - w1;
-            if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
-                int offset = y * surface->stride + x;
-                int depth_offset = y * surface->width + x;
-                float z = w0 * a->z + w1 * b->z + w2 * c->z;
-                if (surface->depth == 0 ||
-                        depth_offset >= surface->depth_count ||
-                        z <= surface->depth[depth_offset]) {
-                    if (texture != 0) {
-                        float recip = w0 * a->inv_z + w1 * b->inv_z +
-                                      w2 * c->inv_z;
-                        float u;
-                        float v;
-                        if (recip != 0.0f) {
-                            u = (w0 * a->u * a->inv_z +
-                                 w1 * b->u * b->inv_z +
-                                 w2 * c->u * c->inv_z) / recip;
-                            v = (w0 * a->v * a->inv_z +
-                                 w1 * b->v * b->inv_z +
-                                 w2 * c->v * c->inv_z) / recip;
-                            funkey_m3g_put_argb(surface, x, y,
-                                               funkey_m3g_sample_texture(texture,
-                                                                         u, v));
-                        }
-                    } else {
-                        surface->pixels[offset] = color;
-                    }
-                    if (surface->depth != 0 &&
-                            depth_offset < surface->depth_count) {
-                        surface->depth[depth_offset] = z;
-                    }
-                }
-            }
-        }
-    }
-}
-
-static void
-funkey_m3g_surface_render_mesh_state(FunKeyM3GSurface *surface, long mesh,
-                                     const float *world,
-                                     const FunKeyM3GRenderState *state) {
-    FunKeyM3GObject *m = funkey_m3g_object(mesh);
-    FunKeyM3GObject *vb;
-    FunKeyM3GObject *positions;
-    float model_view[16];
-    int sub;
-    if (surface == 0 || m == 0 || m->class_id != FUNKEY_M3G_CLASS_MESH) {
-        return;
-    }
-    vb = funkey_m3g_object(m->mesh_vertices);
-    if (vb == 0) {
-        return;
-    }
-    positions = funkey_m3g_object(vb->vb_positions);
-    if (positions == 0) {
-        return;
-    }
-    funkey_m3g_matrix_mul(model_view, state->view, world);
-    if (g_mesh_trace_count < 48) {
-        int textured = 0;
-        for (sub = 0; sub < m->mesh_submesh_count; ++sub) {
-            FunKeyM3GObject *app = funkey_m3g_object(m->mesh_appearances[sub]);
-            if (app != 0 && app->appearance_textures[0] != 0 &&
-                    vb->vb_texcoords[0] != 0) {
-                ++textured;
-            }
-        }
-        fprintf(stderr, "[M3G raster] mesh=%ld sub=%d textured=%d vertices=%d\n",
-                mesh, m->mesh_submesh_count, textured,
-                positions->vertex_count);
-        ++g_mesh_trace_count;
-    }
-    for (sub = 0; sub < m->mesh_submesh_count; ++sub) {
-        FunKeyM3GObject *idx = funkey_m3g_object(m->mesh_indices[sub]);
-        FunKeyM3GObject *appearance = funkey_m3g_object(m->mesh_appearances[sub]);
-        FunKeyM3GObject *texture = appearance != 0 ?
-            funkey_m3g_object(appearance->appearance_textures[0]) : 0;
-        FunKeyM3GObject *texcoords = vb->vb_texcoords[0] != 0 ?
-            funkey_m3g_object(vb->vb_texcoords[0]) : 0;
-        unsigned short color = funkey_m3g_mesh_color(m, vb, sub);
-        int i;
-        if (texture == 0 || texture->texture_image == 0 || texcoords == 0) {
-            texture = 0;
-        }
-        if (idx == 0 || idx->indices == 0) {
-            continue;
-        }
-        for (i = 0; i + 2 < idx->index_count; i += 3) {
-            FunKeyM3GProjectedVertex a, b, c;
-            funkey_m3g_get_projected_vertex(surface, positions,
-                                            idx->indices[i],
-                                            vb->vb_position_scale_bias[0],
-                                            &vb->vb_position_scale_bias[1],
-                                            model_view, state,
-                                            &a);
-            funkey_m3g_get_projected_vertex(surface, positions,
-                                            idx->indices[i + 1],
-                                            vb->vb_position_scale_bias[0],
-                                            &vb->vb_position_scale_bias[1],
-                                            model_view, state,
-                                            &b);
-            funkey_m3g_get_projected_vertex(surface, positions,
-                                            idx->indices[i + 2],
-                                            vb->vb_position_scale_bias[0],
-                                            &vb->vb_position_scale_bias[1],
-                                            model_view, state,
-                                            &c);
-            if (texture != 0) {
-                funkey_m3g_get_texcoord(texcoords, idx->indices[i],
-                                        vb->vb_texcoord_scale_bias[0], &a);
-                funkey_m3g_get_texcoord(texcoords, idx->indices[i + 1],
-                                        vb->vb_texcoord_scale_bias[0], &b);
-                funkey_m3g_get_texcoord(texcoords, idx->indices[i + 2],
-                                        vb->vb_texcoord_scale_bias[0], &c);
-            }
-            if (!a.visible || !b.visible || !c.visible) {
-                continue;
-            }
-            funkey_m3g_fill_triangle(surface, &a, &b, &c, color, texture);
-            if (texture == 0) {
-                funkey_m3g_draw_line(surface, a.x, a.y, b.x, b.y, color);
-                funkey_m3g_draw_line(surface, b.x, b.y, c.x, c.y, color);
-                funkey_m3g_draw_line(surface, c.x, c.y, a.x, a.y, color);
-            }
-        }
-    }
-}
-
-static void
-funkey_m3g_core_matrix_rows(M3GMatrix *matrix, float *out) {
-    m3gGetMatrixRows(matrix, out);
-}
-
-static void
-funkey_m3g_core_project(FunKeyM3GSurface *surface, const float *model_view,
-                        const FunKeyM3GRenderState *state,
-                        float x, float y, float z,
-                        FunKeyM3GProjectedVertex *out) {
-    float view[3];
-    float zc;
-    float fovy;
-    float aspect;
-    float ndc_x;
-    float ndc_y;
-    out->u = 0.0f;
-    out->v = 0.0f;
-    funkey_m3g_transform_point(model_view, x, y, z, view);
-    zc = -view[2];
-    if (!state->has_camera) {
-        out->x = funkey_m3g_project_coord(surface, view[0], 0);
-        out->y = funkey_m3g_project_coord(surface, -view[1], 1);
-        out->z = view[2];
-        out->inv_z = 1.0f;
-        out->visible = 1;
-        return;
-    }
-    if (zc <= state->near_plane) {
-        out->visible = 0;
-        return;
-    }
-    fovy = state->fovy > 1.0f ? state->fovy : 45.0f;
-    aspect = state->aspect > 0.001f ? state->aspect :
-             surface->height != 0 ? (float) surface->width / (float) surface->height : 1.0f;
-    ndc_y = view[1] / (zc * tanf(fovy * (float) M_PI / 360.0f));
-    ndc_x = view[0] / (zc * tanf(fovy * (float) M_PI / 360.0f) * aspect);
-    out->x = (int) ((float) surface->clip_x +
-                    ((ndc_x + 1.0f) * 0.5f) * (float) surface->clip_w);
-    out->y = (int) ((float) surface->clip_y +
-                    ((1.0f - ndc_y) * 0.5f) * (float) surface->clip_h);
-    out->z = zc;
-    out->inv_z = 1.0f / zc;
-    out->visible = 1;
-}
-
-static void
-funkey_m3g_core_free_texture(FunKeyM3GCoreTexture *texture) {
-    if (texture != 0 && texture->argb != 0) {
-        free(texture->argb);
-        texture->argb = 0;
-    }
-}
-
-static int
-funkey_m3g_core_load_texture(M3GAppearance app, FunKeyM3GCoreTexture *out) {
-    M3GTexture texture;
-    M3GImage image;
-    size_t pixels;
-    if (out == 0) {
-        return 0;
-    }
-    memset(out, 0, sizeof(*out));
-    if (app == 0) {
-        return 0;
-    }
-    texture = m3gGetTexture(app, 0);
-    if (texture == 0) {
-        return 0;
-    }
-    image = m3gGetTextureImage(texture);
-    if (image == 0) {
-        return 0;
-    }
-    out->width = m3gGetWidth(image);
-    out->height = m3gGetHeight(image);
-    out->wrap_s = m3gGetWrappingS(texture);
-    out->wrap_t = m3gGetWrappingT(texture);
-    if (out->width <= 0 || out->height <= 0) {
-        return 0;
-    }
-    pixels = (size_t) out->width * (size_t) out->height;
-    out->argb = (unsigned int *) malloc(pixels * sizeof(unsigned int));
-    if (out->argb == 0) {
-        return 0;
-    }
-    m3gGetImageARGB(image, (M3Guint *) out->argb);
-    return 1;
-}
-
-static unsigned int
-funkey_m3g_core_sample_texture(const FunKeyM3GCoreTexture *texture,
-                               float u, float v) {
-    int x;
-    int y;
-    if (texture == 0 || texture->argb == 0 ||
-            texture->width <= 0 || texture->height <= 0) {
-        return 0xffffffffU;
-    }
-    x = (int) floorf(u * (float) texture->width);
-    y = (int) floorf((1.0f - v) * (float) texture->height);
-    x = funkey_m3g_wrap_texel(x, texture->width, texture->wrap_s);
-    y = funkey_m3g_wrap_texel(y, texture->height, texture->wrap_t);
-    return texture->argb[y * texture->width + x];
-}
-
-static void
-funkey_m3g_core_fill_triangle(FunKeyM3GSurface *surface,
-                              const FunKeyM3GProjectedVertex *a,
-                              const FunKeyM3GProjectedVertex *b,
-                              const FunKeyM3GProjectedVertex *c,
-                              unsigned short color,
-                              const FunKeyM3GCoreTexture *texture) {
-    int x;
-    int y;
-    int min_x;
-    int min_y;
-    int max_x;
-    int max_y;
-    float area;
-    if (surface == 0 || surface->pixels == 0 || surface->stride <= 0 ||
-            !a->visible || !b->visible || !c->visible) {
-        return;
-    }
-    area = (float) ((b->x - a->x) * (c->y - a->y) -
-                    (b->y - a->y) * (c->x - a->x));
-    if (area == 0.0f) {
-        return;
-    }
-    min_x = funkey_m3g_min3(a->x, b->x, c->x);
-    min_y = funkey_m3g_min3(a->y, b->y, c->y);
-    max_x = funkey_m3g_max3(a->x, b->x, c->x);
-    max_y = funkey_m3g_max3(a->y, b->y, c->y);
-    if (min_x < surface->clip_x) min_x = surface->clip_x;
-    if (min_y < surface->clip_y) min_y = surface->clip_y;
-    if (max_x >= surface->clip_x + surface->clip_w) {
-        max_x = surface->clip_x + surface->clip_w - 1;
-    }
-    if (max_y >= surface->clip_y + surface->clip_h) {
-        max_y = surface->clip_y + surface->clip_h - 1;
-    }
-    if (min_x < 0) min_x = 0;
-    if (min_y < 0) min_y = 0;
-    if (max_x >= surface->width) max_x = surface->width - 1;
-    if (max_y >= surface->height) max_y = surface->height - 1;
-
-    for (y = min_y; y <= max_y; ++y) {
-        for (x = min_x; x <= max_x; ++x) {
-            float px = (float) x + 0.5f;
-            float py = (float) y + 0.5f;
-            float w0 = ((b->x - px) * (c->y - py) -
-                        (b->y - py) * (c->x - px)) / area;
-            float w1 = ((c->x - px) * (a->y - py) -
-                        (c->y - py) * (a->x - px)) / area;
-            float w2 = 1.0f - w0 - w1;
-            if (w0 >= 0.0f && w1 >= 0.0f && w2 >= 0.0f) {
-                int depth_offset = y * surface->width + x;
-                float z = w0 * a->z + w1 * b->z + w2 * c->z;
-                if (surface->depth == 0 ||
-                        depth_offset >= surface->depth_count ||
-                        z <= surface->depth[depth_offset]) {
-                    if (texture != 0 && texture->argb != 0) {
-                        float recip = w0 * a->inv_z + w1 * b->inv_z +
-                                      w2 * c->inv_z;
-                        if (recip != 0.0f) {
-                            float u = (w0 * a->u * a->inv_z +
-                                       w1 * b->u * b->inv_z +
-                                       w2 * c->u * c->inv_z) / recip;
-                            float v = (w0 * a->v * a->inv_z +
-                                       w1 * b->v * b->inv_z +
-                                       w2 * c->v * c->inv_z) / recip;
-                            funkey_m3g_put_argb(surface, x, y,
-                                funkey_m3g_core_sample_texture(texture, u, v));
-                        }
-                    } else {
-                        surface->pixels[y * surface->stride + x] = color;
-                    }
-                    if (surface->depth != 0 &&
-                            depth_offset < surface->depth_count) {
-                        surface->depth[depth_offset] = z;
-                    }
-                }
-            }
-        }
-    }
-}
-
-static void
-funkey_m3g_core_draw_triangle(FunKeyM3GSurface *surface,
-                              const FunKeyM3GProjectedVertex *a,
-                              const FunKeyM3GProjectedVertex *b,
-                              const FunKeyM3GProjectedVertex *c,
-                              unsigned short color,
-                              const FunKeyM3GCoreTexture *texture) {
-    if (!a->visible || !b->visible || !c->visible) {
-        return;
-    }
-    funkey_m3g_core_fill_triangle(surface, a, b, c, color, texture);
-    if (texture == 0 || texture->argb == 0) {
-        funkey_m3g_draw_line(surface, a->x, a->y, b->x, b->y, color);
-        funkey_m3g_draw_line(surface, b->x, b->y, c->x, c->y, color);
-        funkey_m3g_draw_line(surface, c->x, c->y, a->x, a->y, color);
-    }
-}
-
-static void
-funkey_m3g_core_render_mesh(FunKeyM3GSurface *surface, M3GMesh mesh,
-                            const FunKeyM3GRenderState *state) {
-    M3GVertexBuffer vb;
-    M3GVertexArray pos;
-    M3GMatrix composite;
-    float world[16];
-    float model_view[16];
-    float scale_bias[4] = {1.0f, 0.0f, 0.0f, 0.0f};
-    M3Gsizei count = 0;
-    M3Gsizei stride = 0;
-    M3Gint size = 0;
-    M3Gdatatype type = M3G_FLOAT;
-    float *xyz;
-    M3GVertexArray texcoord;
-    float tex_scale_bias[4] = {1.0f, 0.0f, 0.0f, 0.0f};
-    float *uv = 0;
-    M3Gsizei tex_count = 0;
-    M3Gint tex_size = 0;
-    M3Gsizei tex_stride = 0;
-    M3Gdatatype tex_type = M3G_FLOAT;
-    int sub_count;
-    int sub;
-    if (surface == 0 || mesh == 0) {
-        return;
-    }
-    vb = m3gGetVertexBuffer(mesh);
-    if (vb == 0) {
-        return;
-    }
-    pos = m3gGetVertexArray(vb, M3G_GET_POSITIONS, scale_bias, 4);
-    if (pos == 0) {
-        return;
-    }
-    m3gGetVertexArrayParams(pos, &count, &size, &type, &stride);
-    if (count <= 0 || size < 2) {
-        return;
-    }
-    xyz = (float *) malloc((size_t) count * 3U * sizeof(float));
-    if (xyz == 0) {
-        return;
-    }
-    memset(xyz, 0, (size_t) count * 3U * sizeof(float));
-    m3gGetVertexArrayElements(pos, 0, count,
-                              (M3Gsizei) ((size_t) count * (size_t) size * sizeof(float)),
-                              M3G_FLOAT, xyz);
-    {
-        int i;
-        for (i = 0; i < count; ++i) {
-            xyz[i * 3 + 0] = xyz[i * 3 + 0] * scale_bias[0] + scale_bias[1];
-            xyz[i * 3 + 1] = xyz[i * 3 + 1] * scale_bias[0] + scale_bias[2];
-            xyz[i * 3 + 2] = (size > 2 ? xyz[i * 3 + 2] : 0.0f) * scale_bias[0] + scale_bias[3];
-        }
-    }
-    texcoord = m3gGetVertexArray(vb, M3G_GET_TEXCOORDS0, tex_scale_bias, 4);
-    if (texcoord != 0) {
-        m3gGetVertexArrayParams(texcoord, &tex_count, &tex_size, &tex_type,
-                                &tex_stride);
-        if (tex_count > 0 && tex_size >= 2) {
-            uv = (float *) malloc((size_t) tex_count * 2U * sizeof(float));
-            if (uv != 0) {
-                int i;
-                memset(uv, 0, (size_t) tex_count * 2U * sizeof(float));
-                m3gGetVertexArrayElements(texcoord, 0, tex_count,
-                    (M3Gsizei) ((size_t) tex_count * (size_t) tex_size *
-                                sizeof(float)),
-                    M3G_FLOAT, uv);
-                for (i = 0; i < tex_count; ++i) {
-                    uv[i * 2 + 0] = uv[i * 2 + 0] * tex_scale_bias[0] +
-                                    tex_scale_bias[1];
-                    uv[i * 2 + 1] = uv[i * 2 + 1] * tex_scale_bias[0] +
-                                    tex_scale_bias[2];
-                }
-            }
-        }
-    }
-    m3gGetCompositeTransform((M3GTransformable) mesh, &composite);
-    funkey_m3g_core_matrix_rows(&composite, world);
-    funkey_m3g_matrix_mul(model_view, state->view, world);
-    sub_count = m3gGetSubmeshCount(mesh);
-    for (sub = 0; sub < sub_count; ++sub) {
-        M3GAppearance app = m3gGetAppearance(mesh, sub);
-        M3GIndexBuffer ib = m3gGetIndexBuffer(mesh, sub);
-        M3GMaterial mat = app != 0 ? m3gGetMaterial(app) : 0;
-        FunKeyM3GCoreTexture texture;
-        int has_texture;
-        unsigned int argb = m3gGetVertexDefaultColor(vb);
-        unsigned short color;
-        int batches;
-        int batch;
-        memset(&texture, 0, sizeof(texture));
-        if (ib == 0) {
-            continue;
-        }
-        if (mat != 0) {
-            argb = m3gGetColor(mat, M3G_DIFFUSE_BIT);
-        }
-        color = funkey_m3g_argb_to_rgb565(argb | 0xff000000U);
-        has_texture = uv != 0 && funkey_m3g_core_load_texture(app, &texture);
-        batches = m3gGetBatchCount(ib);
-        for (batch = 0; batch < batches; ++batch) {
-            int batch_size = m3gGetBatchSize(ib, batch);
-            int *indices;
-            int i;
-            if (batch_size < 3) {
-                continue;
-            }
-            indices = (int *) malloc((size_t) batch_size * sizeof(int));
-            if (indices == 0) {
-                continue;
-            }
-            if (!m3gGetBatchIndices(ib, batch, indices)) {
-                free(indices);
-                continue;
-            }
-            for (i = 0; i + 2 < batch_size; ++i) {
-                int ia = indices[i];
-                int ibb = indices[i + 1 + (i & 1)];
-                int ic = indices[i + 2 - (i & 1)];
-                FunKeyM3GProjectedVertex a, b, c;
-                if (ia < 0 || ibb < 0 || ic < 0 ||
-                        ia >= count || ibb >= count || ic >= count) {
-                    continue;
-                }
-                funkey_m3g_core_project(surface, model_view, state,
-                                        xyz[ia * 3], xyz[ia * 3 + 1],
-                                        xyz[ia * 3 + 2], &a);
-                funkey_m3g_core_project(surface, model_view, state,
-                                        xyz[ibb * 3], xyz[ibb * 3 + 1],
-                                        xyz[ibb * 3 + 2], &b);
-                funkey_m3g_core_project(surface, model_view, state,
-                                        xyz[ic * 3], xyz[ic * 3 + 1],
-                                        xyz[ic * 3 + 2], &c);
-                if (has_texture && ia < tex_count && ibb < tex_count &&
-                        ic < tex_count) {
-                    a.u = uv[ia * 2 + 0];
-                    a.v = uv[ia * 2 + 1];
-                    b.u = uv[ibb * 2 + 0];
-                    b.v = uv[ibb * 2 + 1];
-                    c.u = uv[ic * 2 + 0];
-                    c.v = uv[ic * 2 + 1];
-                } else {
-                    a.u = b.u = c.u = 0.0f;
-                    a.v = b.v = c.v = 0.0f;
-                }
-                funkey_m3g_core_draw_triangle(surface, &a, &b, &c, color,
-                                              has_texture ? &texture : 0);
-            }
-            free(indices);
-        }
-        funkey_m3g_core_free_texture(&texture);
-    }
-    if (uv != 0) {
-        free(uv);
-    }
-    free(xyz);
-}
-
-static void
-funkey_m3g_core_render_node(FunKeyM3GSurface *surface, M3GNode node,
-                            const FunKeyM3GRenderState *state) {
-    M3GClass cls;
-    int i;
-    int count;
-    if (node == 0) {
-        return;
-    }
-    cls = m3gGetClass((M3GObject) node);
-    if (cls == M3G_CLASS_MESH || cls == M3G_CLASS_MORPHING_MESH ||
-            cls == M3G_CLASS_SKINNED_MESH) {
-        funkey_m3g_core_render_mesh(surface, (M3GMesh) node, state);
-    }
-    if (cls != M3G_CLASS_GROUP && cls != M3G_CLASS_WORLD) {
-        return;
-    }
-    count = m3gGetChildCount((M3GGroup) node);
-    for (i = 0; i < count; ++i) {
-        funkey_m3g_core_render_node(surface, m3gGetChild((M3GGroup) node, i),
-                                    state);
-    }
-}
-
-static int
-funkey_m3g_surface_render_core_world(FunKeyM3GSurface *surface, long world) {
-    FunKeyM3GObject *w = funkey_m3g_object(world);
-    M3GInterface m3g;
-    M3GRenderContext ctx;
-    if (surface == 0 || surface->pixels == 0 ||
-            surface->width <= 0 || surface->height <= 0 ||
-            w == 0 || w->core == 0) {
-        return 0;
-    }
-    m3g = w->core_interface != 0 ? w->core_interface :
-          funkey_m3g_ensure_core_interface();
-    if (m3g == 0) {
-        return 0;
-    }
-    ctx = m3gCreateContext(m3g);
-    if (ctx == 0) {
-        return 0;
-    }
-    m3gBindMemoryTarget(ctx, surface->pixels,
-                        (M3Guint) surface->width,
-                        (M3Guint) surface->height,
-                        M3G_RGB565,
-                        (M3Guint) surface->stride,
-                        0);
-    m3gSetViewport(ctx, 0, 0, surface->width, surface->height);
-    if (surface->clip_w > 0 && surface->clip_h > 0) {
-        m3gSetClipRect(ctx, surface->clip_x, surface->clip_y,
-                       surface->clip_w, surface->clip_h);
-    }
-    if (funkey_m3g_rally_trace_enabled() && g_bind_trace_count < 2) {
-        fprintf(stderr,
-                "[M3G FRAME EVENT] bindTarget context=%ld size=%dx%d stride=%d\n",
-                (long) ctx, surface->width, surface->height, surface->stride);
-        ++g_bind_trace_count;
-    }
-    m3gRenderWorld(ctx, (M3GWorld) w->core);
-    m3gReleaseTarget(ctx);
-    m3gDeleteRef((M3GObject) ctx);
-    return 1;
-}
-
 static M3GRenderContext
 funkey_m3g_context_core(long context) {
     FunKeyM3GObject *ctx = funkey_m3g_object(context);
@@ -6008,12 +4552,6 @@ funkey_m3g_context_bind_surface(long context, FunKeyM3GSurface *surface) {
         m3gSetClipRect(ctx, surface->clip_x, surface->clip_y,
                        surface->clip_w, surface->clip_h);
     }
-    if (funkey_m3g_rally_trace_enabled() && g_bind_trace_count < 2) {
-        fprintf(stderr,
-                "[M3G FRAME EVENT] bindTarget context=%ld size=%dx%d stride=%d\n",
-                context, surface->width, surface->height, surface->stride);
-        ++g_bind_trace_count;
-    }
 }
 
 /* bindTarget's depth flag and hints: without this the depth test stayed on
@@ -6050,7 +4588,6 @@ funkey_m3g_context_release_target(long context) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     if (ctx != 0) {
         m3gReleaseTarget(ctx);
-        nglDiagFinish();
     }
 }
 
@@ -6059,12 +4596,6 @@ funkey_m3g_context_clear(long context, long background) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     M3GObject bg = funkey_m3g_core_object(background);
     if (ctx != 0) {
-        funkey_m3g_immediate_trace_frame();
-        nglDiagFrameBegin(g_immediate_trace_frame, 0);
-        if (g_immediate_trace_capture) {
-            fprintf(stderr, "[M3G FRAME EVENT] clear frame=%d background=%ld\n",
-                    g_immediate_trace_frame, background);
-        }
         m3gClear(ctx, (M3GBackground) bg);
     }
 }
@@ -6079,148 +4610,31 @@ funkey_m3g_context_render(long context, long vertices, long indices,
     M3GObject vb = funkey_m3g_core_object(vertices);
     M3GObject ib = funkey_m3g_core_object(indices);
     M3GObject app = funkey_m3g_core_object(appearance);
-    ++g_frame_direct_calls;
     if (ctx == 0 || vb == 0 || ib == 0 || app == 0) {
-        if (funkey_m3g_ngl_trace_enabled()) {
-            fprintf(stderr, "[M3G NGL] render immediate skipped ctx=%ld vb=%ld ib=%ld app=%ld\n",
-                    context, vertices, indices, appearance);
-        }
         return;
     }
-    funkey_m3g_matrix_from_float(&matrix, transform);
-    if (transform != 0) matrix_ptr = &matrix;
-    funkey_m3g_trace_immediate_core_matrix(transform, &matrix,
-                                           vertices, indices, appearance);
-    if (funkey_m3g_rally_trace_enabled()) {
-        nglTraceImmediateTransform(transform);
-    }
-    if (g_immediate_trace_capture) {
-        nglDiagForceCapture();
-    }
-    if (funkey_m3g_immediate_trace_mesh(vertices, indices, appearance)) {
-        FunKeyM3GObject *vb_obj = funkey_m3g_object(vertices);
-        FunKeyM3GObject *ib_obj = funkey_m3g_object(indices);
-        FunKeyM3GObject *app_obj = funkey_m3g_object(appearance);
-        long texture0 = app_obj != 0 ? app_obj->appearance_textures[0] : 0;
-        FunKeyM3GObject *tex_obj = funkey_m3g_object(texture0);
-        nglTraceImmediateMesh((unsigned long) vertices,
-                              (unsigned long) indices,
-                              (unsigned long) appearance,
-                              (unsigned long) texture0,
-                              (unsigned long) (tex_obj != 0 ? tex_obj->texture_image : 0),
-                              vb_obj != 0 ? funkey_m3g_vertex_buffer_get_vertex_count(vertices) : 0,
-                              ib_obj != 0 ? ib_obj->index_count : 0,
-                              g_immediate_trace_frame,
-                              g_frame_direct_calls,
-                              !g_immediate_trace_capture);
-    }
-    nglDiagSetSource(1);
-    funkey_m3g_trace_frame_state(ctx);
-    if (funkey_m3g_ngl_trace_enabled() && !g_ngl_trace_immediate) {
-        fprintf(stderr, "[M3G NGL] trace first immediate frame\n");
-        nglTraceFrame(64, 64);
-        g_ngl_trace_immediate = 1;
-    }
-    if (funkey_m3g_ngl_trace_enabled() && g_draw_trace_count < 64) {
-        FunKeyM3GObject *vb_obj = funkey_m3g_object(vertices);
-        FunKeyM3GObject *ib_obj = funkey_m3g_object(indices);
-        FunKeyM3GObject *app_obj = funkey_m3g_object(appearance);
-        long texture0 = app_obj != 0 ? app_obj->appearance_textures[0] : 0;
-        FunKeyM3GObject *tex_obj = funkey_m3g_object(texture0);
-        long texcoords0 = vb_obj != 0 ? vb_obj->vb_texcoords[0] : 0;
-        fprintf(stderr,
-                "[M3G DRAW] mesh=direct vertices=%ld vertexCount=%d indices=%ld indexCount=%d appearance=%ld texture0=%ld image=%ld texcoords0=%ld material=%ld compositing=%ld polygonMode=%ld fog=%ld\n",
-                vertices,
-                vb_obj != 0 ? funkey_m3g_vertex_buffer_get_vertex_count(vertices) : 0,
-                indices, ib_obj != 0 ? ib_obj->index_count : 0,
-                appearance, texture0,
-                tex_obj != 0 ? tex_obj->texture_image : 0,
-                texcoords0,
-                app_obj != 0 ? app_obj->appearance_material : 0,
-                app_obj != 0 ? app_obj->appearance_compositing : 0,
-                app_obj != 0 ? app_obj->appearance_polygon : 0,
-                app_obj != 0 ? app_obj->appearance_fog : 0);
-        ++g_draw_trace_count;
+    if (transform != 0) {
+        funkey_m3g_matrix_from_float(&matrix, transform);
+        matrix_ptr = &matrix;
     }
     m3gRender(ctx, (M3GVertexBuffer) vb, (M3GIndexBuffer) ib,
               (M3GAppearance) app, matrix_ptr, 1.0f, scope);
-    nglDiagSetSource(0);
 }
 
 void
 funkey_m3g_context_render_node(long context, long node, const float *transform) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
-    M3GInterface iface;
     M3GMatrix matrix;
-    float converted[16];
     M3GMatrix *matrix_ptr = 0;
-    int trace_transform = funkey_m3g_ngl_trace_enabled() &&
-                          g_render_node_transform_trace_count == 0;
     M3GObject n = funkey_m3g_core_object(node);
-    ++g_frame_node_calls;
-    if (funkey_m3g_rally_trace_enabled() &&
-            !g_immediate_trace_done && !g_immediate_trace_capture &&
-            g_frame_direct_calls > 0 &&
-            g_frame_node_calls == 1) {
-        nglTraceImmediateFrameFlush();
-        nglDiagForceCapture();
-        g_immediate_trace_capture = 1;
-        g_immediate_trace_candidate = 0;
-        g_immediate_trace_done = 1;
-        g_immediate_trace_auto_remaining = 2;
-        g_immediate_trace_mesh_count = 0;
-        fprintf(stderr,
-                "[M3G FRAME AUTO] arm after nodeCalls>0 frame=%d directCalls=%d\n",
-                g_immediate_trace_frame, g_frame_direct_calls);
-    }
     if (ctx == 0 || n == 0) {
-        if (funkey_m3g_ngl_trace_enabled()) {
-            fprintf(stderr, "[M3G NGL] render node skipped ctx=%ld node=%ld\n",
-                    context, node);
-        }
         return;
     }
-    funkey_m3g_trace_frame_state(ctx);
     if (transform != 0) {
-        if (trace_transform) {
-            funkey_m3g_trace_float_matrix("[M3G RENDERNODE RAW TRANSFORM]",
-                                          transform);
-        }
         funkey_m3g_matrix_from_float(&matrix, transform);
-        if (trace_transform) {
-            m3gGetMatrixColumns(&matrix, converted);
-            funkey_m3g_trace_float_matrix(
-                "[M3G RENDERNODE CONVERTED TRANSFORM]", converted);
-        }
         matrix_ptr = &matrix;
-        if (trace_transform) {
-            ++g_render_node_transform_trace_count;
-        }
     }
-    if (funkey_m3g_ngl_trace_enabled()) {
-        fprintf(stderr, "[M3G NGL] render node=%ld\n", node);
-    }
-    iface = funkey_m3g_ensure_core_interface();
-    {
-        M3Gint before_nodes = iface != 0 ? m3gGetStatistic(iface, M3G_STAT_RENDER_NODES) : 0;
-        M3Gint before_culled = iface != 0 ? m3gGetStatistic(iface, M3G_STAT_RENDER_NODES_CULLED) : 0;
-        M3Gint before_drawn = iface != 0 ? m3gGetStatistic(iface, M3G_STAT_RENDER_NODES_DRAWN) : 0;
-        M3GClass cls = m3gGetClass(n);
-        M3Gint subtree = (cls == M3G_CLASS_GROUP || cls == M3G_CLASS_WORLD) ?
-                         m3gGetSubtreeSize((M3GNode) n) : 1;
-        nglDiagSetSource(2);
-        m3gRenderNode(ctx, (M3GNode) n, matrix_ptr);
-        nglDiagSetSource(0);
-        if (funkey_m3g_ngl_trace_enabled()) {
-            fprintf(stderr,
-                    "[M3G NODE RESULT] node=%ld class=%d subtree=%d nodes=%d culled=%d drawn=%d error=%d\n",
-                    node, (int) cls, (int) subtree,
-                    iface != 0 ? m3gGetStatistic(iface, M3G_STAT_RENDER_NODES) - before_nodes : 0,
-                    iface != 0 ? m3gGetStatistic(iface, M3G_STAT_RENDER_NODES_CULLED) - before_culled : 0,
-                    iface != 0 ? m3gGetStatistic(iface, M3G_STAT_RENDER_NODES_DRAWN) - before_drawn : 0,
-                    iface != 0 ? (int) m3gGetError(iface) : -1);
-        }
-    }
+    m3gRenderNode(ctx, (M3GNode) n, matrix_ptr);
 }
 
 void
@@ -6228,28 +4642,9 @@ funkey_m3g_context_render_world(long context, long world) {
     M3GRenderContext ctx = funkey_m3g_context_core(context);
     M3GObject w = funkey_m3g_core_object(world);
     if (ctx == 0 || w == 0) {
-        if (funkey_m3g_ngl_trace_enabled()) {
-            fprintf(stderr, "[M3G NGL] render world skipped ctx=%ld world=%ld\n",
-                    context, world);
-        }
         return;
     }
-    if (funkey_m3g_ngl_trace_enabled() && world != g_ngl_trace_world) {
-        g_ngl_trace_world = world;
-        g_ngl_trace_frame = 0;
-    }
-    if (funkey_m3g_ngl_trace_enabled() && g_ngl_trace_frame == 0) {
-        fprintf(stderr, "[M3G NGL] render new world=%ld trace first frame\n",
-                world);
-        nglTraceFrame(64, 64);
-    } else if (funkey_m3g_ngl_trace_enabled() && g_ngl_trace_frame < 3) {
-        fprintf(stderr, "[M3G NGL] render world=%ld frame=%d\n",
-                world, g_ngl_trace_frame + 1);
-    }
-    ++g_ngl_trace_frame;
-    nglDiagSetSource(3);
     m3gRenderWorld(ctx, (M3GWorld) w);
-    nglDiagSetSource(0);
 }
 
 void
@@ -6290,11 +4685,6 @@ funkey_m3g_context_set_camera(long context, long camera, const float *transform)
         matrix_ptr = &matrix;
     }
     m3gSetCamera(ctx, (M3GCamera) c, matrix_ptr);
-    g_last_camera_valid = 0;
-    if (g_immediate_trace_capture) {
-        fprintf(stderr, "[M3G FRAME EVENT] setCamera frame=%d camera=%ld hasTransform=%d\n",
-                g_immediate_trace_frame, camera, transform != 0);
-    }
 }
 
 void
@@ -6414,140 +4804,3 @@ funkey_m3g_context_get_viewport(long context, int *x, int *y,
     if (height != 0) *height = vh;
 }
 
-static void
-funkey_m3g_surface_render_background(FunKeyM3GSurface *surface,
-                                     FunKeyM3GObject *background) {
-    FunKeyM3GObject *image;
-    int x;
-    int y;
-    int source_x;
-    int source_y;
-    int start_x;
-    int start_y;
-    int end_x;
-    int end_y;
-    if (surface == 0 || background == 0 || background->background_image == 0) {
-        return;
-    }
-    image = funkey_m3g_object(background->background_image);
-    if (image == 0 || image->image_pixels == 0) {
-        return;
-    }
-    start_x = surface->clip_x < 0 ? 0 : surface->clip_x;
-    start_y = surface->clip_y < 0 ? 0 : surface->clip_y;
-    end_x = surface->clip_x + surface->clip_w;
-    end_y = surface->clip_y + surface->clip_h;
-    if (end_x > surface->width) end_x = surface->width;
-    if (end_y > surface->height) end_y = surface->height;
-    for (y = start_y; y < end_y; ++y) {
-        for (x = start_x; x < end_x; ++x) {
-            source_x = background->crop_x + x - surface->clip_x;
-            source_y = background->crop_y + y - surface->clip_y;
-            source_x = funkey_m3g_wrap_texel(source_x, image->image_width,
-                                             background->image_mode_x == 33 ?
-                                             241 : 240);
-            source_y = funkey_m3g_wrap_texel(source_y, image->image_height,
-                                             background->image_mode_y == 33 ?
-                                             241 : 240);
-            funkey_m3g_put_argb(surface, x, y,
-                               funkey_m3g_image_argb(image, source_x, source_y));
-        }
-    }
-}
-
-void
-funkey_m3g_surface_render_mesh(FunKeyM3GSurface *surface, long mesh) {
-    FunKeyM3GRenderState state;
-    float world[16];
-    funkey_m3g_matrix_identity(state.view);
-    state.fovy = 45.0f;
-    state.aspect = surface != 0 && surface->height != 0 ?
-                   (float) surface->width / (float) surface->height : 1.0f;
-    state.near_plane = 0.1f;
-    state.has_camera = 0;
-    funkey_m3g_matrix_identity(world);
-    funkey_m3g_surface_render_mesh_state(surface, mesh, world, &state);
-}
-
-static void
-funkey_m3g_surface_render_node_state(FunKeyM3GSurface *surface, long node,
-                                     const float *parent_world,
-                                     const FunKeyM3GRenderState *state) {
-    FunKeyM3GObject *obj = funkey_m3g_object(node);
-    float local[16];
-    float world[16];
-    int i;
-    if (obj == 0 || obj->rendering_enabled == 0) {
-        return;
-    }
-    funkey_m3g_local_matrix(obj, local);
-    funkey_m3g_matrix_mul(world, parent_world, local);
-    if (obj->class_id == FUNKEY_M3G_CLASS_MESH) {
-        funkey_m3g_surface_render_mesh_state(surface, node, world, state);
-        return;
-    }
-    for (i = 0; i < obj->child_count; ++i) {
-        funkey_m3g_surface_render_node_state(surface, obj->children[i],
-                                             world, state);
-    }
-}
-
-void
-funkey_m3g_surface_render_node(FunKeyM3GSurface *surface, long node) {
-    FunKeyM3GRenderState state;
-    float world[16];
-    funkey_m3g_matrix_identity(state.view);
-    state.fovy = 45.0f;
-    state.aspect = surface != 0 && surface->height != 0 ?
-                   (float) surface->width / (float) surface->height : 1.0f;
-    state.near_plane = 0.1f;
-    state.has_camera = 0;
-    funkey_m3g_matrix_identity(world);
-    funkey_m3g_surface_render_node_state(surface, node, world, &state);
-}
-
-void
-funkey_m3g_surface_render_world(FunKeyM3GSurface *surface, long world) {
-    FunKeyM3GRenderState state;
-    FunKeyM3GObject *w = funkey_m3g_object(world);
-    float identity[16];
-    if (world != g_mesh_trace_world) {
-        g_mesh_trace_world = world;
-        g_mesh_trace_count = 0;
-        fprintf(stderr, "[M3G raster] world=%ld\n", world);
-    }
-    if (w != 0 && w->core != 0) {
-        funkey_m3g_surface_render_core_world(surface, world);
-        return;
-    }
-    funkey_m3g_matrix_identity(identity);
-    funkey_m3g_matrix_identity(state.view);
-    state.fovy = 45.0f;
-    state.aspect = surface != 0 && surface->height != 0 ?
-                   (float) surface->width / (float) surface->height : 1.0f;
-    state.near_plane = 0.1f;
-    state.has_camera = 0;
-    if (w != 0 && w->background != 0) {
-        funkey_m3g_surface_render_background(surface,
-                                             funkey_m3g_object(w->background));
-    }
-    if (w != 0 && w->active_camera != 0) {
-        FunKeyM3GObject *camera = funkey_m3g_object(w->active_camera);
-        float camera_world[16];
-        funkey_m3g_world_matrix(w->active_camera, camera_world);
-        if (funkey_m3g_matrix_invert(state.view, camera_world)) {
-            state.has_camera = 1;
-        }
-        if (camera != 0) {
-            if (camera->projection_mode == 50) {
-                state.fovy = camera->projection_params[0];
-                state.aspect = camera->projection_params[1];
-                state.near_plane = camera->projection_params[2] > 0.001f ?
-                                   camera->projection_params[2] : 0.1f;
-            } else if (camera->projection_mode == 49) {
-                state.has_camera = 0;
-            }
-        }
-    }
-    funkey_m3g_surface_render_node_state(surface, world, identity, &state);
-}

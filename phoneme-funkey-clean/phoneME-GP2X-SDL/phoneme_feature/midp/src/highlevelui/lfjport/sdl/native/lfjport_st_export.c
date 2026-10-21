@@ -146,8 +146,6 @@ static Scaler    PresentScaler;
 static int       DisplayDebug;
 static int       RefreshBoundsValid;
 static int       RefreshMinX, RefreshMinY, RefreshMaxX, RefreshMaxY;
-static const char *FrameDumpPath;
-static int       FrameDumpEnabled = -1;
 
 enum {
     PRESENT_SCALE_AUTO = 0,
@@ -175,50 +173,6 @@ typedef struct {
     int areaH;
     const char *name;
 } PresentLayout;
-
-static void frame_dump_surface(SDL_Surface *surface) {
-    FILE *fp;
-    char tmpPath[1024];
-    unsigned short *pixels;
-    int pitchPixels;
-    int x, y;
-
-    if (FrameDumpEnabled < 0) {
-        FrameDumpPath = getenv("PHONEME_FRAME_DUMP");
-        FrameDumpEnabled = (FrameDumpPath != NULL && FrameDumpPath[0] != '\0');
-    }
-    if (!FrameDumpEnabled || surface == NULL || surface->pixels == NULL) {
-        return;
-    }
-    if (snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", FrameDumpPath) >= (int)sizeof(tmpPath)) {
-        return;
-    }
-
-    if (SDL_MUSTLOCK(surface) && SDL_LockSurface(surface) != 0) {
-        return;
-    }
-    fp = fopen(tmpPath, "wb");
-    if (fp != NULL) {
-        fprintf(fp, "P6\n%d %d\n255\n", surface->w, surface->h);
-        pixels = (unsigned short *)surface->pixels;
-        pitchPixels = surface->pitch / 2;
-        for (y = 0; y < surface->h; y++) {
-            for (x = 0; x < surface->w; x++) {
-                unsigned short p = pixels[y * pitchPixels + x];
-                unsigned char rgb[3];
-                rgb[0] = (unsigned char)((((p >> 11) & 0x1f) * 255) / 31);
-                rgb[1] = (unsigned char)((((p >> 5) & 0x3f) * 255) / 63);
-                rgb[2] = (unsigned char)(((p & 0x1f) * 255) / 31);
-                fwrite(rgb, 1, 3, fp);
-            }
-        }
-        fclose(fp);
-        rename(tmpPath, FrameDumpPath);
-    }
-    if (SDL_MUSTLOCK(surface)) {
-        SDL_UnlockSurface(surface);
-    }
-}
 
 typedef struct {
     const char *id;
@@ -1744,7 +1698,6 @@ void PhoneMEOverlayRefresh(void) {
         present_surface(Native_SDL_HScreen, OriginalOrientation == 1);
     }
     SDL_Flip(Native_SDL_Screen);
-    frame_dump_surface(Native_SDL_Screen);
 }
 
 /**
@@ -1878,23 +1831,7 @@ void VideoCopyRotate(unsigned short *Buffer, unsigned short *Video)
 }
 
 void lfjport_refresh(int x1, int y1, int x2, int y2)
-{ static int refreshCount = 0;
-  static int refreshVerbose = -1;
-  static Uint32 lastRefreshLog = 0;
-  Uint32 now;
-  refreshCount++;
-  if (refreshVerbose < 0) {
-    refreshVerbose = (getenv("PHONEME_REFRESH_DEBUG") != NULL);
-  }
-  now = SDL_GetTicks();
-  if ((refreshCount <= 8) ||
-      (refreshVerbose && ((lastRefreshLog == 0) || ((now - lastRefreshLog) >= 1000)))) {
-    fprintf(stderr, "lfjport_refresh: #%d area=%d,%d-%d,%d orient=%d original=%d ticks=%lu\n",
-            refreshCount, x1, y1, x2, y2,
-            Native_SDL_ScreenOrientation, OriginalOrientation,
-            (unsigned long)now);
-    lastRefreshLog = now;
-  }
+{
   wait_frame_limit();
   update_refresh_bounds(x1, y1, x2, y2);
   SDL_UnlockSurface(Native_SDL_HScreen);
@@ -1907,13 +1844,8 @@ void lfjport_refresh(int x1, int y1, int x2, int y2)
   /* SDL_Flip alone pushes the frame (on a software surface it is the full
    * update); calling SDL_UpdateRect before it copied every frame twice */
   SDL_Flip(Native_SDL_Screen);
-  frame_dump_surface(Native_SDL_Screen);
   SDL_LockSurface(Native_SDL_HScreen);
   SDL_LockSurface(Native_SDL_VScreen);
-  (void)x1;
-  (void)y1;
-  (void)x2;
-  (void)y2;
 }
 
 /**
