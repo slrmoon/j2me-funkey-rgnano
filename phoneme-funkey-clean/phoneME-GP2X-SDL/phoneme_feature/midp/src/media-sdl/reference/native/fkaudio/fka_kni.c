@@ -90,6 +90,18 @@ int MediaSDL_GetMasterVolume(void)
     return fka_get_master_volume();
 }
 
+void MediaSDL_SetSynth(int engine)
+{
+    fka_lock();
+    fka_set_synth(engine);
+    fka_unlock();
+}
+
+int MediaSDL_GetSynth(void)
+{
+    return fka_get_synth();
+}
+
 /* system menu open: freeze every player (the MIDlet is frozen too) */
 void MediaSDL_PauseAll(int paused)
 {

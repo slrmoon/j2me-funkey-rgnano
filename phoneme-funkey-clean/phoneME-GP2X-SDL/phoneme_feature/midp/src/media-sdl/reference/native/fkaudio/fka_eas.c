@@ -30,6 +30,8 @@ static EAS_DATA_HANDLE g_eas;
 static const S_EAS_LIB_CONFIG *g_cfg;
 static int g_frame;     /* EAS render granularity (samples) */
 
+static S_SYNTH *stream_synth(void *stream);
+
 int fka_eas_init(int engine)
 {
     const char *lib_name;
@@ -82,6 +84,25 @@ int fka_eas_set_engine(int engine)
     lib_name = EAS_GetDefaultSoundLibrary(type);
     if (lib_name == NULL) return -2;
     return EAS_SetSoundLibrary(g_eas, NULL, EAS_GetSoundLibrary(g_eas, lib_name)) == EAS_SUCCESS ? 0 : -3;
+}
+
+void fka_eas_stream_engine(void *stream, int engine)
+{
+    const char *lib_name;
+    E_EAS_SNDLIB_TYPE type;
+    if (g_eas == NULL || stream == NULL) return;
+    type = engine == 1 ? EAS_SNDLIB_WT : (engine == 2 ? EAS_SNDLIB_FM : EAS_SNDLIB_HYBRID);
+    lib_name = EAS_GetDefaultSoundLibrary(type);
+    if (lib_name == NULL) return;
+    fka_eas_silence(stream, 1);
+    if (EAS_SetSoundLibrary(g_eas, (EAS_HANDLE) stream, EAS_GetSoundLibrary(g_eas, lib_name)) == EAS_SUCCESS) {
+        /* channels cache a region index into the old library: resolve the
+         * current program again in the new one */
+        S_SYNTH *syn = stream_synth(stream);
+        int ch;
+        for (ch = 0; syn != NULL && ch < 16; ++ch)
+            VMProgramChange(g_eas->pVoiceMgr, syn, (EAS_U8) ch, syn->channels[ch].programNum);
+    }
 }
 
 void *fka_eas_open(void)

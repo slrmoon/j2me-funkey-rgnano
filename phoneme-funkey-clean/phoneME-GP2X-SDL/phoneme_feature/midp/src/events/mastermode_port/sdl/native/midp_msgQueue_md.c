@@ -104,6 +104,8 @@ static const RuntimeKeyProfilePreset RuntimeKeyProfiles[] = {
 int PhoneMEOverlayHandleSDLEvent(SDL_Event *event);
 int PhoneMEOverlayConsumeShutdown(void);
 void PhoneMEOverlayRefresh(void);
+int PhoneMEOverlayIsVisible(void);
+void PhoneMEOverlayRunModal(void);
 
 int PhoneMEInputGetBindCount()
 {
@@ -624,12 +626,35 @@ static int CheckInjectedInput(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEv
   return 1;
 }
 
+/* Keys held when the menu opened had their key-up eaten by the menu: queue
+ * the releases so the game does not see them stuck down. */
+static void ReleasePhysicalKeys(void)
+{
+  int i;
+  for (i = 0; i < 512; i++) {
+    if (KeyboardPhysicalDown[i]) {
+      SDL_Event up;
+      memset(&up, 0, sizeof(up));
+      up.type = SDL_KEYUP;
+      up.key.type = SDL_KEYUP;
+      up.key.state = SDL_RELEASED;
+      up.key.keysym.sym = (SDLKey) i;
+      SDL_PushEvent(&up);
+    }
+  }
+}
+
 int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent)
 { if (event->type == SDL_QUIT)
      { return RequestGracefulShutdown(pNewSignal, pNewMidpEvent);
      }
   if (PhoneMEOverlayHandleSDLEvent(event)) {
     PhoneMEOverlayRefresh();
+    if (PhoneMEOverlayIsVisible()) {
+      /* menu opened: freeze the game (and its audio) until it closes */
+      PhoneMEOverlayRunModal();
+      ReleasePhysicalKeys();
+    }
     if (PhoneMEOverlayConsumeShutdown()) {
       return RequestGracefulShutdown(pNewSignal, pNewMidpEvent);
     }

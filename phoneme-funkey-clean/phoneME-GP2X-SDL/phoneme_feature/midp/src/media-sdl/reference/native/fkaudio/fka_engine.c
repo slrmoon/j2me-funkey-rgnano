@@ -66,6 +66,7 @@ static Event g_events[EVENT_RING];
 static int g_ev_head, g_ev_tail;
 static int g_ready;
 static int g_paused;
+static int g_pause_open = 1;   /* output gate, follows g_paused with a fade */
 static int g_master = 0x7fff;
 static int g_master_percent = 100;
 static int g_frame = 64;
@@ -376,9 +377,12 @@ static void render_frame(int16_t *out, int n)
 {
     int32_t acc[FRAME_MAX];
     int16_t synth[FRAME_MAX];
-    int i, any_stream = 0;
+    int i, any_stream = 0, ramp = 0;
     memset(acc, 0, sizeof(int32_t) * (size_t) n);
-    if (!g_paused) {
+    /* pause/resume: one frame (~3 ms) fade instead of a click */
+    if (g_paused && g_pause_open) ramp = -1;
+    else if (!g_paused && !g_pause_open) ramp = 1;
+    if (!g_paused || ramp != 0) {
         tones_tick(n);
         for (i = 0; i < MAX_PLAYERS; ++i) {
             Player *p = g_players[i];
@@ -391,6 +395,13 @@ static void render_frame(int16_t *out, int n)
         if ((any_stream || g_tone_stream != NULL) && fka_eas_render(synth) == n) {
             for (i = 0; i < n; ++i) acc[i] += (synth[i] * g_master) >> 15;
         }
+    }
+    if (ramp != 0) {
+        for (i = 0; i < n; ++i) {
+            int g = ramp > 0 ? i : n - 1 - i;
+            acc[i] = (int32_t) (((int64_t) acc[i] * g) / n);
+        }
+        g_pause_open = ramp > 0;
     }
     for (i = 0; i < n; ++i) out[i] = soft_clip(acc[i]);
 }
@@ -467,10 +478,47 @@ void fka_pause_all(int paused)
     g_paused = paused;
 }
 
+/* Switches the instrument set live: new streams and every open one. Voices
+ * of the old set are cut (callers do this while audio is paused). */
 void fka_set_synth(int engine)
 {
+    int i;
+    if (engine != FKA_SYNTH_WAVETABLE && engine != FKA_SYNTH_FM) engine = FKA_SYNTH_HYBRID;
     g_engine = engine;
-    if (g_ready) fka_eas_set_engine(engine);
+    if (!g_ready) return;
+    /* A muted voice still renders its release ramp with the region data of
+     * the set it started on; switching under it reads the wrong library
+     * (crash). Mute everything and run the synth until all voices are gone. */
+    {
+        int16_t scratch[FRAME_MAX];
+        int k, busy = 1;
+        for (i = 0; i < MAX_PLAYERS; ++i) {
+            Player *p = g_players[i];
+            if (p != NULL && p->stream != NULL) fka_eas_silence(p->stream, 1);
+        }
+        if (g_tone_stream != NULL) fka_eas_silence(g_tone_stream, 1);
+        for (k = 0; k < 256 && busy; ++k) {
+            busy = 0;
+            for (i = 0; i < MAX_PLAYERS && !busy; ++i) {
+                Player *p = g_players[i];
+                if (p != NULL && p->stream != NULL && fka_eas_active(p->stream) > 0) busy = 1;
+            }
+            if (g_tone_stream != NULL && fka_eas_active(g_tone_stream) > 0) busy = 1;
+            if (busy) fka_eas_render(scratch);
+        }
+        for (i = 0; i < MAX_TONES; ++i) g_tones[i].left = 0;
+    }
+    if (fka_eas_set_engine(engine) != 0) return;
+    for (i = 0; i < MAX_PLAYERS; ++i) {
+        Player *p = g_players[i];
+        if (p != NULL && p->stream != NULL) fka_eas_stream_engine(p->stream, engine);
+    }
+    if (g_tone_stream != NULL) fka_eas_stream_engine(g_tone_stream, engine);
+}
+
+int fka_get_synth(void)
+{
+    return g_engine;
 }
 
 int fka_load_soundbank(const char *path)

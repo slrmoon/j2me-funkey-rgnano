@@ -77,7 +77,8 @@ void fka_play_tone(int note, int duration_ms, int volume);
 int  fka_poll_event(int *player, int *type, int64_t *arg, int *data);
 
 /* configuration */
-void fka_set_synth(int engine);            /* FKA_SYNTH_* */
+void fka_set_synth(int engine);            /* FKA_SYNTH_*, also live */
+int  fka_get_synth(void);
 int  fka_load_soundbank(const char *path); /* external DLS / SF2 */
 
 /* output driver (fka_sdl.c) */
