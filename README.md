@@ -45,6 +45,8 @@ Based on the upstream phoneME-GP2X-SDL source at:
 - **Scaling** for every phone resolution, with sharp / smooth filtering and a
   movable view for cropped modes. See [Scaling](#scaling).
 - **In-game menu** (Power button) that freezes the game while open.
+- **Debug options** in the launcher and the in-game menu: log file, detailed
+  logs, FPS counter and an on-device log viewer. See [Debugging](#debugging).
 
 ## In-game menu
 
@@ -58,6 +60,8 @@ menu is translucent, so the frozen picture stays visible behind it.
 | **Display** | Screen, Zoom, Size, Filter, FPS, Adjust view — see [Scaling](#scaling) |
 | **Controls** | key profile and per-button bindings |
 | **Sound** | Volume, MIDI synth — see [Sound](#sound) |
+| **Debug** | log switches and FPS counter — see [Debugging](#debugging) |
+| **Restart game** | quit and start the game again (applies a new Size and debug settings) |
 | **Exit** | save and quit to the launcher |
 
 D-pad moves and changes values, **A** selects, **B** goes back.
@@ -72,7 +76,7 @@ so the picture usually has to be scaled, cropped or both.
 ### 1. Size — the game's own resolution
 
 Pick the screen size the game was made for. Everything else depends on it.
-**Restart the game after changing it.**
+**Restart the game after changing it** (in-game menu → **Restart game**).
 
 | Size | Typical phones |
 |---|---|
@@ -336,13 +340,27 @@ Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funk
 
 ## Debugging
 
-After launching a game, the runtime writes a log to:
+Debug options are **global** (the same for every game). Open them in the
+launcher with **Y**, or in a game from the menu → **Debug**. Both edit the
+same file, `/mnt/FunKey/.pm/debug.cfg`.
 
-`/mnt/FunKey/.pm/runmidlet.log`
+| Option | Default | What it does |
+|---|---|---|
+| **Log file** | On | write the game output to `/mnt/FunKey/.pm/runmidlet.log`; the run before is kept as `runmidlet.prev.log`. Off writes nothing to the SD card |
+| **Key log** | Off | every button press and the phone key it maps to |
+| **Event log** | Off | key events delivered to the game |
+| **Display log** | Off | screen set-up and the chosen scaling layout |
+| **Audio log** | Off | audio device rate, channels and buffer |
+| **Launch log** | Off | all settings the launcher passes to the game |
+| **FPS counter** | Off | frames per second in the top-left corner (no log needed) |
 
-Useful switches for the log (set in `r.sh`): `PHONEME_AUDIO_TRACE=1`
-(audio device), `PHONEME_DISPLAY_DEBUG=1` (chosen scaling layout),
-`PHONEME_KEY_DEBUG=1` / `PHONEME_EVENT_DEBUG=1` (input).
+The logs need **Log file** on; the launcher marks them `On (no log)` otherwise.
+In a game, the FPS counter switches at once; the log options apply after
+**Restart game**, and the menu shows a reminder when a restart is needed.
+
+**View log** in the launcher's debug screen shows the log on the device:
+D-pad scrolls, **L1/R1** jump to the start/end, **X** switches between the
+last and the previous run. **Clear logs** deletes both files.
 
 ## Third-party components
 

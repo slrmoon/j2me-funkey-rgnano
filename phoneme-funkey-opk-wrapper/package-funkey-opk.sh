@@ -342,10 +342,30 @@ fi
 export MIDP_HOME="$APP_DIR"
 export PHONEME_SYNTH="${PHONEME_SYNTH:-hybrid}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
-if [ "${PHONEME_DEBUG_LOGS:-0}" = "1" ]; then
-    export PHONEME_KEY_DEBUG="${PHONEME_KEY_DEBUG:-1}"
-    export PHONEME_EVENT_DEBUG="${PHONEME_EVENT_DEBUG:-1}"
-fi
+# debug switches: shared with the launcher and the in-game Debug menu
+DEBUG_CFG="$APP_DIR/debug.cfg"
+RESTART_FLAG="$APP_DIR/restart-request"
+export PHONEME_DEBUG_CONFIG="$DEBUG_CFG"
+export PHONEME_RESTART_FLAG="$RESTART_FLAG"
+debug_on() {
+    # LOG defaults to on, everything else to off
+    if [ -f "$DEBUG_CFG" ] && grep -q "^$1=" "$DEBUG_CFG"; then
+        grep -q "^$1=1" "$DEBUG_CFG"
+    else
+        [ "$1" = "LOG" ]
+    fi
+}
+apply_debug_env() {
+    for pair in KEYS:PHONEME_KEY_DEBUG EVENTS:PHONEME_EVENT_DEBUG \
+                DISPLAY:PHONEME_DISPLAY_DEBUG AUDIO:PHONEME_AUDIO_TRACE \
+                FPS:PHONEME_SHOW_FPS; do
+        if debug_on "${pair%%:*}"; then
+            export "${pair#*:}=1"
+        else
+            unset "${pair#*:}"
+        fi
+    done
+}
 export PHONEME_KEY_PROFILE="${PHONEME_KEY_PROFILE:-game}"
 DEFAULT_RUNMIDLET_HEAP_ARG='__RUNMIDLET_HEAP_ARG__'
 RUNMIDLET_HEAP_ARG=${PHONEME_RUNMIDLET_HEAP_ARG:-$DEFAULT_RUNMIDLET_HEAP_ARG}
@@ -407,9 +427,15 @@ fi
 echo "cd app bin" >> "$EARLY_LOG"
 cd "$APP_DIR/bin"
 echo "create main log" >> "$EARLY_LOG"
-: > "$LOG"
-echo "redirect main log" >> "$EARLY_LOG"
-exec >> "$LOG" 2>&1
+if debug_on LOG; then
+    [ -f "$LOG" ] && mv -f "$LOG" "$LOG.prev"
+    : > "$LOG"
+    echo "redirect main log" >> "$EARLY_LOG"
+    exec >> "$LOG" 2>&1
+else
+    echo "log file off" >> "$EARLY_LOG"
+    exec > /dev/null 2>&1
+fi
 
 child_pid=
 
@@ -443,20 +469,28 @@ if [ "__RUNTIME_ONLY__" = "1" ]; then
 fi
 MIDLET_CLASS=$(cat "$APP_DIR/midlets/main-class")
 echo "MIDLET_CLASS=$MIDLET_CLASS"
-if [ -n "${RUNMIDLET_HEAP_ARG:-}" ]; then
-    # Expand VM args into separate argv entries for runMidlet/JVM_ParseOneArg.
-    # shellcheck disable=SC2086
-    set -- $RUNMIDLET_HEAP_ARG
-    ./runMidlet "$@" -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
-else
-    ./runMidlet -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
-fi
-child_pid=$!
-echo "runMidlet pid: $child_pid"
-wait "$child_pid"
-status=$?
-child_pid=
-echo "runMidlet exit status: $status"
+# "Restart game" in the in-game menu leaves RESTART_FLAG and exits
+while :; do
+    rm -f "$RESTART_FLAG"
+    apply_debug_env
+    if [ -n "${RUNMIDLET_HEAP_ARG:-}" ]; then
+        # Expand VM args into separate argv entries for runMidlet/JVM_ParseOneArg.
+        # shellcheck disable=SC2086
+        set -- $RUNMIDLET_HEAP_ARG
+        ./runMidlet "$@" -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
+    else
+        ./runMidlet -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
+    fi
+    child_pid=$!
+    echo "runMidlet pid: $child_pid"
+    wait "$child_pid"
+    status=$?
+    child_pid=
+    echo "runMidlet exit status: $status"
+    [ -f "$RESTART_FLAG" ] || break
+    echo "restart requested"
+done
+rm -f "$RESTART_FLAG"
 echo "$status" > "$APP_DIR/s"
 exit "$(cat "$APP_DIR/s" 2>/dev/null || echo 1)"
 EOF
