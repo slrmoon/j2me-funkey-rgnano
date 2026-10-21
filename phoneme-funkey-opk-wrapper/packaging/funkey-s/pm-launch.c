@@ -28,6 +28,10 @@
 #define BIN_DIR    "/mnt/FunKey/.pm/bin"
 #define RMS_DIR    "/mnt/FunKey/.pm/rms"
 #define FAVORITES_FILE PM_DIR "/favorites.txt"
+#define DEBUG_FILE     PM_DIR "/debug.cfg"
+#define RESTART_FLAG   PM_DIR "/restart-request"
+#define LOG_FILE       PM_DIR "/runmidlet.log"
+#define LOG_PREV_FILE  PM_DIR "/runmidlet.prev.log"
 
 static char java_dir[PATH_MAX] = "/mnt/java";
 
@@ -57,14 +61,6 @@ static const char *bind_names[] = {
     "A", "B", "X", "Y",
     "L1", "R1",
     "START", "SELECT",
-    NULL
-};
-
-static const char *bind_labels[] = {
-    "FK UP", "FK DOWN", "FK LEFT", "FK RIGHT",
-    "FK A", "FK B", "FK X", "FK Y",
-    "FK L1", "FK R1",
-    "FK START", "FK SELECT",
     NULL
 };
 
@@ -356,20 +352,13 @@ static int    key_edit_mode = 0;      /* 0 = settings menu, 1 = key rows */
 static int    delete_confirm = 0;
 
 /* ── state ──────────────────────────────────────────── */
-enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING, STATE_RESOLUTION };
+enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING, STATE_RESOLUTION,
+       STATE_DEBUG, STATE_LOGVIEW };
 static int state = STATE_BROWSER;
 static int launching_game_idx = -1;
 
 /* ── SDL objects ────────────────────────────────────── */
 static SDL_Surface *screen = NULL;
-
-/* ── colours ───────────────────────────────────────── */
-static SDL_Color clr_bg     = {0x10, 0x18, 0x20, 0};
-static SDL_Color clr_title  = {0x7d, 0xf9, 0xff, 0};
-static SDL_Color clr_text   = {0xff, 0xff, 0xff, 0};
-static SDL_Color clr_sel    = {0x00, 0xff, 0x88, 0};
-static SDL_Color clr_dim    = {0x60, 0x70, 0x78, 0};
-static SDL_Color clr_warn   = {0xff, 0x60, 0x60, 0};
 
 #define PM_FONT_ADVANCE 8
 #define PM_ASCII_ADVANCE 8
@@ -794,12 +783,6 @@ static int leave_folder(void) {
 /* ─────────────────────────────────────────────────────
  *  key binding config read / write
  * ──────────────────────────────────────────────────── */
-static const char *game_stem(const char *path) {
-    const char *s = strrchr(path, '/');
-    if (s) s++; else s = path;
-    return s;
-}
-
 static char *trim_line(char *text) {
     char *end;
     while (*text == ' ' || *text == '\t') text++;
@@ -944,65 +927,6 @@ static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out
     }
     fclose(jad);
     return 0;
-}
-
-static const char *midp_key_label(int key) {
-    switch (key) {
-    case K_UP:     return "PHONE UP";
-    case K_DOWN:   return "PHONE DOWN";
-    case K_LEFT:   return "PHONE LEFT";
-    case K_RIGHT:  return "PHONE RIGHT";
-    case K_SELECT: return "PHONE FIRE";
-    case K_SOFT1:  return "SOFT L NOK -6";
-    case K_SOFT2:  return "SOFT R NOK -7";
-    case K_CLEAR:  return "PHONE CLEAR";
-    case K_GAMEA:  return "PHONE GAMEA";
-    case K_GAMEB:  return "PHONE GAMEB";
-    case K_GAMEC:  return "PHONE GAMEC";
-    case K_GAMED:  return "PHONE GAMED";
-    case K_SEND:   return "PHONE SEND";
-    case K_END:    return "PHONE END";
-    case K_GAME_UP:    return "PHONE GAME UP";
-    case K_GAME_DOWN:  return "PHONE GAME DOWN";
-    case K_GAME_LEFT:  return "PHONE GAME LEFT";
-    case K_GAME_RIGHT: return "PHONE GAME RIGHT";
-    case -21:      return "SOFT L MOTO -21";
-    case -22:      return "SOFT R MOTO -22";
-    case 21:       return "SOFT L 21";
-    case 22:       return "SOFT R 22";
-    case 42:       return "PHONE *";
-    case 35:       return "PHONE #";
-    case 48:       return "PHONE 0";
-    case 49:       return "PHONE 1";
-    case 50:       return "PHONE 2";
-    case 51:       return "PHONE 3";
-    case 52:       return "PHONE 4";
-    case 53:       return "PHONE 5";
-    case 54:       return "PHONE 6";
-    case 55:       return "PHONE 7";
-    case 56:       return "PHONE 8";
-    case 57:       return "PHONE 9";
-    default:       return NULL;
-    }
-}
-
-static int find_phone_key_index(int code) {
-    int i;
-    for (i = 0; i < PHONE_KEY_COUNT; i++) {
-        if (phone_key_options[i].code == code) return i;
-    }
-    return -1;
-}
-
-static void cycle_bind_value(int bind_index, int direction) {
-    int key_index;
-    if (bind_index < 0 || bind_index >= BIND_COUNT) return;
-    key_index = find_phone_key_index(binds[bind_index]);
-    if (key_index < 0) key_index = 0;
-    key_index += direction;
-    if (key_index < 0) key_index = PHONE_KEY_COUNT - 1;
-    if (key_index >= PHONE_KEY_COUNT) key_index = 0;
-    binds[bind_index] = phone_key_options[key_index].code;
 }
 
 static void apply_key_profile(int profile_index) {
@@ -1439,6 +1363,148 @@ static void save_binds(const char *game_name) {
 }
 
 /* ─────────────────────────────────────────────────────
+ *  debug options (global, shared with the in-game menu)
+ *
+ *  Stored in DEBUG_FILE as KEY=0/1. The runtime reads the same file
+ *  (PHONEME_DEBUG_CONFIG) so the in-game menu can change it; switches the
+ *  runtime reads at start-up apply on the next launch.
+ * ──────────────────────────────────────────────────── */
+typedef struct {
+    const char *key;
+    const char *label;
+    const char *env;        /* set to "1" when on; NULL = handled here */
+    const char *hint1;
+    const char *hint2;
+    int def;
+} DebugOption;
+
+static const DebugOption debug_options[] = {
+    { "LOG",     "LOG FILE",    NULL,                    "Write runmidlet.log",  "previous: .prev.log",  1 },
+    { "KEYS",    "KEY LOG",     "PHONEME_KEY_DEBUG",     "Every button press",   "and its phone key",    0 },
+    { "EVENTS",  "EVENT LOG",   "PHONEME_EVENT_DEBUG",   "Key events delivered", "to the game",          0 },
+    { "DISPLAY", "DISPLAY LOG", "PHONEME_DISPLAY_DEBUG", "Screen init and the",  "scaling layout",       0 },
+    { "AUDIO",   "AUDIO LOG",   "PHONEME_AUDIO_TRACE",   "Audio device rate,",   "channels and buffer",  0 },
+    { "LAUNCH",  "LAUNCH LOG",  "PM_LAUNCH_TRACE",       "Settings the launcher","passes to the game",   0 },
+    { "FPS",     "FPS COUNTER", "PHONEME_SHOW_FPS",      "Frame rate in the",    "top-left corner",      0 }
+};
+#define DEBUG_OPTION_COUNT ((int)(sizeof(debug_options) / sizeof(debug_options[0])))
+#define DEBUG_OPT_LOG 0
+#define DEBUG_OPT_FPS (DEBUG_OPTION_COUNT - 1)
+#define DEBUG_ROW_VIEW  DEBUG_OPTION_COUNT
+#define DEBUG_ROW_CLEAR (DEBUG_OPTION_COUNT + 1)
+#define DEBUG_ROW_COUNT (DEBUG_OPTION_COUNT + 2)
+
+static int debug_values[DEBUG_OPTION_COUNT];
+static int debug_sel = 0;
+static int debug_notice = 0;   /* 1 = "logs cleared" */
+
+static void load_debug(void) {
+    FILE *f;
+    char line[128];
+    int i;
+    for (i = 0; i < DEBUG_OPTION_COUNT; i++) debug_values[i] = debug_options[i].def;
+    f = fopen(DEBUG_FILE, "r");
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        for (i = 0; i < DEBUG_OPTION_COUNT; i++) {
+            if (strcmp(trim_line(line), debug_options[i].key) == 0) {
+                debug_values[i] = atoi(eq + 1) != 0;
+            }
+        }
+    }
+    fclose(f);
+}
+
+static void save_debug(void) {
+    FILE *f;
+    int i;
+    mkdir(PM_DIR, 0777);
+    f = fopen(DEBUG_FILE, "w");
+    if (!f) return;
+    for (i = 0; i < DEBUG_OPTION_COUNT; i++)
+        fprintf(f, "%s=%d\n", debug_options[i].key, debug_values[i]);
+    fclose(f);
+}
+
+static void apply_debug_env(void) {
+    int i;
+    for (i = 0; i < DEBUG_OPTION_COUNT; i++) {
+        if (debug_options[i].env == NULL) continue;
+        /* the runtime tests these with getenv() != NULL: unset means off */
+        if (debug_values[i]) setenv(debug_options[i].env, "1", 1);
+        else unsetenv(debug_options[i].env);
+    }
+    setenv("PHONEME_DEBUG_CONFIG", DEBUG_FILE, 1);
+    setenv("PHONEME_RESTART_FLAG", RESTART_FLAG, 1);
+}
+
+/* ── log viewer ─────────────────────────────────────── */
+#define LOGVIEW_COLS   29
+#define LOGVIEW_MAX    3000
+#define LOGVIEW_ROWS   18
+#define LOGVIEW_TAIL   (64 * 1024)
+
+static char logview_lines[LOGVIEW_MAX][LOGVIEW_COLS + 1];
+static int logview_count = 0;
+static int logview_top = 0;
+static int logview_prev = 0;    /* 0 = last run, 1 = run before */
+
+static void logview_push(const char *text, int len) {
+    if (logview_count >= LOGVIEW_MAX) {
+        memmove(logview_lines[0], logview_lines[1],
+                sizeof(logview_lines[0]) * (LOGVIEW_MAX - 1));
+        logview_count = LOGVIEW_MAX - 1;
+    }
+    memcpy(logview_lines[logview_count], text, len);
+    logview_lines[logview_count][len] = '\0';
+    logview_count++;
+}
+
+static void logview_load(void) {
+    FILE *f = fopen(logview_prev ? LOG_PREV_FILE : LOG_FILE, "rb");
+    char cur[LOGVIEW_COLS + 1];
+    int len = 0, c;
+    long size;
+
+    logview_count = 0;
+    logview_top = 0;
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    if (size > LOGVIEW_TAIL) {
+        /* only the end matters; skip the partial first line */
+        fseek(f, size - LOGVIEW_TAIL, SEEK_SET);
+        while ((c = fgetc(f)) != EOF && c != '\n') {}
+    } else {
+        fseek(f, 0, SEEK_SET);
+    }
+    while ((c = fgetc(f)) != EOF) {
+        if (c == '\r') continue;
+        if (c == '\n') {
+            logview_push(cur, len);
+            len = 0;
+            continue;
+        }
+        if (c == '\t') c = ' ';
+        if (c < 32 || c > 126) c = '?';
+        if (len == LOGVIEW_COLS) {      /* wrap long lines */
+            logview_push(cur, len);
+            len = 0;
+            cur[len++] = ' ';
+        }
+        cur[len++] = (char)c;
+    }
+    if (len > 0) logview_push(cur, len);
+    fclose(f);
+    /* open at the end: the interesting part is usually the last lines */
+    logview_top = logview_count - LOGVIEW_ROWS;
+    if (logview_top < 0) logview_top = 0;
+}
+
+/* ─────────────────────────────────────────────────────
  *  draw helpers
  * ──────────────────────────────────────────────────── */
 static void draw_header_color(const char *title, int y, Uint32 color) {
@@ -1539,6 +1605,7 @@ static void draw_browser(void) {
     /* help bar */
     y = SCR_H - 30;
     stringColor(screen, 2, y, "SELECT:Favorite", 0x607078ff);
+    stringColor(screen, 158, y, "Y:Debug", 0x607078ff);
     y = SCR_H - 15;
     stringColor(screen, 2, y, "A:Run", 0x607078ff);
     stringColor(screen, 64, y, "START:Keys", 0x607078ff);
@@ -1792,16 +1859,6 @@ static void remove_tree(const char *path) {
     system(cmd);
 }
 
-static int jar_has_entry(const char *jar_path, const char *entry) {
-    char cmd[PATH_MAX * 2 + 256];
-    int rc;
-    snprintf(cmd, sizeof(cmd),
-        "unzip -l \"%s\" \"%s\" >/dev/null 2>&1",
-        jar_path, entry);
-    rc = system(cmd);
-    return rc == 0;
-}
-
 static void copy_dir(const char *src_base, const char *dst_base) {
     DIR *d = opendir(src_base);
     if (!d) return;
@@ -1826,8 +1883,10 @@ static void copy_dir(const char *src_base, const char *dst_base) {
 /* ─────────────────────────────────────────────────────
  *  launch
  * ──────────────────────────────────────────────────── */
-static void launch_game(int idx) {
+/* returns 1 when the game asked to be restarted from its in-game menu */
+static int launch_game_once(int idx) {
     const char *jar_path = games[idx].path;
+    int restart = 0;
 
     draw_launching();
 
@@ -1977,6 +2036,10 @@ static void launch_game(int idx) {
         unsetenv("PHONEME_LCD_SIZE");
     }
 
+    load_debug();
+    apply_debug_env();
+    unlink(RESTART_FLAG);
+
     int i;
     for (i = 0; i < BIND_COUNT; i++) {
         char kvenv[128], val[32];
@@ -1994,9 +2057,14 @@ static void launch_game(int idx) {
 
     pid_t pid = fork();
     if (pid == 0) {
-        /* child — redirect stdout+stderr to runmidlet log */
-        int log_fd = open(PM_DIR "/runmidlet.log",
-                          O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        /* child — stdout+stderr go to the log, or nowhere when it is off */
+        int log_fd;
+        if (debug_values[DEBUG_OPT_LOG]) {
+            rename(LOG_FILE, LOG_PREV_FILE);
+            log_fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        } else {
+            log_fd = open("/dev/null", O_WRONLY);
+        }
         if (log_fd >= 0) {
             dup2(log_fd, STDOUT_FILENO);
             dup2(log_fd, STDERR_FILENO);
@@ -2028,6 +2096,10 @@ static void launch_game(int idx) {
                    getenv("PHONEME_SOUND_VOLUME") ? getenv("PHONEME_SOUND_VOLUME") : "",
                    getenv("PHONEME_CONFIG_PATH") ? getenv("PHONEME_CONFIG_PATH") : "");
             printf("pm-launch key profile=%s\n", key_profiles[key_profile_sel].id);
+            printf("pm-launch debug");
+            for (i = 0; i < DEBUG_OPTION_COUNT; i++)
+                printf(" %s=%d", debug_options[i].key, debug_values[i]);
+            printf("\n");
             for (i = 0; i < BIND_COUNT; i++) {
                 printf("pm-launch key %s %s=%s\n",
                        bind_names[i], bind_gp2x_env[i],
@@ -2064,7 +2136,161 @@ static void launch_game(int idx) {
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
         screen = SDL_SetVideoMode(SCR_W, SCR_H, 16, SDL_SWSURFACE);
         SDL_ShowCursor(SDL_DISABLE);
+        restart = (unlink(RESTART_FLAG) == 0);
     }
+    return restart;
+}
+
+static void launch_game(int idx) {
+    /* "Restart game" in the in-game menu: run it again with the settings
+     * (and debug switches) it saved */
+    while (launch_game_once(idx)) {
+        load_binds(games[idx].config, games[idx].path);
+    }
+}
+
+/* ─────────────────────────────────────────────────────
+ *  debug screen and log viewer
+ * ──────────────────────────────────────────────────── */
+static void draw_debug(void) {
+    char buf[64];
+    int i, y = 6;
+    const char *h1 = "", *h2 = "";
+    Uint32 hint_color = 0x9aaab0ff;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
+    draw_header("Debug (all games)", y);
+    y += PM_FONT_LINE_H + 1;
+
+    for (i = 0; i < DEBUG_ROW_COUNT; i++) {
+        if (i < DEBUG_OPTION_COUNT) {
+            const char *value = debug_values[i] ? "On" : "Off";
+            if (i != DEBUG_OPT_LOG && i != DEBUG_OPT_FPS &&
+                debug_values[i] && !debug_values[DEBUG_OPT_LOG]) {
+                value = "On (no log)";
+            }
+            snprintf(buf, sizeof(buf), "%-12s %s", debug_options[i].label, value);
+        } else if (i == DEBUG_ROW_VIEW) {
+            snprintf(buf, sizeof(buf), "VIEW LOG     >");
+        } else {
+            snprintf(buf, sizeof(buf), "CLEAR LOGS");
+        }
+        y = draw_item(4, y, buf, i == debug_sel);
+    }
+
+    if (debug_sel < DEBUG_OPTION_COUNT) {
+        h1 = debug_options[debug_sel].hint1;
+        h2 = debug_options[debug_sel].hint2;
+        if (debug_sel != DEBUG_OPT_LOG && debug_sel != DEBUG_OPT_FPS &&
+            !debug_values[DEBUG_OPT_LOG]) {
+            h2 = "needs LOG FILE on";
+        }
+    } else if (debug_sel == DEBUG_ROW_VIEW) {
+        h1 = "Read the log of the";
+        h2 = "last game run here";
+    } else if (debug_notice) {
+        h1 = "Logs deleted";
+        hint_color = 0x00ff88ff;
+    } else {
+        h1 = "Delete runmidlet.log";
+        h2 = "and runmidlet.prev.log";
+    }
+    y += 6;
+    stringColor(screen, 4, y, h1, hint_color);
+    stringColor(screen, 4, y + PM_FONT_LINE_H, h2, hint_color);
+
+    stringColor(screen, 4, SCR_H - 26, "Changes apply on launch", 0x607078ff);
+    stringColor(screen, 4, SCR_H - 15, "A/<>:change  B:back", 0x607078ff);
+    SDL_Flip(screen);
+}
+
+static void handle_key_debug(SDL_KeyboardEvent *kev) {
+    if (kev->type != SDL_KEYDOWN) return;
+    switch (kev->keysym.sym) {
+    case SDLK_UP: case SDLK_u:
+        debug_notice = 0;
+        if (--debug_sel < 0) debug_sel = DEBUG_ROW_COUNT - 1;
+        break;
+    case SDLK_DOWN: case SDLK_d:
+        debug_notice = 0;
+        if (++debug_sel >= DEBUG_ROW_COUNT) debug_sel = 0;
+        break;
+    case SDLK_LEFT: case SDLK_l:
+    case SDLK_RIGHT: case SDLK_r:
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a:
+        if (debug_sel < DEBUG_OPTION_COUNT) {
+            debug_values[debug_sel] = !debug_values[debug_sel];
+            save_debug();
+        } else if (debug_sel == DEBUG_ROW_VIEW) {
+            if (kev->keysym.sym == SDLK_LEFT || kev->keysym.sym == SDLK_l ||
+                kev->keysym.sym == SDLK_RIGHT || kev->keysym.sym == SDLK_r) break;
+            logview_prev = 0;
+            logview_load();
+            state = STATE_LOGVIEW;
+        } else if (kev->keysym.sym == SDLK_a || kev->keysym.sym == SDLK_RETURN ||
+                   kev->keysym.sym == SDLK_SPACE) {
+            unlink(LOG_FILE);
+            unlink(LOG_PREV_FILE);
+            sync();
+            debug_notice = 1;
+        }
+        break;
+    case SDLK_b: case SDLK_y: case SDLK_ESCAPE: case SDLK_q:
+        save_debug();
+        state = STATE_BROWSER;
+        break;
+    default:
+        break;
+    }
+}
+
+static void draw_logview(void) {
+    char buf[64];
+    int i, y = 6;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x08, 0x0c, 0x10));
+    snprintf(buf, sizeof(buf), "%s  %d/%d",
+             logview_prev ? "Previous run" : "Last run",
+             logview_count == 0 ? 0 : logview_top + 1, logview_count);
+    draw_header(buf, y);
+    y += PM_FONT_LINE_H + 1;
+
+    if (logview_count == 0) {
+        stringColor(screen, 4, y, "No log yet.", 0xffffffff);
+        stringColor(screen, 4, y + PM_FONT_LINE_H, "Turn LOG FILE on and", 0x9aaab0ff);
+        stringColor(screen, 4, y + PM_FONT_LINE_H * 2, "run a game.", 0x9aaab0ff);
+    }
+    for (i = logview_top; i < logview_count && i < logview_top + LOGVIEW_ROWS; i++) {
+        stringColor(screen, 4, y, logview_lines[i], 0xd0d8dcff);
+        y += PM_FONT_LINE_H;
+    }
+    stringColor(screen, 4, SCR_H - 15, "<>:page X:prev/last B:back", 0x607078ff);
+    SDL_Flip(screen);
+}
+
+static void handle_key_logview(SDL_KeyboardEvent *kev) {
+    int max_top = logview_count - LOGVIEW_ROWS;
+    if (kev->type != SDL_KEYDOWN) return;
+    if (max_top < 0) max_top = 0;
+    switch (kev->keysym.sym) {
+    case SDLK_UP: case SDLK_u:       logview_top -= 1; break;
+    case SDLK_DOWN: case SDLK_d:     logview_top += 1; break;
+    case SDLK_LEFT: case SDLK_l:     logview_top -= LOGVIEW_ROWS; break;
+    case SDLK_RIGHT: case SDLK_r:    logview_top += LOGVIEW_ROWS; break;
+    case SDLK_n:                     logview_top = 0; break;         /* L1: start */
+    case SDLK_m:                     logview_top = max_top; break;   /* R1: end */
+    case SDLK_x:
+        logview_prev = !logview_prev;
+        logview_load();
+        return;
+    case SDLK_b: case SDLK_a: case SDLK_ESCAPE: case SDLK_q:
+        state = STATE_DEBUG;
+        return;
+    default:
+        break;
+    }
+    if (logview_top > max_top) logview_top = max_top;
+    if (logview_top < 0) logview_top = 0;
 }
 
 /* ─────────────────────────────────────────────────────
@@ -2072,6 +2298,14 @@ static void launch_game(int idx) {
  * ──────────────────────────────────────────────────── */
 static void handle_key_browser(SDL_KeyboardEvent *kev) {
     if (kev->type != SDL_KEYDOWN) return;
+
+    if (kev->keysym.sym == SDLK_y) {   /* Y = debug options (global) */
+        load_debug();
+        debug_sel = 0;
+        debug_notice = 0;
+        state = STATE_DEBUG;
+        return;
+    }
 
     if (game_count <= 0) {
         switch (kev->keysym.sym) {
@@ -2376,6 +2610,8 @@ int main(int argc, char **argv) {
         case STATE_KEYBINDS:    draw_keybinds();         break;
         case STATE_LAUNCHING:   draw_launching();        break;
         case STATE_RESOLUTION:  draw_resolution_picker(); break;
+        case STATE_DEBUG:       draw_debug();            break;
+        case STATE_LOGVIEW:     draw_logview();          break;
         }
 
         while (SDL_WaitEvent(&ev)) {
@@ -2392,6 +2628,12 @@ int main(int argc, char **argv) {
                     break;
                 case STATE_RESOLUTION:
                     handle_key_resolution(&ev.key);
+                    break;
+                case STATE_DEBUG:
+                    handle_key_debug(&ev.key);
+                    break;
+                case STATE_LOGVIEW:
+                    handle_key_logview(&ev.key);
                     break;
                 }
                 if (ev.type == SDL_KEYDOWN) break; /* one event per frame */

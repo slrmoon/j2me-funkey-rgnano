@@ -375,8 +375,53 @@ enum {
     OVERLAY_PAGE_DISPLAY,
     OVERLAY_PAGE_SOUND,
     OVERLAY_PAGE_CONTROLS,
-    OVERLAY_PAGE_VIEW          /* "Adjust view": move/zoom over the frozen game */
+    OVERLAY_PAGE_VIEW,         /* "Adjust view": move/zoom over the frozen game */
+    OVERLAY_PAGE_DEBUG
 };
+
+enum {
+    OVERLAY_MAIN_RESUME = 0,
+    OVERLAY_MAIN_DISPLAY,
+    OVERLAY_MAIN_CONTROLS,
+    OVERLAY_MAIN_SOUND,
+    OVERLAY_MAIN_DEBUG,
+    OVERLAY_MAIN_RESTART,
+    OVERLAY_MAIN_EXIT,
+    OVERLAY_MAIN_COUNT
+};
+
+/*
+ * Debug switches, shared with the launcher through PHONEME_DEBUG_CONFIG
+ * (KEY=0/1 lines). Everything except the FPS counter is read at start-up,
+ * so those changes apply when the game is restarted.
+ */
+static const struct {
+    const char *key;
+    const char *label;
+    int def;
+    int live;
+} OverlayDebugOptions[] = {
+    { "LOG",     "Log file",    1, 0 },
+    { "KEYS",    "Key log",     0, 0 },
+    { "EVENTS",  "Event log",   0, 0 },
+    { "DISPLAY", "Display log", 0, 0 },
+    { "AUDIO",   "Audio log",   0, 0 },
+    { "LAUNCH",  "Launch log",  0, 0 },
+    { "FPS",     "FPS counter", 0, 1 }
+};
+#define OVERLAY_DEBUG_COUNT ((int) (sizeof(OverlayDebugOptions) / sizeof(OverlayDebugOptions[0])))
+#define OVERLAY_DEBUG_FPS   (OVERLAY_DEBUG_COUNT - 1)
+#define OVERLAY_DEBUG_ROW_RESTART OVERLAY_DEBUG_COUNT
+
+static const char *OverlayDebugPath;
+static int OverlayDebug[OVERLAY_DEBUG_COUNT];
+static int OverlayDebugAtStart[OVERLAY_DEBUG_COUNT];
+
+/* FPS counter */
+static int ShowFps;
+static int FpsFrames;
+static int FpsValue = -1;
+static Uint32 FpsWindowStart;
 
 static int parse_screen_size(const char *text, int *width, int *height) {
     char *endptr;
@@ -784,8 +829,94 @@ static void overlay_save_config(void) {
     fclose(f);
 }
 
+static void overlay_load_debug(void) {
+    FILE *f;
+    char line[128];
+    int i;
+    for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) OverlayDebug[i] = OverlayDebugOptions[i].def;
+    if (OverlayDebugPath == NULL || OverlayDebugPath[0] == '\0') return;
+    f = fopen(OverlayDebugPath, "r");
+    if (f == NULL) return;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *eq = strchr(line, '=');
+        if (eq == NULL) continue;
+        *eq = '\0';
+        for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) {
+            if (strcmp(line, OverlayDebugOptions[i].key) == 0) OverlayDebug[i] = atoi(eq + 1) != 0;
+        }
+    }
+    fclose(f);
+}
+
+static void overlay_save_debug(void) {
+    FILE *f;
+    int i;
+    if (OverlayDebugPath == NULL || OverlayDebugPath[0] == '\0') return;
+    f = fopen(OverlayDebugPath, "w");
+    if (f == NULL) return;
+    for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) {
+        fprintf(f, "%s=%d\n", OverlayDebugOptions[i].key, OverlayDebug[i]);
+    }
+    fclose(f);
+}
+
+static int overlay_debug_needs_restart(void) {
+    int i;
+    for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) {
+        if (!OverlayDebugOptions[i].live && OverlayDebug[i] != OverlayDebugAtStart[i]) return 1;
+    }
+    return 0;
+}
+
+/* Restart: leave a flag for the launcher, then exit like "Exit" does */
+static int overlay_can_restart(void) {
+    const char *flag = getenv("PHONEME_RESTART_FLAG");
+    return flag != NULL && flag[0] != '\0';
+}
+
+static void overlay_request_restart(void) {
+    const char *flag = getenv("PHONEME_RESTART_FLAG");
+    if (flag != NULL && flag[0] != '\0') {
+        FILE *f = fopen(flag, "w");
+        if (f != NULL) fclose(f);
+    }
+    overlay_save_config();
+    OverlayVisible = 0;
+    OverlayShutdownRequested = 1;
+}
+
+static void fps_count_frame(void) {
+    Uint32 now;
+    if (!ShowFps) return;
+    now = SDL_GetTicks();
+    if (FpsWindowStart == 0) FpsWindowStart = now;
+    FpsFrames++;
+    if (now - FpsWindowStart >= 1000) {
+        FpsValue = (int) ((FpsFrames * 1000 + (now - FpsWindowStart) / 2) / (now - FpsWindowStart));
+        FpsFrames = 0;
+        FpsWindowStart = now;
+    }
+}
+
+static void fps_draw(void) {
+    char text[16];
+    int w;
+    if (!ShowFps || OverlayVisible) return;
+    if (FpsValue < 0) snprintf(text, sizeof(text), "-- fps");
+    else snprintf(text, sizeof(text), "%d fps", FpsValue);
+    w = (int) strlen(text) * 8;
+    boxColor(Native_SDL_Screen, 0, 0, (Sint16) (w + 3), 11, 0x000000a0);
+    stringColor(Native_SDL_Screen, 2, 2, text, 0x00ff88ff);
+}
+
 static void overlay_init(void) {
     char *volumeText;
+    int i;
+
+    OverlayDebugPath = getenv("PHONEME_DEBUG_CONFIG");
+    overlay_load_debug();
+    for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) OverlayDebugAtStart[i] = OverlayDebug[i];
+    ShowFps = getenv("PHONEME_SHOW_FPS") != NULL;
 
     OverlayConfigPath = getenv("PHONEME_CONFIG_PATH");
     configure_frame_limit();
@@ -1216,10 +1347,45 @@ static void overlay_assigned_binds_for_phone(int phoneCode, char *out, int outSi
 }
 
 static void overlay_draw_main(void) {
-    const char *items[] = { "Resume", "Display", "Controls", "Sound", "Exit" };
+    const char *items[OVERLAY_MAIN_COUNT] = {
+        "Resume", "Display", "Controls", "Sound", "Debug", "Restart game", "Exit"
+    };
     int i;
-    for (i = 0; i < 5; i++) {
-        overlay_draw_row(54 + i * 16, items[i], "", OverlayRow == i);
+    for (i = 0; i < OVERLAY_MAIN_COUNT; i++) {
+        overlay_draw_row(50 + i * 15, items[i], "", OverlayRow == i);
+    }
+    if (OverlayRow == OVERLAY_MAIN_RESTART && !overlay_can_restart()) {
+        stringColor(Native_SDL_Screen, 18, 160, "Exits; start the game", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 172, "again to apply changes", 0x9aaab0ff);
+    } else if (OverlayRow == OVERLAY_MAIN_RESTART) {
+        stringColor(Native_SDL_Screen, 18, 160, "Applies new size and", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 172, "debug settings", 0x9aaab0ff);
+    }
+}
+
+static void overlay_draw_debug(void) {
+    int i;
+    for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) {
+        const char *value = OverlayDebug[i] ? "On" : "Off";
+        if (i != 0 && i != OVERLAY_DEBUG_FPS && OverlayDebug[i] && !OverlayDebug[0]) {
+            value = "On (no log)";
+        }
+        overlay_draw_row(48 + i * 14, OverlayDebugOptions[i].label, value, OverlayRow == i);
+    }
+    overlay_draw_row(48 + OVERLAY_DEBUG_COUNT * 14,
+                     overlay_can_restart() ? "Restart now" : "Exit now", "",
+                     OverlayRow == OVERLAY_DEBUG_ROW_RESTART);
+    if (OverlayDebugPath == NULL || OverlayDebugPath[0] == '\0') {
+        stringColor(Native_SDL_Screen, 18, 172, "Start the game from the", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 184, "launcher to save these", 0xffd060ff);
+    } else if (overlay_debug_needs_restart()) {
+        stringColor(Native_SDL_Screen, 18, 172, "Restart the game to", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 184, "apply the log settings", 0xffd060ff);
+    } else if (OverlayRow == OVERLAY_DEBUG_FPS) {
+        stringColor(Native_SDL_Screen, 18, 172, "Shown right away", 0x9aaab0ff);
+    } else if (OverlayRow < OVERLAY_DEBUG_COUNT) {
+        stringColor(Native_SDL_Screen, 18, 172, "Read logs in launcher:", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 184, "Y > View log", 0x9aaab0ff);
     }
 }
 
@@ -1239,8 +1405,8 @@ static void overlay_draw_display(void) {
     overlay_draw_row(118, "FPS", OverlayFpsLimits[OverlayFpsSel].label, OverlayRow == 4);
     overlay_draw_row(134, "Adjust view", ">", OverlayRow == 5);
     if (OverlayResolutionChanged) {
-        stringColor(Native_SDL_Screen, 18, 158, "Restart game for new", 0xffd060ff);
-        stringColor(Native_SDL_Screen, 18, 170, "resolution to apply", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 158, "New size applies after", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 170, "Menu > Restart game", 0xffd060ff);
     } else if (OverlayRow == 1 && PresentScaleMode != PRESENT_SCALE_ZOOM) {
         stringColor(Native_SDL_Screen, 18, 158, "Zoom works in", 0x9aaab0ff);
         stringColor(Native_SDL_Screen, 18, 170, "Manual zoom mode", 0x9aaab0ff);
@@ -1341,6 +1507,9 @@ static void overlay_draw(void) {
     } else if (OverlayPage == OVERLAY_PAGE_CONTROLS) {
         stringColor(Native_SDL_Screen, 18, 34, "Controls", 0x7df9ffff);
         overlay_draw_controls();
+    } else if (OverlayPage == OVERLAY_PAGE_DEBUG) {
+        stringColor(Native_SDL_Screen, 18, 34, "Debug (all games)", 0x7df9ffff);
+        overlay_draw_debug();
     }
 
     stringColor(Native_SDL_Screen, 18, SDL_FULLHEIGHT - 20,
@@ -1376,11 +1545,23 @@ static void overlay_adjust_selected(int direction) {
             overlay_set_profile_index(OverlayProfileSel + direction);
             overlay_save_config();
         }
+    } else if (OverlayPage == OVERLAY_PAGE_DEBUG) {
+        if (OverlayRow < OVERLAY_DEBUG_COUNT) {
+            OverlayDebug[OverlayRow] = !OverlayDebug[OverlayRow];
+            if (OverlayRow == OVERLAY_DEBUG_FPS) {
+                ShowFps = OverlayDebug[OverlayRow];
+                FpsValue = -1;
+                FpsFrames = 0;
+                FpsWindowStart = 0;
+            }
+            overlay_save_debug();
+        }
     }
 }
 
 static int overlay_row_count(void) {
-    if (OverlayPage == OVERLAY_PAGE_MAIN) return 5;
+    if (OverlayPage == OVERLAY_PAGE_MAIN) return OVERLAY_MAIN_COUNT;
+    if (OverlayPage == OVERLAY_PAGE_DEBUG) return OVERLAY_DEBUG_COUNT + 1;
     if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 6;
     if (OverlayPage == OVERLAY_PAGE_SOUND) return 2;
     if (OverlayPage == OVERLAY_PAGE_CONTROLS) return OVERLAY_PHONE_COUNT + OVERLAY_CONTROL_ROW_OFFSET;
@@ -1403,29 +1584,40 @@ static void overlay_back(void) {
         OverlayRow = 5;
         return;
     }
+    OverlayRow = OverlayPage == OVERLAY_PAGE_DISPLAY ? OVERLAY_MAIN_DISPLAY
+               : OverlayPage == OVERLAY_PAGE_CONTROLS ? OVERLAY_MAIN_CONTROLS
+               : OverlayPage == OVERLAY_PAGE_SOUND ? OVERLAY_MAIN_SOUND
+               : OVERLAY_MAIN_DEBUG;
     OverlayPage = OVERLAY_PAGE_MAIN;
-    OverlayRow = 0;
 }
 
 static void overlay_accept(void) {
     if (OverlayPage == OVERLAY_PAGE_MAIN) {
-        if (OverlayRow == 0) {
+        if (OverlayRow == OVERLAY_MAIN_RESUME) {
             OverlayVisible = 0;
             overlay_save_config();
-        } else if (OverlayRow == 1) {
+        } else if (OverlayRow == OVERLAY_MAIN_DISPLAY) {
             OverlayPage = OVERLAY_PAGE_DISPLAY;
             OverlayRow = 0;
-        } else if (OverlayRow == 2) {
+        } else if (OverlayRow == OVERLAY_MAIN_CONTROLS) {
             OverlayPage = OVERLAY_PAGE_CONTROLS;
             OverlayRow = 0;
-        } else if (OverlayRow == 3) {
+        } else if (OverlayRow == OVERLAY_MAIN_SOUND) {
             OverlayPage = OVERLAY_PAGE_SOUND;
             OverlayRow = 0;
-        } else if (OverlayRow == 4) {
+        } else if (OverlayRow == OVERLAY_MAIN_DEBUG) {
+            OverlayPage = OVERLAY_PAGE_DEBUG;
+            OverlayRow = 0;
+        } else if (OverlayRow == OVERLAY_MAIN_RESTART) {
+            overlay_request_restart();
+        } else if (OverlayRow == OVERLAY_MAIN_EXIT) {
             overlay_save_config();
             OverlayVisible = 0;
             OverlayShutdownRequested = 1;
         }
+    } else if (OverlayPage == OVERLAY_PAGE_DEBUG &&
+               OverlayRow == OVERLAY_DEBUG_ROW_RESTART) {
+        overlay_request_restart();
     } else if (OverlayPage == OVERLAY_PAGE_CONTROLS) {
         if (OverlayRow == 0) {
             overlay_adjust_selected(1);
@@ -1682,6 +1874,7 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
     }
 
     SDL_UnlockSurface(Native_SDL_Screen);
+    fps_draw();
     overlay_draw();
 }
 
@@ -1833,6 +2026,7 @@ void VideoCopyRotate(unsigned short *Buffer, unsigned short *Video)
 void lfjport_refresh(int x1, int y1, int x2, int y2)
 {
   wait_frame_limit();
+  fps_count_frame();
   update_refresh_bounds(x1, y1, x2, y2);
   SDL_UnlockSurface(Native_SDL_HScreen);
   SDL_UnlockSurface(Native_SDL_VScreen);
