@@ -7,6 +7,7 @@
 int  fka_eas_init(int engine);
 void fka_eas_shutdown(void);
 int  fka_eas_set_engine(int engine);
+void fka_eas_stream_engine(void *stream, int engine);
 int  fka_eas_frame(void);                 /* samples per EAS render call */
 void *fka_eas_open(void);                 /* new MIDI stream + virtual synth */
 void fka_eas_close(void *stream);

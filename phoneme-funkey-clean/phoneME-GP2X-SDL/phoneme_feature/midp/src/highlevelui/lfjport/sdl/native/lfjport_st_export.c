@@ -39,14 +39,48 @@
 extern int characterColor(SDL_Surface *dst, Sint16 x, Sint16 y, char c,
                           Uint32 color);
 
+/* color is 0xRRGGBBAA like SDL_gfx. The old version passed it straight to
+ * SDL_FillRect as a raw RGB565 pixel: no blending and wrong colors, so the
+ * "dim" layer was a solid blue screen hiding the game behind the menu. */
 static int boxColor(SDL_Surface *dst, Sint16 x1, Sint16 y1, Sint16 x2, Sint16 y2,
                     Uint32 color) {
-    SDL_Rect rect;
-    rect.x = x1;
-    rect.y = y1;
-    rect.w = (Uint16) (x2 >= x1 ? x2 - x1 + 1 : 0);
-    rect.h = (Uint16) (y2 >= y1 ? y2 - y1 + 1 : 0);
-    return SDL_FillRect(dst, &rect, color);
+    Uint8 r = (Uint8) (color >> 24), g = (Uint8) (color >> 16);
+    Uint8 b = (Uint8) (color >> 8), a = (Uint8) color;
+    int x, y;
+    if (dst == NULL) return -1;
+    if (x1 > x2) { Sint16 t = x1; x1 = x2; x2 = t; }
+    if (y1 > y2) { Sint16 t = y1; y1 = y2; y2 = t; }
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x2 >= dst->w) x2 = (Sint16) (dst->w - 1);
+    if (y2 >= dst->h) y2 = (Sint16) (dst->h - 1);
+    if (x1 > x2 || y1 > y2) return 0;
+    if (a == 255 || dst->format->BytesPerPixel != 2) {
+        SDL_Rect rect;
+        rect.x = x1;
+        rect.y = y1;
+        rect.w = (Uint16) (x2 - x1 + 1);
+        rect.h = (Uint16) (y2 - y1 + 1);
+        return SDL_FillRect(dst, &rect, SDL_MapRGB(dst->format, r, g, b));
+    }
+    if (SDL_MUSTLOCK(dst) && SDL_LockSurface(dst) != 0) return -1;
+    {
+        /* RGB565 blend */
+        int sr = r >> 3, sg = g >> 2, sb = b >> 3, ia = 255 - a;
+        for (y = y1; y <= y2; y++) {
+            Uint16 *p = (Uint16 *) ((Uint8 *) dst->pixels + y * dst->pitch) + x1;
+            for (x = x1; x <= x2; x++, p++) {
+                int d = *p;
+                int dr = (d >> 11) & 31, dg = (d >> 5) & 63, db = d & 31;
+                dr = (sr * a + dr * ia) / 255;
+                dg = (sg * a + dg * ia) / 255;
+                db = (sb * a + db * ia) / 255;
+                *p = (Uint16) ((dr << 11) | (dg << 5) | db);
+            }
+        }
+    }
+    if (SDL_MUSTLOCK(dst)) SDL_UnlockSurface(dst);
+    return 0;
 }
 
 static int rectangleColor(SDL_Surface *dst, Sint16 x1, Sint16 y1, Sint16 x2,
@@ -83,6 +117,9 @@ int  InitAudioSubsystem(void);
 void FinalizeAudioSubsystem(void);
 void MediaSDL_SetMasterVolume(int volume);
 int  MediaSDL_GetMasterVolume(void);
+void MediaSDL_PauseAll(int paused);
+void MediaSDL_SetSynth(int engine);
+int  MediaSDL_GetSynth(void);
 int  PhoneMEInputGetBind(int index);
 void PhoneMEInputSetBind(int index, int key);
 int  PhoneMEInputGetProfileCount(void);
@@ -340,9 +377,22 @@ static int OverlayResolutionChanged;
 static int OverlayFpsSel = 3;
 static int OverlayProfileSel;
 static int OverlayVolume = 100;
+static int OverlaySynthSel;      /* index into OverlaySynths */
 static const char *OverlayConfigPath;
 static int FrameLimitFps = 30;
 static Uint32 FrameLimitLastTicks;
+
+/* MIDI synth presets (fkaudio engine ids: 1 wavetable, 2 FM, 3 hybrid) */
+static const struct {
+    const char *id;
+    const char *label;
+    int engine;
+} OverlaySynths[] = {
+    { "hybrid",    "Hybrid",    3 },
+    { "wavetable", "Wavetable", 1 },
+    { "fm",        "FM",        2 }
+};
+#define OVERLAY_SYNTH_COUNT ((int) (sizeof(OverlaySynths) / sizeof(OverlaySynths[0])))
 
 enum {
     OVERLAY_PAGE_MAIN = 0,
@@ -679,6 +729,22 @@ static void overlay_set_volume(int volume) {
     MediaSDL_SetMasterVolume(OverlayVolume);
 }
 
+static void overlay_set_synth_index(int index) {
+    if (index < 0) index = OVERLAY_SYNTH_COUNT - 1;
+    if (index >= OVERLAY_SYNTH_COUNT) index = 0;
+    OverlaySynthSel = index;
+    MediaSDL_SetSynth(OverlaySynths[index].engine);
+}
+
+static int overlay_find_synth(const char *id) {
+    int i;
+    for (i = 0; id != NULL && i < OVERLAY_SYNTH_COUNT; i++) {
+        if (strcmp(OverlaySynths[i].id, id) == 0) return i;
+    }
+    if (id != NULL && strcmp(id, "wt") == 0) return 1;
+    return 0;
+}
+
 static void overlay_set_fps_index(int index) {
     if (index < 0) index = OVERLAY_FPS_LIMIT_COUNT - 1;
     if (index >= OVERLAY_FPS_LIMIT_COUNT) index = 0;
@@ -704,6 +770,7 @@ static void overlay_save_config(void) {
     fprintf(f, "DISPLAY_MODE=%s\n", OverlayModes[OverlayModeSel].id);
     fprintf(f, "FPS_LIMIT=%s\n", OverlayFpsLimits[OverlayFpsSel].id);
     fprintf(f, "VOLUME=%d\n", OverlayVolume);
+    fprintf(f, "SYNTH=%s\n", OverlaySynths[OverlaySynthSel].id);
     fprintf(f, "PROFILE=%s\n", PhoneMEInputGetProfileId(OverlayProfileSel));
     for (i = 0; i < OVERLAY_BIND_COUNT; i++) {
         fprintf(f, "%s=%d\n", OverlayBindNames[i], PhoneMEInputGetBind(i));
@@ -726,6 +793,8 @@ static void overlay_init(void) {
         OverlayVolume = MediaSDL_GetMasterVolume();
     }
     overlay_set_volume(OverlayVolume);
+    /* the engine reads PHONEME_SYNTH itself at start; just mirror it */
+    OverlaySynthSel = overlay_find_synth(getenv("PHONEME_SYNTH"));
 }
 
 static int compute_fit_height_width(int srcWidth, int srcHeight) {
@@ -1115,6 +1184,7 @@ static void overlay_draw_sound(void) {
     char value[32];
     snprintf(value, sizeof(value), "%d%%", OverlayVolume);
     overlay_draw_row(54, "Volume", value, OverlayRow == 0);
+    overlay_draw_row(70, "MIDI synth", OverlaySynths[OverlaySynthSel].label, OverlayRow == 1);
 }
 
 static void overlay_draw_controls(void) {
@@ -1156,10 +1226,11 @@ static void overlay_draw_controls(void) {
 static void overlay_draw(void) {
     if (!OverlayVisible) return;
 
+    /* the frozen game stays visible under a dimmed, translucent panel */
     boxColor(Native_SDL_Screen, 0, 0, SDL_FULLWIDTH - 1, SDL_FULLHEIGHT - 1,
-             0x00000099);
+             0x00000070);
     boxColor(Native_SDL_Screen, 8, 24, SDL_FULLWIDTH - 8, SDL_FULLHEIGHT - 12,
-             0x101820ee);
+             0x101820b0);
     rectangleColor(Native_SDL_Screen, 8, 24, SDL_FULLWIDTH - 8, SDL_FULLHEIGHT - 12,
                    0x7df9ffff);
 
@@ -1192,7 +1263,8 @@ static void overlay_adjust_selected(int direction) {
         else if (OverlayRow == 3) overlay_set_fps_index(OverlayFpsSel + direction);
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
-        overlay_set_volume(OverlayVolume + direction * 5);
+        if (OverlayRow == 0) overlay_set_volume(OverlayVolume + direction * 5);
+        else if (OverlayRow == 1) overlay_set_synth_index(OverlaySynthSel + direction);
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_CONTROLS) {
         if (OverlayRow == 0) {
@@ -1205,7 +1277,7 @@ static void overlay_adjust_selected(int direction) {
 static int overlay_row_count(void) {
     if (OverlayPage == OVERLAY_PAGE_MAIN) return 5;
     if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 4;
-    if (OverlayPage == OVERLAY_PAGE_SOUND) return 1;
+    if (OverlayPage == OVERLAY_PAGE_SOUND) return 2;
     if (OverlayPage == OVERLAY_PAGE_CONTROLS) return OVERLAY_PHONE_COUNT + OVERLAY_CONTROL_ROW_OFFSET;
     return 1;
 }
@@ -1332,6 +1404,41 @@ int PhoneMEOverlayHandleSDLEvent(SDL_Event *event) {
         return 1;
     }
     return 1;
+}
+
+void PhoneMEOverlayRefresh(void);
+
+int PhoneMEOverlayIsVisible(void) {
+    return OverlayVisible;
+}
+
+/*
+ * The menu is modal: while it is open this loop owns the event queue, so the
+ * VM (and every Java thread of the game) is frozen until it closes. Audio is
+ * paused at the mixer: notes neither advance nor get stuck, and resume where
+ * they were.
+ */
+void PhoneMEOverlayRunModal(void) {
+    SDL_Event ev;
+    MediaSDL_PauseAll(1);
+    PhoneMEOverlayRefresh();
+    while (OverlayVisible) {
+        int redraw = 0;
+        while (SDL_PollEvent(&ev)) {
+            if (ev.type == SDL_QUIT) {
+                OverlayVisible = 0;
+                OverlayShutdownRequested = 1;
+                break;
+            }
+            if (PhoneMEOverlayHandleSDLEvent(&ev)) redraw = 1;
+            if (!OverlayVisible) break;
+        }
+        if (redraw) PhoneMEOverlayRefresh();
+        if (OverlayVisible) SDL_Delay(16);
+    }
+    MediaSDL_PauseAll(0);
+    FrameLimitLastTicks = 0;
+    PhoneMEOverlayRefresh();
 }
 
 int PhoneMEOverlayConsumeShutdown(void) {

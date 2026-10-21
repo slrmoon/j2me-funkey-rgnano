@@ -363,6 +363,7 @@ static int    source_sel = 0;
 static int    display_mode_sel = 5;
 static int    fps_limit_sel = 3;
 static int    sound_volume = 100;
+static char   synth_id[16] = "hybrid";   /* MIDI synth preset, set in the in-game menu */
 static int    key_profile_sel = 0;
 static int    bind_sel   = 0;        /* selected row in settings */
 static int    bind_scroll = 0;
@@ -1343,6 +1344,7 @@ static void load_binds(const char *game_name, const char *jar_path) {
     display_mode_sel = 5;
     fps_limit_sel = 3;
     sound_volume = 100;
+    strcpy(synth_id, "hybrid");
     key_profile_sel = 0;
 
     if (!game_name) return;
@@ -1386,6 +1388,13 @@ static void load_binds(const char *game_name, const char *jar_path) {
             if (sound_volume > 100) sound_volume = 100;
             continue;
         }
+        if (strcmp(key, "SYNTH") == 0) {
+            if (strcmp(value, "hybrid") == 0 || strcmp(value, "wavetable") == 0 ||
+                strcmp(value, "fm") == 0) {
+                snprintf(synth_id, sizeof(synth_id), "%s", value);
+            }
+            continue;
+        }
         if (strcmp(key, "PROFILE") == 0 || strcmp(key, "KEY_PROFILE") == 0) {
             key_profile_sel = find_key_profile(value);
             apply_key_profile(key_profile_sel);
@@ -1418,6 +1427,7 @@ static void save_binds(const char *game_name) {
     fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
     fprintf(f, "FPS_LIMIT=%s\n", fps_limits[fps_limit_sel].id);
     fprintf(f, "VOLUME=%d\n", sound_volume);
+    fprintf(f, "SYNTH=%s\n", synth_id);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
 
     for (i = 0; i < BIND_COUNT; i++)
@@ -1956,6 +1966,7 @@ static void launch_game(int idx) {
         snprintf(volume, sizeof(volume), "%d", sound_volume);
         setenv("PHONEME_SOUND_VOLUME", volume, 1);
     }
+    setenv("PHONEME_SYNTH", synth_id, 1);
     {
         char ratio[16];
         snprintf(ratio, sizeof(ratio), "%d", current_scale_preset()->ratio);
