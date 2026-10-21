@@ -67,6 +67,7 @@
 
 #if ENABLE_DYNAMIC_NATIVE_METHODS || ENABLE_JVMPI_PROFILE
 #include <dlfcn.h>
+#include <ucontext.h>
 #endif
 
 // IMPL_NOTE: the offset of PC value in ucontext_t structure
@@ -466,7 +467,35 @@ static void print_ucontext(void* context) {
   jvm_fprintf(stderr, "\n");
 #endif
 
-#endif // __NetBSD__
+#elif defined(__linux__) && defined(__arm__)
+  /* Where it crashed: registers, then every word on the native stack that
+   * points into the executable (return addresses), so a crash report can
+   * be turned into function names with addr2line on runMidlet. */
+  extern char __executable_start, etext;
+  ucontext_t* uc = (ucontext_t*) context;
+  mcontext_t* mc = &uc->uc_mcontext;
+  unsigned long lo = (unsigned long) &__executable_start;
+  unsigned long hi = (unsigned long) &etext;
+  unsigned long *sp = (unsigned long *) mc->arm_sp;
+  int i, found = 0;
+  jvm_fprintf(stderr, "pc=%08lx lr=%08lx sp=%08lx fp=%08lx ip=%08lx\n",
+              (unsigned long) mc->arm_pc, (unsigned long) mc->arm_lr,
+              (unsigned long) mc->arm_sp, (unsigned long) mc->arm_fp,
+              (unsigned long) mc->arm_ip);
+  jvm_fprintf(stderr, "r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n",
+              (unsigned long) mc->arm_r0, (unsigned long) mc->arm_r1,
+              (unsigned long) mc->arm_r2, (unsigned long) mc->arm_r3,
+              (unsigned long) mc->arm_r4, (unsigned long) mc->arm_r5);
+  jvm_fprintf(stderr, "text=%08lx-%08lx stack:", lo, hi);
+  for (i = 0; sp != NULL && i < 512 && found < 24; i++) {
+    unsigned long w = sp[i];
+    if (w >= lo && w < hi) {
+      jvm_fprintf(stderr, " %08lx", w);
+      found++;
+    }
+  }
+  jvm_fprintf(stderr, "\n");
+#endif // __NetBSD__ / linux-arm
 }
 
 #if ENABLE_PAGE_PROTECTION
