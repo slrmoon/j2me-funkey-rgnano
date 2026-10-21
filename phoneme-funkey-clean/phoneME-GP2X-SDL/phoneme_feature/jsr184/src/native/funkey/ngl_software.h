@@ -285,9 +285,27 @@ static void ngl_sw_vec(const NGLArray *a, int index, float *v, int want) {
     if (p == NULL) {
         return;
     }
-    step = ngl_sw_type_size(a->type);
-    for (i = 0; i < a->size && i < want; ++i) {
-        v[i] = ngl_sw_component(p + i * step, a->type);
+    /* one type dispatch per vector instead of per component */
+    step = a->size < want ? a->size : want;
+    switch (a->type) {
+    case GL_SHORT:
+        for (i = 0; i < step; ++i) v[i] = (float)((const short *)p)[i];
+        break;
+    case GL_BYTE:
+        for (i = 0; i < step; ++i) v[i] = (float)((const signed char *)p)[i];
+        break;
+    case GL_UNSIGNED_BYTE:
+        for (i = 0; i < step; ++i) v[i] = (float)p[i];
+        break;
+    case GL_UNSIGNED_SHORT:
+        for (i = 0; i < step; ++i) v[i] = (float)((const unsigned short *)p)[i];
+        break;
+    case GL_FIXED:
+        for (i = 0; i < step; ++i) v[i] = (float)((const int *)p)[i] / 65536.0f;
+        break;
+    default:
+        for (i = 0; i < step; ++i) v[i] = ((const float *)p)[i];
+        break;
     }
 }
 
@@ -1006,7 +1024,10 @@ typedef struct {
     float fog;
     float u[NGL_SW_TEXTURE_UNITS], v[NGL_SW_TEXTURE_UNITS];
     unsigned int color;
+    unsigned int outcode;   /* clip planes outside (transformed vertices only) */
 } NGLVertex;
+
+static unsigned int ngl_sw_outcode(const NGLVertex *v);
 
 static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
     float p[4];
@@ -1027,12 +1048,13 @@ static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
      * fully fogged every sprite with a positive NDC depth. Identical for
      * ordinary geometry in front of the camera. */
     out->fog = -mv[2];
+    out->outcode = ngl_sw_outcode(out);
     out->color = ngl_sw_lit_color(index, mv, ngl_sw_color(index));
     for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
         out->u[unit] = 0.0f;
         out->v[unit] = 0.0f;
         if (ngl_sw.texcoord[unit].enabled && ngl_sw.texcoord[unit].ptr != NULL) {
-            ngl_sw_vec(&ngl_sw.texcoord[unit], index, tc, 4);
+            ngl_sw_vec(&ngl_sw.texcoord[unit], index, tc, 2);
             out->u[unit] = ngl_sw.texture_matrix[unit][0] * tc[0] +
                            ngl_sw.texture_matrix[unit][4] * tc[1] +
                            ngl_sw.texture_matrix[unit][12];
@@ -1339,6 +1361,13 @@ static int ngl_sw_floor_int(float f) {
     return (f < (float)i) ? i - 1 : i;
 }
 
+/* floorf without the libm call for the usual range; huge or NaN values
+ * (degenerate w) keep the exact libm behaviour. */
+static float ngl_sw_floorf(float f) {
+    if (f > -8388608.0f && f < 8388608.0f) return (float)ngl_sw_floor_int(f);
+    return floorf(f);
+}
+
 static int ngl_sw_is_pow2(int v) {
     return v > 0 && (v & (v - 1)) == 0;
 }
@@ -1422,6 +1451,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     int mode = GL_MODULATE;
     int repeat_s = 0, repeat_t = 0;
     int tw = 0, th = 0, wmask = 0, hmask = 0;
+    float inv_tw = 0.0f, inv_th = 0.0f;  /* exact: repeat needs pow2 */
     float l1x = (float)a1 * inv_area, l2x = (float)a2 * inv_area;
     float dqx = 0.0f, duqx = 0.0f, dvqx = 0.0f, dzx;
     float dcx[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -1437,6 +1467,8 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         if (mode != GL_MODULATE && mode != GL_REPLACE) return 0;
         tw = tex->width;
         th = tex->height;
+        inv_tw = 1.0f / (float)tw;
+        inv_th = 1.0f / (float)th;
         repeat_s = tex->wrap_s == GL_REPEAT;
         repeat_t = tex->wrap_t == GL_REPEAT;
         if ((repeat_s && !ngl_sw_is_pow2(tw)) || (repeat_t && !ngl_sw_is_pow2(th))) return 0;
@@ -1523,7 +1555,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                 /* keep 16.16 in range: shift repeating coordinates by whole
                  * texture periods, clamp the others (indices clamp anyway) */
                 if (repeat_s) {
-                    float k = floorf(s0 / (float)tw) * (float)tw;
+                    float k = ngl_sw_floorf(s0 * inv_tw) * (float)tw;
                     s0 -= k;
                     s1 -= k;
                 } else {
@@ -1531,7 +1563,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                     s1 = s1 < -8192.0f ? -8192.0f : (s1 > 8192.0f ? 8192.0f : s1);
                 }
                 if (repeat_t) {
-                    float k = floorf(t0 / (float)th) * (float)th;
+                    float k = ngl_sw_floorf(t0 * inv_th) * (float)th;
                     t0 -= k;
                     t1 -= k;
                 } else {
@@ -1619,7 +1651,8 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     return 1;
 }
 
-static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
+static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
+                                   const NGLVertex *c) {
     float aw, bw, cw;
     float fax, fay, fbx, fby, fcx, fcy;
     float maxabs;
@@ -1656,18 +1689,18 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
     if (ngl_sw.pixels == NULL || ngl_sw.width <= 0 || ngl_sw.height <= 0) {
         return;
     }
-    if (!(a.w > 0.0f) || !(b.w > 0.0f) || !(c.w > 0.0f)) {
+    if (!(a->w > 0.0f) || !(b->w > 0.0f) || !(c->w > 0.0f)) {
         return;
     }
-    aw = 1.0f / a.w;
-    bw = 1.0f / b.w;
-    cw = 1.0f / c.w;
-    fax = (a.x * aw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
-    fay = (a.y * aw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
-    fbx = (b.x * bw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
-    fby = (b.y * bw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
-    fcx = (c.x * cw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
-    fcy = (c.y * cw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
+    aw = 1.0f / a->w;
+    bw = 1.0f / b->w;
+    cw = 1.0f / c->w;
+    fax = (a->x * aw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
+    fay = (a->y * aw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
+    fbx = (b->x * bw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
+    fby = (b->y * bw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
+    fcx = (c->x * cw * 0.5f + 0.5f) * (float)ngl_sw.viewport[2] + (float)ngl_sw.viewport[0];
+    fcy = (c->y * cw * 0.5f + 0.5f) * (float)ngl_sw.viewport[3] + (float)ngl_sw.viewport[1];
 
     /* Pick the finest subpixel grid whose edge values fit in 32 bits:
      * |E| <= 2 * (2 * M * sub)^2 < 2^31  =>  M * sub < 16384. */
@@ -1677,7 +1710,7 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
     if (maxabs * 16.0f < 16000.0f) shift = 4;
     else if (maxabs * 4.0f < 16000.0f) shift = 2;
     else {
-        ngl_sw_raster_tri_ref(a, b, c);
+        ngl_sw_raster_tri_ref(*a, *b, *c);
         return;
     }
     sub = 1 << shift;
@@ -1706,7 +1739,7 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
         }
     }
     if (area < 0) {
-        NGLVertex tv = b; b = c; c = tv;
+        const NGLVertex *tv = b; b = c; c = tv;
         { int t = bx; bx = cx; cx = t; }
         { int t = by; by = cy; cy = t; }
         { float t = bw; bw = cw; cw = t; }
@@ -1716,11 +1749,33 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
     }
     inv_area = 1.0f / (float)area;
 
+    /* Pixel bounds, then scissor and target: reject off-screen
+     * triangles before any attribute or texture setup. */
+    minx = (int)(((ax < bx ? (ax < cx ? ax : cx) : (bx < cx ? bx : cx))) >> shift);
+    maxx = (int)(((ax > bx ? (ax > cx ? ax : cx) : (bx > cx ? bx : cx))) >> shift) + 1;
+    miny = (int)(((ay < by ? (ay < cy ? ay : cy) : (by < cy ? by : cy))) >> shift);
+    maxy = (int)(((ay > by ? (ay > cy ? ay : cy) : (by > cy ? by : cy))) >> shift) + 1;
+    scx0 = ngl_sw.scissor_test ? ngl_sw.scissor[0] : 0;
+    scy0 = ngl_sw.scissor_test ? ngl_sw.scissor[1] : 0;
+    scx1 = scx0 + (ngl_sw.scissor_test ? ngl_sw.scissor[2] : ngl_sw.width);
+    scy1 = scy0 + (ngl_sw.scissor_test ? ngl_sw.scissor[3] : ngl_sw.height);
+    if (scx0 < 0) scx0 = 0;
+    if (scy0 < 0) scy0 = 0;
+    if (scx1 > ngl_sw.width) scx1 = ngl_sw.width;
+    if (scy1 > ngl_sw.height) scy1 = ngl_sw.height;
+    if (minx < scx0) minx = scx0;
+    if (maxx > scx1) maxx = scx1;
+    if (miny < scy0) miny = scy0;
+    if (maxy > scy1) maxy = scy1;
+    if (minx >= maxx || miny >= maxy) {
+        return;
+    }
+
     /* Depth in final 16-bit units, linear in screen space. */
     {
-        float az = a.z * aw * 0.5f + 0.5f;
-        float bz = b.z * bw * 0.5f + 0.5f;
-        float cz = c.z * cw * 0.5f + 0.5f;
+        float az = a->z * aw * 0.5f + 0.5f;
+        float bz = b->z * bw * 0.5f + 0.5f;
+        float cz = c->z * cw * 0.5f + 0.5f;
         if (ngl_sw.polygon_offset_fill) {
             float span_x = fmaxf(fax, fmaxf(fbx, fcx)) - fminf(fax, fminf(fbx, fcx));
             float span_y = fmaxf(fay, fmaxf(fby, fcy)) - fminf(fay, fminf(fby, fcy));
@@ -1759,8 +1814,8 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
         }
     }
     smooth = ngl_sw.shade_model == GL_SMOOTH &&
-             !(a.color == b.color && b.color == c.color);
-    flat_color = c.color;
+             !(a->color == b->color && b->color == c->color);
+    flat_color = c->color;
     /* Constant w (2D overlays, backgrounds, orthographic) needs no
      * per-pixel division at all. */
     perspective = (any_tex || smooth || ngl_sw.fog) &&
@@ -1775,20 +1830,20 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
         float kc = perspective ? cw : 1.0f;
         for (unit = 0; unit < NGL_SW_TEXTURE_UNITS; ++unit) {
             if (tex_unit[unit] == NULL) continue;
-            ngl_sw_plane(&pu[unit], a.u[unit] * ka, b.u[unit] * kb, c.u[unit] * kc);
-            ngl_sw_plane(&pv[unit], a.v[unit] * ka, b.v[unit] * kb, c.v[unit] * kc);
+            ngl_sw_plane(&pu[unit], a->u[unit] * ka, b->u[unit] * kb, c->u[unit] * kc);
+            ngl_sw_plane(&pv[unit], a->v[unit] * ka, b->v[unit] * kb, c->v[unit] * kc);
         }
         if (ngl_sw.fog) {
-            ngl_sw_plane(&pfog, a.fog * ka, b.fog * kb, c.fog * kc);
+            ngl_sw_plane(&pfog, a->fog * ka, b->fog * kb, c->fog * kc);
         }
         if (smooth) {
             int ch;
             for (ch = 0; ch < 4; ++ch) {
                 int sh = ch == 3 ? 24 : 16 - ch * 8;
                 ngl_sw_plane(&pcol[ch],
-                             (float)((a.color >> sh) & 0xffU) * ka,
-                             (float)((b.color >> sh) & 0xffU) * kb,
-                             (float)((c.color >> sh) & 0xffU) * kc);
+                             (float)((a->color >> sh) & 0xffU) * ka,
+                             (float)((b->color >> sh) & 0xffU) * kb,
+                             (float)((c->color >> sh) & 0xffU) * kc);
             }
         }
     }
@@ -1798,26 +1853,6 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
                    ngl_sw.color_mask[0] && ngl_sw.color_mask[1] &&
                    ngl_sw.color_mask[2];
 
-    /* Pixel bounds, then scissor and target. */
-    minx = (int)(((ax < bx ? (ax < cx ? ax : cx) : (bx < cx ? bx : cx))) >> shift);
-    maxx = (int)(((ax > bx ? (ax > cx ? ax : cx) : (bx > cx ? bx : cx))) >> shift) + 1;
-    miny = (int)(((ay < by ? (ay < cy ? ay : cy) : (by < cy ? by : cy))) >> shift);
-    maxy = (int)(((ay > by ? (ay > cy ? ay : cy) : (by > cy ? by : cy))) >> shift) + 1;
-    scx0 = ngl_sw.scissor_test ? ngl_sw.scissor[0] : 0;
-    scy0 = ngl_sw.scissor_test ? ngl_sw.scissor[1] : 0;
-    scx1 = scx0 + (ngl_sw.scissor_test ? ngl_sw.scissor[2] : ngl_sw.width);
-    scy1 = scy0 + (ngl_sw.scissor_test ? ngl_sw.scissor[3] : ngl_sw.height);
-    if (scx0 < 0) scx0 = 0;
-    if (scy0 < 0) scy0 = 0;
-    if (scx1 > ngl_sw.width) scx1 = ngl_sw.width;
-    if (scy1 > ngl_sw.height) scy1 = ngl_sw.height;
-    if (minx < scx0) minx = scx0;
-    if (maxx > scx1) maxx = scx1;
-    if (miny < scy0) miny = scy0;
-    if (maxy > scy1) maxy = scy1;
-    if (minx >= maxx || miny >= maxy) {
-        return;
-    }
 
     /* e0 = edge(b, c, p) weights a; e1 = edge(c, a, p) weights b;
      * e2 = edge(a, b, p) weights c. E(p) = (px-Px)(Qy-Py) - (py-Py)(Qx-Px). */
@@ -1963,7 +1998,8 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
     }
 }
 
-static void ngl_sw_raster_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
+static void ngl_sw_raster_tri(const NGLVertex *a, const NGLVertex *b,
+                              const NGLVertex *c) {
     ngl_sw_raster_tri_fast(a, b, c);
 }
 
@@ -1981,7 +2017,8 @@ static unsigned int ngl_sw_outcode(const NGLVertex *v) {
     return code;
 }
 
-static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
+static void ngl_sw_draw_tri(const NGLVertex *a, const NGLVertex *b,
+                            const NGLVertex *c) {
     NGLVertex first[12];
     NGLVertex second[12];
     NGLVertex *input = first;
@@ -1991,25 +2028,30 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     int plane;
     int i;
     unsigned int clip_mask = 0x7fU;
-    first[0] = a;
-    first[1] = b;
-    first[2] = c;
     {
-        unsigned int oa = ngl_sw_outcode(&a);
-        unsigned int ob = ngl_sw_outcode(&b);
-        unsigned int oc = ngl_sw_outcode(&c);
+        unsigned int oa = a->outcode;
+        unsigned int ob = b->outcode;
+        unsigned int oc = c->outcode;
         if ((oa & ob & oc) != 0) {
             return;  /* entirely outside one plane */
         }
         if ((oa | ob | oc) == 0) {
-            if (ngl_sw.shade_model != GL_SMOOTH) {
-                a.color = b.color = c.color;
+            /* entirely inside: no clipping */
+            if (ngl_sw.shade_model != GL_SMOOTH &&
+                    (a->color != c->color || b->color != c->color)) {
+                NGLVertex fa = *a, fb = *b;
+                fa.color = fb.color = c->color;
+                ngl_sw_raster_tri(&fa, &fb, c);
+            } else {
+                ngl_sw_raster_tri(a, b, c);
             }
-            ngl_sw_raster_tri(a, b, c);  /* entirely inside: no clipping */
             return;
         }
         clip_mask = oa | ob | oc;
     }
+    first[0] = *a;
+    first[1] = *b;
+    first[2] = *c;
     for (plane = 0; plane < 7 && count >= 3; ++plane) {
         if ((clip_mask & (1U << plane)) == 0) {
             continue;  /* no vertex crosses this plane */
@@ -2022,10 +2064,10 @@ static void ngl_sw_draw_tri(NGLVertex a, NGLVertex b, NGLVertex c) {
     if (ngl_sw.shade_model != GL_SMOOTH) {
         /* Flat shading uses the provoking (last) vertex of the original
          * triangle for every piece produced by clipping. */
-        for (i = 0; i < count; ++i) input[i].color = c.color;
+        for (i = 0; i < count; ++i) input[i].color = c->color;
     }
     for (i = 1; i + 1 < count; ++i) {
-        ngl_sw_raster_tri(input[0], input[i], input[i + 1]);
+        ngl_sw_raster_tri(&input[0], &input[i], &input[i + 1]);
     }
 }
 
@@ -2064,18 +2106,21 @@ static int ngl_sw_vcache_reserve(int index) {
     return 1;
 }
 
-static void ngl_sw_fetch_vertex(int index, NGLVertex *out) {
+/* The cache is reserved for the whole draw up front (see draw_indexed), so
+ * the returned pointer stays valid until the draw ends. */
+static const NGLVertex *ngl_sw_fetch_vertex(int index, int cached,
+                                            NGLVertex *scratch) {
     NGLVertex *cache;
-    if (index < 0 || !ngl_sw_vcache_reserve(index)) {
-        ngl_sw_transform_vertex(index, out);
-        return;
+    if (!cached || index < 0) {
+        ngl_sw_transform_vertex(index, scratch);
+        return scratch;
     }
     cache = (NGLVertex *)ngl_sw.vcache;
     if (ngl_sw.vcache_stamp[index] != ngl_sw.vcache_draw) {
         ngl_sw_transform_vertex(index, &cache[index]);
         ngl_sw.vcache_stamp[index] = ngl_sw.vcache_draw;
     }
-    *out = cache[index];
+    return &cache[index];
 }
 
 static int ngl_sw_index(GLenum type, const GLvoid *indices, int i) {
@@ -2087,15 +2132,27 @@ static int ngl_sw_index(GLenum type, const GLvoid *indices, int i) {
 static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
                                 const GLvoid *indices, GLint first) {
     int i;
+    int max_index;
+    int cached;
+    NGLVertex sa, sb, sc;
     (void)mode;
     if (!ngl_sw.vertex.enabled || ngl_sw.vertex.ptr == NULL || count < 3) return;
+    if (indices != NULL) {
+        max_index = 0;
+        for (i = 0; i < count; ++i) {
+            int k = ngl_sw_index(type, indices, i);
+            if (k > max_index) max_index = k;
+        }
+    } else {
+        max_index = first + count - 1;
+    }
+    cached = max_index >= 0 && ngl_sw_vcache_reserve(max_index);
     ngl_sw_vcache_begin();
     ngl_sw_light_begin();
     for (i = 0; i + 2 < count; ++i) {
         int ia = indices != NULL ? ngl_sw_index(type, indices, i) : first + i;
         int ib = indices != NULL ? ngl_sw_index(type, indices, i + 1) : first + i + 1;
         int ic = indices != NULL ? ngl_sw_index(type, indices, i + 2) : first + i + 2;
-        NGLVertex a, b, c;
         if ((i & 1) != 0) {
             int t = ia; ia = ib; ib = t;
         }
@@ -2103,10 +2160,9 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
         if (ia == ib || ib == ic || ia == ic) {
             continue;
         }
-        ngl_sw_fetch_vertex(ia, &a);
-        ngl_sw_fetch_vertex(ib, &b);
-        ngl_sw_fetch_vertex(ic, &c);
-        ngl_sw_draw_tri(a, b, c);
+        ngl_sw_draw_tri(ngl_sw_fetch_vertex(ia, cached, &sa),
+                        ngl_sw_fetch_vertex(ib, cached, &sb),
+                        ngl_sw_fetch_vertex(ic, cached, &sc));
     }
 }
 
