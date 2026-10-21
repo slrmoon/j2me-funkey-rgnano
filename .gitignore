@@ -15,3 +15,8 @@ phoneme-funkey-opk-wrapper/stage/
 build/
 m3g_probe_results/
 m3g_ngl_probe_funkey
+
+# build outputs inside the phoneME tree
+phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/preverifier/build/linux/*.o
+phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/preverifier/build/linux/preverify
+phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/tools/output/
