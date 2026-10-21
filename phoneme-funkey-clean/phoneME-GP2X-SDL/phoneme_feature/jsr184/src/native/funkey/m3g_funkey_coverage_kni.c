@@ -689,7 +689,9 @@ Java_javax_microedition_m3g_Image2D__1isMutable(void) {
 KNIEXPORT KNI_RETURNTYPE_VOID
 Java_javax_microedition_m3g_Image2D__1set(void) {
     unsigned char *pixels;
-    int len = m3g_read_byte_array(8, &pixels);
+    /* _set(long handle, int x, int y, int w, int h, byte[] image):
+     * the long takes slots 1-2, so the array is slot 7 */
+    int len = m3g_read_byte_array(7, &pixels);
     funkey_m3g_image_set(M3G_LONG_PARAM(1), KNI_GetParameterAsInt(3), KNI_GetParameterAsInt(4),
                          KNI_GetParameterAsInt(5), KNI_GetParameterAsInt(6), pixels, len);
     if (pixels != 0) free(pixels);
