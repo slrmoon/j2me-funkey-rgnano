@@ -1392,6 +1392,233 @@ static void ngl_sw_plane(NGLPlane *p, float va, float vb, float vc) {
 
 #define NGL_SW_PLANE(p, l1, l2) ((p).a + (l1) * (p).db + (l2) * (p).dc)
 
+/*
+ * Span fast path for the common state: at most one texture (unit 0),
+ * nearest, no mipmaps, REPLACE or MODULATE; no fog, blending or colour
+ * mask; depth test off or LESS/LEQUAL/ALWAYS. Per row the covered span is
+ * found with the integer edge functions alone, then attributes are stepped
+ * across it instead of being rebuilt from barycentrics at every pixel:
+ * depth in 20.12 fixed point, texture coordinates and colours in 16.16,
+ * with the perspective division done every NGL_SW_SPAN pixels and linear
+ * interpolation in between (subpixel error, invisible at 240 px). Returns
+ * 0 when the state needs the general per-pixel loop.
+ */
+#define NGL_SW_SPAN 16
+
+static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
+                            const int *tex_mips, int perspective, int smooth,
+                            int simple_write, unsigned int flat_color,
+                            float inv_area, const NGLPlane *pz,
+                            const NGLPlane *pinvw, const NGLPlane *pu,
+                            const NGLPlane *pv, const NGLPlane *pcol,
+                            int minx, int maxx, int miny, int maxy,
+                            int row0, int row1, int row2,
+                            int a0, int a1, int a2, int b0, int b1, int b2,
+                            int bias1, int bias2) {
+    const NGLTexture *tex = tex_unit[0];
+    int depth_on = ngl_sw.depth_test && ngl_sw.depth != NULL;
+    int depth_less = depth_on && ngl_sw.depth_func == GL_LESS;
+    int depth_write = depth_on && ngl_sw.depth_mask;
+    int mode = GL_MODULATE;
+    int repeat_s = 0, repeat_t = 0;
+    int tw = 0, th = 0, wmask = 0, hmask = 0;
+    float l1x = (float)a1 * inv_area, l2x = (float)a2 * inv_area;
+    float dqx = 0.0f, duqx = 0.0f, dvqx = 0.0f, dzx;
+    float dcx[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    int y, ch;
+
+    if (!simple_write || ngl_sw.fog) return 0;
+    if (depth_on && ngl_sw.depth_func != GL_LEQUAL &&
+            ngl_sw.depth_func != GL_LESS && ngl_sw.depth_func != GL_ALWAYS) return 0;
+    if (NGL_SW_TEXTURE_UNITS > 1 && tex_unit[1] != NULL) return 0;
+    if (tex != NULL) {
+        mode = ngl_sw.tex_env_mode[0];
+        if (!tex_nearest[0] || tex_mips[0] || tex->no_color) return 0;
+        if (mode != GL_MODULATE && mode != GL_REPLACE) return 0;
+        tw = tex->width;
+        th = tex->height;
+        repeat_s = tex->wrap_s == GL_REPEAT;
+        repeat_t = tex->wrap_t == GL_REPEAT;
+        if ((repeat_s && !ngl_sw_is_pow2(tw)) || (repeat_t && !ngl_sw_is_pow2(th))) return 0;
+        wmask = tw - 1;
+        hmask = th - 1;
+    }
+
+    dzx = pz->db * l1x + pz->dc * l2x;
+    if (perspective) dqx = pinvw->db * l1x + pinvw->dc * l2x;
+    if (tex != NULL) {
+        duqx = pu[0].db * l1x + pu[0].dc * l2x;
+        dvqx = pv[0].db * l1x + pv[0].dc * l2x;
+    }
+    if (smooth) {
+        for (ch = 0; ch < 4; ++ch) dcx[ch] = pcol[ch].db * l1x + pcol[ch].dc * l2x;
+    }
+
+    for (y = miny; y < maxy; ++y, row0 += b0, row1 += b1, row2 += b2) {
+        int e0 = row0, e1 = row1, e2 = row2;
+        int xs, xe, x;
+        unsigned short *dst_row;
+        unsigned short *depth_row;
+        float l1, l2, q, uq = 0.0f, vq = 0.0f, rw0;
+        float cq[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        float u0 = 0.0f, v0 = 0.0f, c0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        int zfix, dzfix;
+
+        /* covered span of this row (triangles are convex) */
+        for (xs = minx; xs < maxx; ++xs, e0 += a0, e1 += a1, e2 += a2) {
+            if ((e0 | e1 | e2) >= 0) break;
+        }
+        if (xs >= maxx) continue;
+        {
+            int f0 = e0, f1 = e1, f2 = e2;
+            for (xe = xs; xe < maxx && (f0 | f1 | f2) >= 0; ++xe) {
+                f0 += a0; f1 += a1; f2 += a2;
+            }
+        }
+        dst_row = ngl_sw.pixels + (ngl_sw.height - 1 - y) * ngl_sw.stride;
+        depth_row = depth_on ? ngl_sw.depth + (ngl_sw.height - 1 - y) * ngl_sw.stride : NULL;
+
+        l1 = (float)(e1 - bias1) * inv_area;
+        l2 = (float)(e2 - bias2) * inv_area;
+        {
+            float zf = NGL_SW_PLANE(*pz, l1, l2);
+            zfix = (int)(zf * 4096.0f + 2048.0f);
+            dzfix = (int)(dzx * 4096.0f);
+        }
+        q = perspective ? NGL_SW_PLANE(*pinvw, l1, l2) : 1.0f;
+        rw0 = 1.0f / q;
+        if (tex != NULL) {
+            uq = NGL_SW_PLANE(pu[0], l1, l2);
+            vq = NGL_SW_PLANE(pv[0], l1, l2);
+            u0 = uq * rw0 * (float)tw;
+            v0 = vq * rw0 * (float)th;
+        }
+        if (smooth) {
+            for (ch = 0; ch < 4; ++ch) {
+                cq[ch] = NGL_SW_PLANE(pcol[ch], l1, l2);
+                c0[ch] = cq[ch] * rw0;
+            }
+        }
+
+        for (x = xs; x < xe; ) {
+            int n = xe - x < NGL_SW_SPAN ? xe - x : NGL_SW_SPAN;
+            int i;
+            float rw1, u1 = 0.0f, v1 = 0.0f, c1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            int su = 0, sv = 0, dsu = 0, dsv = 0;
+            int ci[4] = {0, 0, 0, 0}, dci[4] = {0, 0, 0, 0};
+            float inv_n = 1.0f / (float)n;
+
+            q += dqx * (float)n;
+            rw1 = 1.0f / q;
+            if (tex != NULL) {
+                /* segment ends in texels; s0/s1, t0/t1 are working copies,
+                 * u1/v1 stay unshifted as the next segment's start */
+                float s0 = u0, t0 = v0, s1, t1;
+                uq += duqx * (float)n;
+                vq += dvqx * (float)n;
+                u1 = uq * rw1 * (float)tw;
+                v1 = vq * rw1 * (float)th;
+                s1 = u1;
+                t1 = v1;
+                /* keep 16.16 in range: shift repeating coordinates by whole
+                 * texture periods, clamp the others (indices clamp anyway) */
+                if (repeat_s) {
+                    float k = floorf(s0 / (float)tw) * (float)tw;
+                    s0 -= k;
+                    s1 -= k;
+                } else {
+                    s0 = s0 < -8192.0f ? -8192.0f : (s0 > 8192.0f ? 8192.0f : s0);
+                    s1 = s1 < -8192.0f ? -8192.0f : (s1 > 8192.0f ? 8192.0f : s1);
+                }
+                if (repeat_t) {
+                    float k = floorf(t0 / (float)th) * (float)th;
+                    t0 -= k;
+                    t1 -= k;
+                } else {
+                    t0 = t0 < -8192.0f ? -8192.0f : (t0 > 8192.0f ? 8192.0f : t0);
+                    t1 = t1 < -8192.0f ? -8192.0f : (t1 > 8192.0f ? 8192.0f : t1);
+                }
+                if (s1 - s0 > 16384.0f || s0 - s1 > 16384.0f ||
+                    t1 - t0 > 16384.0f || t0 - t1 > 16384.0f) {
+                    s1 = s0;   /* absurd gradient (degenerate w): flat */
+                    t1 = t0;
+                }
+                su = (int)(s0 * 65536.0f);
+                sv = (int)(t0 * 65536.0f);
+                dsu = (int)((s1 - s0) * inv_n * 65536.0f);
+                dsv = (int)((t1 - t0) * inv_n * 65536.0f);
+            }
+            if (smooth) {
+                for (ch = 0; ch < 4; ++ch) {
+                    cq[ch] += dcx[ch] * (float)n;
+                    c1[ch] = cq[ch] * rw1;
+                    ci[ch] = (int)(c0[ch] * 65536.0f) + 32768;
+                    dci[ch] = (int)((c1[ch] - c0[ch]) * inv_n * 65536.0f);
+                }
+            }
+
+            for (i = 0; i < n; ++i, ++x) {
+                unsigned int color;
+                int dv = zfix >> 12;
+                if (dv < 0) dv = 0;
+                if (dv > 65535) dv = 65535;
+                zfix += dzfix;
+                if (depth_row != NULL && ngl_sw.depth_func != GL_ALWAYS) {
+                    unsigned short old = depth_row[x];
+                    if (depth_less ? (unsigned int)dv >= old : (unsigned int)dv > old) {
+                        su += dsu; sv += dsv;
+                        if (smooth) { ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3]; }
+                        continue;
+                    }
+                }
+                if (smooth) {
+                    int r = ci[0] >> 16, g = ci[1] >> 16, bl = ci[2] >> 16, al = ci[3] >> 16;
+                    ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3];
+                    color = ngl_sw_pack((unsigned int)(r < 0 ? 0 : r), (unsigned int)(g < 0 ? 0 : g),
+                                        (unsigned int)(bl < 0 ? 0 : bl), (unsigned int)(al < 0 ? 0 : al));
+                } else {
+                    color = flat_color;
+                }
+                if (tex != NULL) {
+                    int tx = su >> 16, ty = sv >> 16;
+                    unsigned int texel;
+                    su += dsu;
+                    sv += dsv;
+                    if (repeat_s) tx &= wmask;
+                    else if (tx < 0) tx = 0;
+                    else if (tx > wmask) tx = wmask;
+                    if (repeat_t) ty &= hmask;
+                    else if (ty < 0) ty = 0;
+                    else if (ty > hmask) ty = hmask;
+                    texel = tex->argb[ty * tw + tx];
+                    if (mode == GL_REPLACE) {
+                        color = (texel & 0x00ffffffU) |
+                                (tex->no_alpha ? (color & 0xff000000U) : (texel & 0xff000000U));
+                    } else if (color != 0xffffffffU) {
+                        color = ngl_sw_modulate(color, texel);
+                    } else {
+                        color = texel;   /* modulate by white */
+                    }
+                }
+                if (ngl_sw.alpha_test &&
+                        !ngl_sw_compare(ngl_sw.alpha_func,
+                                        (float)((color >> 24) & 0xffU) / 255.0f,
+                                        ngl_sw.alpha_ref)) {
+                    continue;
+                }
+                if (depth_write) depth_row[x] = (unsigned short)dv;
+                dst_row[x] = ngl_sw_rgb565(color);
+            }
+            u0 = u1;
+            v0 = v1;
+            if (smooth) {
+                for (ch = 0; ch < 4; ++ch) c0[ch] = c1[ch];
+            }
+        }
+    }
+    return 1;
+}
+
 static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
     float aw, bw, cw;
     float fax, fay, fbx, fby, fcx, fcy;
@@ -1624,6 +1851,13 @@ static void ngl_sw_raster_tri_fast(NGLVertex a, NGLVertex b, NGLVertex c) {
             dvx[unit] = pv[unit].db * l1x + pv[unit].dc * l2x;
             dvy[unit] = pv[unit].db * l1y + pv[unit].dc * l2y;
         }
+    }
+    if (ngl_sw_span_fast(tex_unit, tex_nearest, tex_mips, perspective, smooth,
+                         simple_write, flat_color, inv_area, &pz, &pinvw,
+                         pu, pv, pcol, minx, maxx, miny, maxy,
+                         row0, row1, row2, a0, a1, a2, b0, b1, b2,
+                         bias1, bias2)) {
+        return;
     }
     for (y = miny; y < maxy; ++y, row0 += b0, row1 += b1, row2 += b2) {
         int e0 = row0, e1 = row1, e2 = row2;
