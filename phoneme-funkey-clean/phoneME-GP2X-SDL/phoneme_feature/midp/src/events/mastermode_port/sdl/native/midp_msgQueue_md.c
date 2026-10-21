@@ -100,6 +100,7 @@ int PhoneMEOverlayConsumeShutdown(void);
 void PhoneMEOverlayRefresh(void);
 int PhoneMEOverlayIsVisible(void);
 void PhoneMEOverlayRunModal(void);
+void PhoneMEProfileTick(void);
 
 int PhoneMEInputGetBindCount()
 {
@@ -631,6 +632,7 @@ int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMid
 void checkForSystemSignal(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent, jlong timeout)
 { SDL_Event event;
   jlong stopTime = JVM_JavaMilliSeconds() + (timeout > 0 ? timeout : 0);
+  PhoneMEProfileTick();
   for (;;)
      { if (SDL_PollEvent(&event))
           { if (CheckEvent(&event, pNewSignal, pNewMidpEvent)) return;

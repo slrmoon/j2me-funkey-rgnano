@@ -51,12 +51,15 @@ static int16_t next_sample(void)
     return s;
 }
 
+void PhoneMEProfileThread(void);   /* lfjport_profile.c: sample this thread too */
+
 static void callback(void *user, Uint8 *stream, int bytes)
 {
     int16_t *out = (int16_t *) stream;
     int frames = bytes / (int) (sizeof(int16_t) * (size_t) g_channels);
     int i;
     (void) user;
+    PhoneMEProfileThread();
     if (frames > g_buf_cap) frames = g_buf_cap;
 
     if (g_rate == FKA_RATE) {

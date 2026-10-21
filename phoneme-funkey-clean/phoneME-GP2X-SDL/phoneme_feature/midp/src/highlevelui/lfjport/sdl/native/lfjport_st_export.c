@@ -127,6 +127,7 @@ int  PhoneMEInputGetProfileCount(void);
 const char *PhoneMEInputGetProfileId(int index);
 const char *PhoneMEInputGetProfileLabel(int index);
 int  PhoneMEInputGetProfileIndex(void);
+void PhoneMEProfileInit(void);
 void PhoneMEInputApplyProfile(int index);
 
 SDL_Surface     *Native_SDL_Screen, *Native_SDL_HScreen, *Native_SDL_VScreen;
@@ -407,6 +408,7 @@ static const struct {
     { "DISPLAY", "Display log", 0, 0 },
     { "AUDIO",   "Audio log",   0, 0 },
     { "LAUNCH",  "Launch log",  0, 0 },
+    { "PROFILE", "Profiler",    0, 0 },
     { "FPS",     "FPS counter", 0, 1 }
 };
 #define OVERLAY_DEBUG_COUNT ((int) (sizeof(OverlayDebugOptions) / sizeof(OverlayDebugOptions[0])))
@@ -1370,9 +1372,9 @@ static void overlay_draw_debug(void) {
         if (i != 0 && i != OVERLAY_DEBUG_FPS && OverlayDebug[i] && !OverlayDebug[0]) {
             value = "On (no log)";
         }
-        overlay_draw_row(48 + i * 14, OverlayDebugOptions[i].label, value, OverlayRow == i);
+        overlay_draw_row(48 + i * 13, OverlayDebugOptions[i].label, value, OverlayRow == i);
     }
-    overlay_draw_row(48 + OVERLAY_DEBUG_COUNT * 14,
+    overlay_draw_row(48 + OVERLAY_DEBUG_COUNT * 13,
                      overlay_can_restart() ? "Restart now" : "Exit now", "",
                      OverlayRow == OVERLAY_DEBUG_ROW_RESTART);
     if (OverlayDebugPath == NULL || OverlayDebugPath[0] == '\0') {
@@ -1949,6 +1951,7 @@ int lfjport_ui_init()
     if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: GP2X keys disabled\n");
   }
   overlay_init();
+  PhoneMEProfileInit();
   Native_SDL_Screen = SDL_SetVideoMode(SDL_FULLWIDTH, SDL_FULLHEIGHT, 16, 0);
   if (Native_SDL_Screen == NULL)
    { fprintf(stderr, "lfjport_ui_init: SDL_SetVideoMode failed: %s\n",

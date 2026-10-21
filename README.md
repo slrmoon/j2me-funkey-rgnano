@@ -362,6 +362,7 @@ list explain the selected one.
 | **Display log** | Off | screen set-up and the chosen scaling layout |
 | **Audio log** | Off | audio device rate, channels and buffer |
 | **Launch log** | Off | all settings the launcher passes to the game |
+| **Profiler** | Off | every 10 s: CPU load, time per area (Java, 3D, 2D, display, audio, GC…) and the top functions / Java methods — see below |
 | **FPS counter** | Off | frames per second on screen (no log needed) |
 
 The logs need **Log file** on; otherwise they show as `On (no log)`.
@@ -370,6 +371,22 @@ The logs need **Log file** on; otherwise they show as `On (no log)`.
 **Right — View log**: the log of the last run, read on the device, opened at
 the end. D-pad scrolls, ◀▶ by page, **L1/R1** jump to the start/end,
 **X** switches to the previous run.
+
+### Profiler output
+
+With **Profiler** and **Log file** on, the log gets a report every 10 seconds:
+
+```text
+[profile] 10.0 s, CPU 97%, 980 samples
+[profile] by area: Java (JIT) 41%, 3D (M3G) 27%, display output 9%, audio 8%, ...
+[profile]  12.3%  ngl_sw_raster_tri_fast
+[profile]   6.1%  e.a
+...
+```
+
+`CPU` is how busy the processor was; the areas and the list below show where
+that time went. Java methods appear as `class.method` (obfuscated names in most
+games). Send this report when a game is slow — it shows what to optimize.
 
 ### In a game — Power → **Debug**
 
