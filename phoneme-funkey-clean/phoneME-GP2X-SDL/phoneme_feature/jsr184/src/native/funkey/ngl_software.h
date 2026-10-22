@@ -1454,6 +1454,167 @@ static void ngl_sw_plane(NGLPlane *p, float va, float vb, float vc) {
 
 #define NGL_SW_PLANE(p, l1, l2) ((p).a + (l1) * (p).db + (l2) * (p).dc)
 
+/* Narrow [lo, hi) to the steps k where e + k * a >= 0 (one edge of a row).
+ * Edge functions are linear in x, so this is exactly the set a pixel scan
+ * would find, without walking the empty part of the bounding box. */
+static void ngl_sw_edge_range(int e, int a, int *lo, int *hi) {
+    if (a > 0) {
+        if (e < 0) {
+            unsigned int k = ((unsigned int)(-e) + (unsigned int)a - 1U) / (unsigned int)a;
+            if (k > (unsigned int)*hi) k = (unsigned int)*hi;
+            if ((int)k > *lo) *lo = (int)k;
+        }
+    } else if (a < 0) {
+        if (e < 0) {
+            *hi = *lo;
+        } else {
+            unsigned int k = (unsigned int)e / (unsigned int)(-a) + 1U;
+            if (k < (unsigned int)*hi) *hi = (int)k;
+        }
+    } else if (e < 0) {
+        *hi = *lo;
+    }
+}
+
+#if (defined(__ARM_NEON) || defined(__ARM_NEON__)) && !defined(NGL_SW_NO_NEON)
+#include <arm_neon.h>
+#define NGL_SW_HAVE_NEON 1
+
+/* Per-triangle state of the NEON span kernel. */
+typedef struct {
+    int depth_test;            /* 0: none/ALWAYS, 1: LESS, 2: LEQUAL */
+    int depth_write;
+    const unsigned int *tex;   /* NULL: untextured */
+    int tw, wmask, hmask, repeat_s, repeat_t;
+    int replace;               /* GL_REPLACE (else MODULATE) */
+    int smooth;
+    unsigned int flat_color;
+} NGLSpanNeon;
+
+/* same clamp/wrap as the scalar span loop */
+static inline int ngl_sw_texel_index(const NGLSpanNeon *s, int u, int v) {
+    int tx = u >> 16, ty = v >> 16;
+    if (s->repeat_s) tx &= s->wmask;
+    else if (tx < 0) tx = 0;
+    else if (tx > s->wmask) tx = s->wmask;
+    if (s->repeat_t) ty &= s->hmask;
+    else if (ty < 0) ty = 0;
+    else if (ty > s->hmask) ty = s->hmask;
+    return ty * s->tw + tx;
+}
+
+static inline uint32x4_t ngl_sw_div255_neon(uint32x4_t x) {
+    /* exact x / 255 for x <= 255 * 255 */
+    return vshrq_n_u32(vaddq_u32(vaddq_u32(x, vshrq_n_u32(x, 8)), vdupq_n_u32(1)), 8);
+}
+
+/*
+ * Four pixels per iteration of the span loop in ngl_sw_span_fast, for the
+ * states without alpha test or blending. Same arithmetic as the scalar loop
+ * (16.16 uv and colour, 20.12 depth, nearest texel, exact /255 modulate),
+ * so the output is identical. count is a multiple of 4; the interpolators
+ * are advanced by count pixels on return.
+ */
+static void ngl_sw_span_neon(const NGLSpanNeon *s, unsigned short *dst,
+                             unsigned short *depth, int count,
+                             int *zfix, int dzfix, int *su, int *sv,
+                             int dsu, int dsv, int *ci, const int *dci) {
+    static const int32_t lane[4] = {0, 1, 2, 3};
+    const int32x4_t vi = vld1q_s32(lane);
+    const int32x4_t zero = vdupq_n_s32(0);
+    const int32x4_t z4 = vdupq_n_s32(dzfix * 4);
+    const uint32x4_t m8 = vdupq_n_u32(0xffU);
+    int32x4_t z = vmlaq_n_s32(vdupq_n_s32(*zfix), vi, dzfix);
+    /* texture coordinates stay in core registers: NEON -> core moves stall
+     * the Cortex-A7 pipeline, core -> NEON moves are cheap */
+    int u = *su, v = *sv;
+    int32x4_t cr = zero, cg = zero, cb = zero;
+    int32x4_t cr4 = zero, cg4 = zero, cb4 = zero;
+    uint32x4_t fr, fg, fb;
+    int white = !s->smooth && (s->flat_color & 0x00ffffffU) == 0x00ffffffU;
+    int k;
+
+    fr = vdupq_n_u32((s->flat_color >> 16) & 0xffU);
+    fg = vdupq_n_u32((s->flat_color >> 8) & 0xffU);
+    fb = vdupq_n_u32(s->flat_color & 0xffU);
+    if (s->smooth) {
+        cr = vmlaq_n_s32(vdupq_n_s32(ci[0]), vi, dci[0]);
+        cg = vmlaq_n_s32(vdupq_n_s32(ci[1]), vi, dci[1]);
+        cb = vmlaq_n_s32(vdupq_n_s32(ci[2]), vi, dci[2]);
+        cr4 = vdupq_n_s32(dci[0] * 4);
+        cg4 = vdupq_n_s32(dci[1] * 4);
+        cb4 = vdupq_n_s32(dci[2] * 4);
+    }
+
+    for (k = 0; k < count; k += 4) {
+        int32x4_t dz = vminq_s32(vmaxq_s32(vshrq_n_s32(z, 12), zero),
+                                 vdupq_n_s32(65535));
+        uint16x4_t dv = vmovn_u32(vreinterpretq_u32_s32(dz));
+        uint16x4_t pass = vdup_n_u16(0xffffU);
+        uint16x4_t old = dv;
+        uint32x4_t r, g, b, out;
+
+        if (s->depth_test) {
+            old = vld1_u16(depth + k);
+            pass = s->depth_test == 1 ? vclt_u16(dv, old) : vcle_u16(dv, old);
+        }
+        {
+            if (s->smooth) {
+                r = vreinterpretq_u32_s32(vminq_s32(vmaxq_s32(vshrq_n_s32(cr, 16), zero), vdupq_n_s32(255)));
+                g = vreinterpretq_u32_s32(vminq_s32(vmaxq_s32(vshrq_n_s32(cg, 16), zero), vdupq_n_s32(255)));
+                b = vreinterpretq_u32_s32(vminq_s32(vmaxq_s32(vshrq_n_s32(cb, 16), zero), vdupq_n_s32(255)));
+            } else {
+                r = fr; g = fg; b = fb;
+            }
+            if (s->tex != NULL) {
+                unsigned int t0, t1, t2, t3;
+                uint32x4_t t;
+                t0 = s->tex[ngl_sw_texel_index(s, u, v)];
+                t1 = s->tex[ngl_sw_texel_index(s, u + dsu, v + dsv)];
+                t2 = s->tex[ngl_sw_texel_index(s, u + 2 * dsu, v + 2 * dsv)];
+                t3 = s->tex[ngl_sw_texel_index(s, u + 3 * dsu, v + 3 * dsv)];
+                t = vcombine_u32(vcreate_u32(((uint64_t)t1 << 32) | t0),
+                                 vcreate_u32(((uint64_t)t3 << 32) | t2));
+                if (s->replace || white) {
+                    out = vorrq_u32(vorrq_u32(
+                              vandq_u32(vshrq_n_u32(t, 8), vdupq_n_u32(0xf800U)),
+                              vandq_u32(vshrq_n_u32(t, 5), vdupq_n_u32(0x07e0U))),
+                              vandq_u32(vshrq_n_u32(t, 3), vdupq_n_u32(0x001fU)));
+                    goto store;
+                }
+                r = ngl_sw_div255_neon(vmulq_u32(r, vandq_u32(vshrq_n_u32(t, 16), m8)));
+                g = ngl_sw_div255_neon(vmulq_u32(g, vandq_u32(vshrq_n_u32(t, 8), m8)));
+                b = ngl_sw_div255_neon(vmulq_u32(b, vandq_u32(t, m8)));
+            }
+            out = vorrq_u32(vorrq_u32(
+                      vshlq_n_u32(vandq_u32(r, vdupq_n_u32(0xf8U)), 8),
+                      vshlq_n_u32(vandq_u32(g, vdupq_n_u32(0xfcU)), 3)),
+                      vshrq_n_u32(b, 3));
+        store:
+            vst1_u16(dst + k, vbsl_u16(pass, vmovn_u32(out), vld1_u16(dst + k)));
+            if (s->depth_write) vst1_u16(depth + k, vbsl_u16(pass, dv, old));
+        }
+        z = vaddq_s32(z, z4);
+        u += 4 * dsu;
+        v += 4 * dsv;
+        if (s->smooth) {
+            cr = vaddq_s32(cr, cr4);
+            cg = vaddq_s32(cg, cg4);
+            cb = vaddq_s32(cb, cb4);
+        }
+    }
+    *zfix += dzfix * count;
+    *su += dsu * count;
+    *sv += dsv * count;
+    if (s->smooth) {
+        ci[0] += dci[0] * count;
+        ci[1] += dci[1] * count;
+        ci[2] += dci[2] * count;
+        ci[3] += dci[3] * count;
+    }
+}
+#endif
+
 /*
  * Span fast path for the common state: at most one texture (unit 0),
  * nearest, no mipmaps, REPLACE or MODULATE; no fog, blending or colour
@@ -1491,6 +1652,10 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     int y, ch;
     /* 0: plain write, 1: SRC_ALPHA/ONE_MINUS_SRC_ALPHA, 2: other blend */
     int blend_mode = 0;
+#ifdef NGL_SW_HAVE_NEON
+    NGLSpanNeon ns;
+    int use_neon;
+#endif
 
     if (!rgb_mask_all || ngl_sw.fog) return 0;
     if (ngl_sw.blend) {
@@ -1515,6 +1680,21 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         hmask = th - 1;
     }
 
+#ifdef NGL_SW_HAVE_NEON
+    use_neon = !ngl_sw.alpha_test && blend_mode == 0;
+    ns.depth_test = (depth_on && ngl_sw.depth_func != GL_ALWAYS) ? (depth_less ? 1 : 2) : 0;
+    ns.depth_write = depth_write;
+    ns.tex = tex != NULL ? tex->argb : NULL;
+    ns.tw = tw;
+    ns.wmask = wmask;
+    ns.hmask = hmask;
+    ns.repeat_s = repeat_s;
+    ns.repeat_t = repeat_t;
+    ns.replace = mode == GL_REPLACE;
+    ns.smooth = smooth;
+    ns.flat_color = flat_color;
+#endif
+
     dzx = pz->db * l1x + pz->dc * l2x;
     if (perspective) dqx = pinvw->db * l1x + pinvw->dc * l2x;
     if (tex != NULL) {
@@ -1536,15 +1716,16 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         int zfix, dzfix;
 
         /* covered span of this row (triangles are convex) */
-        for (xs = minx; xs < maxx; ++xs, e0 += a0, e1 += a1, e2 += a2) {
-            if ((e0 | e1 | e2) >= 0) break;
-        }
-        if (xs >= maxx) continue;
         {
-            int f0 = e0, f1 = e1, f2 = e2;
-            for (xe = xs; xe < maxx && (f0 | f1 | f2) >= 0; ++xe) {
-                f0 += a0; f1 += a1; f2 += a2;
-            }
+            int lo = 0, hi = maxx - minx;
+            ngl_sw_edge_range(e0, a0, &lo, &hi);
+            ngl_sw_edge_range(e1, a1, &lo, &hi);
+            ngl_sw_edge_range(e2, a2, &lo, &hi);
+            if (lo >= hi) continue;
+            xs = minx + lo;
+            xe = minx + hi;
+            e1 += lo * a1;
+            e2 += lo * a2;
         }
         dst_row = ngl_sw.pixels + (ngl_sw.height - 1 - y) * ngl_sw.stride;
         depth_row = depth_on ? ngl_sw.depth + (ngl_sw.height - 1 - y) * ngl_sw.stride : NULL;
@@ -1628,7 +1809,18 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                 }
             }
 
-            for (i = 0; i < n; ++i, ++x) {
+            i = 0;
+#ifdef NGL_SW_HAVE_NEON
+            if (use_neon && n >= 4) {
+                int cnt = n & ~3;
+                ngl_sw_span_neon(&ns, dst_row + x,
+                                 depth_row != NULL ? depth_row + x : NULL, cnt,
+                                 &zfix, dzfix, &su, &sv, dsu, dsv, ci, dci);
+                i = cnt;
+                x += cnt;
+            }
+#endif
+            for (; i < n; ++i, ++x) {
                 unsigned int color;
                 int dv = zfix >> 12;
                 if (dv < 0) dv = 0;
