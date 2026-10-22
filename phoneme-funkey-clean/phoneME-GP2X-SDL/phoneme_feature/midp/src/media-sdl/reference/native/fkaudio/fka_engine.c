@@ -331,6 +331,8 @@ static void mix_pcm(Player *p, int32_t *acc, int n)
     uint64_t step = ((uint64_t) src->rate << 32) / FKA_RATE;
     int i, g = (int) (((int64_t) p->gain * g_master) >> 15);
     if (p->rate != 100000) step = (uint64_t) ((double) step * p->rate / 100000.0);
+    /* MLD loops at its cuepoints itself while more plays are wanted */
+    src->mld_loop = p->loop_count < 0 || p->loops_done + 1 < p->loop_count;
     for (i = 0; i < n; ++i) {
         int64_t idx = (int64_t) (p->pos >> 32);
         const int16_t *s;
@@ -346,6 +348,17 @@ static void mix_pcm(Player *p, int32_t *acc, int n)
         }
         if (!p->playing && p->fade == 0) return;
         s = fka_pcm_at(src, idx);
+        if (src->rebase != 0) {
+            /* the melody jumped back to its loop start */
+            p->pos -= (uint64_t) src->rebase << 32;
+            idx -= src->rebase;
+            src->rebase = 0;
+            if (p->playing) {
+                post(p->id, FKA_EVENT_END_OF_MEDIA, duration(p), 1);
+                ++p->loops_done;
+            }
+            src->mld_loop = p->loop_count < 0 || p->loops_done + 1 < p->loop_count;
+        }
         if (s == NULL) {
             if (p->playing) {
                 reached_end(p);
@@ -355,7 +368,10 @@ static void mix_pcm(Player *p, int32_t *acc, int n)
             return;
         }
         s0 = s[0];
-        s1 = (src->length < 0 || idx + 1 < src->length) ? s[1] : s0;
+        if (src->mld != NULL)
+            s1 = idx + 1 < src->win_start + src->win_len ? s[1] : s0;
+        else
+            s1 = (src->length < 0 || idx + 1 < src->length) ? s[1] : s0;
         frac = (int) ((p->pos >> 16) & 0xffff);
         v = s0 + (((s1 - s0) * frac) >> 16);
         acc[i] += (int) (((int64_t) v * g >> 15) * p->fade >> 15);

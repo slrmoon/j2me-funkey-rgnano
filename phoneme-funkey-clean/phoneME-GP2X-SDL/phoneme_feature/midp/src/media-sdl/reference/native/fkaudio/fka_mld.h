@@ -13,6 +13,12 @@ void fka_mld_reset(FkaMld *p);
 int fka_mld_render(FkaMld *p, float *out, int frames);
 int fka_mld_finished(FkaMld *p);
 int fka_mld_is_silent(FkaMld *p);
+/* Cuepoint looping: at a cuepoint end the tracks jump back to the cuepoint
+ * start in place. render() returns at the loop point; take_shift() then
+ * gives the frames jumped back (0 when none), to rebase sample positions. */
+void fka_mld_set_loop(FkaMld *p, int enabled);
+long long fka_mld_take_shift(FkaMld *p);
+/* Frames until the last event (no synthesis, no release tail, no loops). */
 long long fka_mld_count_frames(const uint8_t *data, int len, float sample_rate);
 
 #endif

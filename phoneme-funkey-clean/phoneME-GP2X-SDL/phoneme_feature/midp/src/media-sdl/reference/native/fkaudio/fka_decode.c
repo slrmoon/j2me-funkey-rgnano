@@ -581,13 +581,14 @@ static void mld_rewind(FkaPcm *p)
     fka_mld_reset((FkaMld *) p->mld);
     p->win_start = 0;
     p->win_len = 0;
+    p->rebase = 0;
 }
 
 static int mld_next(FkaPcm *p, int64_t keep_from)
 {
     int64_t drop = keep_from - p->win_start;
-    int got, i;
-    if (p->win_start + p->win_len >= p->length) return 0;
+    int got, i, tries;
+    long long shift = 0;
     if (drop < 0) drop = 0;
     if (drop > p->win_len) drop = p->win_len;
     if (p->win_len - drop + MLD_CHUNK > p->win_cap) drop = p->win_len + MLD_CHUNK - p->win_cap;
@@ -596,10 +597,16 @@ static int mld_next(FkaPcm *p, int64_t keep_from)
         p->win_len -= (int) drop;
         p->win_start += drop;
     }
-    got = fka_mld_render((FkaMld *) p->mld, p->mld_buf, MLD_CHUNK);
-    if (got < 0) got = MLD_CHUNK;   /* finished: the tail is still in the buffer */
-    if (p->win_start + p->win_len + got > p->length)
-        got = (int) (p->length - p->win_start - p->win_len);
+    fka_mld_set_loop((FkaMld *) p->mld, p->mld_loop);
+    for (tries = 0; tries < 4; ++tries) {
+        got = fka_mld_render((FkaMld *) p->mld, p->mld_buf, MLD_CHUNK);
+        shift = fka_mld_take_shift((FkaMld *) p->mld);
+        if (got != 0 || shift == 0) break;
+        /* jumped back before rendering anything */
+        p->win_start -= shift;
+        p->rebase += shift;
+    }
+    if (got <= 0) return 0;   /* finished, release tails included */
     for (i = 0; i < got; ++i) {
         /* mono: average of the MA-3 stereo pair, rounded half up */
         float v = (p->mld_buf[2 * i] + p->mld_buf[2 * i + 1]) * 0.5f * 32767.0f;
@@ -608,21 +615,30 @@ static int mld_next(FkaPcm *p, int64_t keep_from)
         if (s < -32768) s = -32768;
         p->win[p->win_len++] = (int16_t) s;
     }
+    if (shift != 0) {
+        /* the frames after this chunk continue from the loop start */
+        p->win_start -= shift;
+        p->rebase += shift;
+    }
     return got;
 }
 
 const int16_t *fka_pcm_at(FkaPcm *p, int64_t idx)
 {
-    if (idx < 0 || (p->length >= 0 && idx >= p->length)) return NULL;
-    if (p->whole) return p->win + idx;
+    if (idx < 0) return NULL;
     if (p->mld != NULL) {
+        /* no length limit: the release tail runs past the last event */
         if (idx < p->win_start) mld_rewind(p);
         while (idx + 1 >= p->win_start + p->win_len) {
+            int64_t before = p->rebase;
             if (mld_next(p, idx > 0 ? idx - 1 : 0) == 0) break;
+            idx -= p->rebase - before;
         }
         if (idx >= p->win_start + p->win_len) return NULL;
         return p->win + (idx - p->win_start);
     }
+    if (p->length >= 0 && idx >= p->length) return NULL;
+    if (p->whole) return p->win + idx;
     if (idx < p->win_start) mp3_rewind(p);
     while (idx + 1 >= p->win_start + p->win_len) {
         if (mp3_next(p, (int) (idx > 0 ? idx - 1 : 0)) == 0) break;

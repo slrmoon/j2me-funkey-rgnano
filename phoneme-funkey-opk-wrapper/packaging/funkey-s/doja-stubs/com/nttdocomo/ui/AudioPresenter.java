@@ -219,7 +219,11 @@ public class AudioPresenter implements MediaPresenter {
             p.addPlayerListener(new PlayerListener() {
                 public void playerUpdate(Player pl, String event, Object data) {
                     if (PlayerListener.END_OF_MEDIA.equals(event)) {
-                        ended(pl);
+                        if (pl.getState() == Player.STARTED) {
+                            looped(pl);     /* more plays follow */
+                        } else {
+                            ended(pl);
+                        }
                     }
                 }
             });
@@ -246,6 +250,12 @@ public class AudioPresenter implements MediaPresenter {
             gen = generation;
         }
         notify(AUDIO_COMPLETE, 0, gen);
+    }
+
+    private void looped(Player pl) {
+        if (pl == player && playing) {
+            notify(AUDIO_LOOPED, 0, generation);
+        }
     }
 
     private void applyVolume(Player p) {
