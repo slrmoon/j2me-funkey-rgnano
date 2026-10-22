@@ -14,6 +14,15 @@
  * multiply-add and int overflow wraps.
  */
 #include "fka_mld.h"
+
+#ifdef FKA_MLD_TRACE
+#include <stdio.h>
+static long long g_trpos;
+#define TR(a) do { fprintf(stderr, "%lld ", g_trpos); fprintf(stderr, a_unpack a); fputc('\n', stderr); } while (0)
+#define a_unpack(...) __VA_ARGS__
+#else
+#define TR(a) do { } while (0)
+#endif
 #include "fka_ma3_rom.h"
 #ifndef FKA_MLD_GENTABLES
 #include "fka_ma3_tables.h"
@@ -809,6 +818,13 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
     if (alg->isWave) return op->fb0;
     op->oscPhase = (int32_t) ((uint32_t) op->oscPhase
                               + (uint32_t) (((note->fNumber << note->block >> 1) * MULTIS[op->d.multi]) >> 1));
+    if (op->d.evb) {
+        /* vibrato (disabled in the Keitai Wiki original; the MA-3 presets
+         * use EVB operators heavily and the phones do vibrate them) */
+        int32_t sign = (int32_t) ((uint32_t) s->vibPhase << 19) >> 31;
+        int sh = 9 - op->d.dvb + ((s->vibPhase >> 10 & 3) == 3 ? 1 : 0);
+        op->oscPhase = (int32_t) ((uint32_t) op->oscPhase + (uint32_t) (sign ^ (note->fNumber >> sh)));
+    }
     return op->fb0;
 }
 
@@ -974,11 +990,12 @@ static void chan_on_volume(Sampler *s, Chan *c)
         note_on_volume(c->notesOut[i], c);
 }
 
-static void chan_on_frequency(Chan *c)
+static void chan_on_frequency(Sampler *s, Chan *c)
 {
     int i;
+    float bend = s->bendOut * c->bendOut;   /* master tune included */
     for (i = 0; i < c->nOut; i++)
-        note_on_frequency(c->notesOut[i], c->bendOut);
+        note_on_frequency(c->notesOut[i], bend);
 }
 
 static void sampler_on_volume(Sampler *s)
@@ -1002,7 +1019,10 @@ static const Alg *get_fm_instrument(Sampler *s, int bank, int program)
     int key = bank << 8 | program;
     const Alg *ret = find_alg(s->fm4ops, s->n4, key);
     if (ret == NULL) ret = find_alg(s->fm2ops, s->n2, key);
-    if (ret == NULL) ret = &g_inst4[bank < 2 ? 0 : ((bank & 1) << 6 | (program & 0x3F))];
+    /* banks 0/1 share the first preset page, odd upper banks the second; the
+     * program number selects the voice in either case (collapsing banks 0/1
+     * to preset 0 made every melody part sound like the same instrument) */
+    if (ret == NULL) ret = &g_inst4[(bank < 2 ? 0 : (bank & 1) << 6) | (program & 0x3F)];
     return ret;
 }
 
@@ -1032,6 +1052,7 @@ static void sampler_key_off(Sampler *s, int channel, int key)
 {
     Chan *c;
     Note *n;
+    TR(("off %d %d", channel, key));
     if (channel < 0 || channel >= NUM_CHANNELS || A4_MA3 + key < 0 || A4_MA3 + key >= 128)
         return;
     c = &s->ch[channel];
@@ -1047,6 +1068,7 @@ static void sampler_key_on(Sampler *s, int channel, int key, float velocity)
     float freqBase = 0;
     int isWave = 0, x;
     Note *n;
+    TR(("on %d %d %.8g", channel, key, velocity));
     if (channel < 0 || channel >= NUM_CHANNELS || A4_MA3 + key < 0 || A4_MA3 + key >= 128)
         return;
     c = &s->ch[channel];
@@ -1098,13 +1120,15 @@ static void sampler_key_on(Sampler *s, int channel, int key, float velocity)
 static void sampler_master_tune(Sampler *s, float semitones)
 {
     int i;
+    TR(("mtune %.8g", semitones));
     s->bendOut = (float) fd_pow(2, semitones);
     for (i = 0; i < NUM_CHANNELS; i++)
-        chan_on_frequency(&s->ch[i]);
+        chan_on_frequency(s, &s->ch[i]);
 }
 
 static void sampler_master_volume(Sampler *s, float volume)
 {
+    TR(("mvol %.8g", volume));
     s->volLevel = volume;
     sampler_on_volume(s);
 }
@@ -1112,6 +1136,7 @@ static void sampler_master_volume(Sampler *s, float volume)
 static void sampler_panpot(Sampler *s, int channel, float panpot)
 {
     Chan *c;
+    TR(("pan %d %.8g", channel, panpot));
     if (channel < 0 || channel >= NUM_CHANNELS) return;
     c = &s->ch[channel];
     c->volPanning = (panpot + 1) / 2;
@@ -1123,26 +1148,29 @@ static void sampler_panpot(Sampler *s, int channel, float panpot)
 static void sampler_pitch_bend(Sampler *s, int channel, float semitones)
 {
     Chan *c;
+    TR(("bend %d %.8g", channel, semitones));
     if (channel < 0 || channel >= NUM_CHANNELS) return;
     c = &s->ch[channel];
     c->bendBase = semitones;
     c->bendOut = (float) fd_pow(2, c->bendBase * c->bendRange);
-    chan_on_frequency(c);
+    chan_on_frequency(s, c);
 }
 
 static void sampler_pitch_bend_range(Sampler *s, int channel, float range)
 {
     Chan *c;
+    TR(("range %d %.8g", channel, range));
     if (channel < 0 || channel >= NUM_CHANNELS) return;
     c = &s->ch[channel];
     c->bendRange = range;
     c->bendOut = (float) fd_pow(2, c->bendBase * c->bendRange);
-    chan_on_frequency(c);
+    chan_on_frequency(s, c);
 }
 
 static void sampler_volume(Sampler *s, int channel, float volume)
 {
     Chan *c;
+    TR(("vol %d %.8g", channel, volume));
     if (channel < 0 || channel >= NUM_CHANNELS) return;
     c = &s->ch[channel];
     c->volLevel = volume;
@@ -1213,6 +1241,7 @@ static void set_wave_drums(Sampler *s, const uint8_t *m, int len)
 
 static void sampler_sysex(Sampler *s, const uint8_t *m, int len)
 {
+    TR(("sysex %d", len));
     if (m == NULL || len < 4 || m[0] != 0x11 || m[1] != 0x01 || (m[2] & 0xF0) != 0xF0)
         return;
     switch (m[3]) {
@@ -1262,6 +1291,9 @@ static void sampler_sample(Sampler *s)
 
 static void sampler_render(Sampler *s, float *out, int frames)
 {
+#ifdef FKA_MLD_TRACE
+    g_trpos += frames;
+#endif
     float *smpPrev = s->smpPrev, *smpNext = s->smpNext;
     float smpWidth = s->smpWidth, smpPosition = s->smpPosition;
     float frame[2];
@@ -1316,13 +1348,14 @@ static void sampler_render(Sampler *s, float *out, int frames)
 #define EVENT_TYPE_NOTE 0
 #define EVENT_TYPE_EXT_B 1
 #define EVENT_TYPE_EXT_INFO 2
+#define EVENT_TYPE_RESOURCE 3
 
 #define EV_BANK_CHANGE 0xE1
 #define EV_CUEPOINT 0xD0
 #define EV_END_OF_TRACK 0xDF
-#define EV_EXPRESSION 0xE6
+#define EV_EXTENDED_WAIT 0xDC
+#define EV_TRACK_CONTROL 0xDD
 #define EV_JUMP 0xD1
-#define EV_MASTER_BALANCE 0xB1
 #define EV_MASTER_TUNE 0xB3
 #define EV_MASTER_VOLUME 0xB0
 #define EV_PANPOT 0xE3
@@ -1332,6 +1365,8 @@ static void sampler_render(Sampler *s, float *out, int frames)
 #define EV_TIMEBASE_TEMPO 0xC0
 #define EV_VOLUME 0xE2
 #define EV_X_DRUM_ENABLE 0xBA
+#define EV_WAVE_VOLUME 0xE8
+#define EV_WAVE_PANPOT 0xE9
 
 typedef struct {
     int delta, status, type, id, param;
@@ -1355,7 +1390,7 @@ typedef struct {
     int ntracks;
     int cuep[4];
     MTrack tracks[4];
-    float masterPan, masterTune, masterVolume;
+    int exstCount;
 } Mld;
 
 typedef struct {
@@ -1428,6 +1463,21 @@ static void parse_event(Mld *m, int track, Rd *r, MEvent *e)
     memset(e, 0, sizeof(*e));
     e->delta = rd_u8(r);
     e->status = rd_u8(r);
+    if (e->status == 0x7F) {
+        /* resource (ADPCM) event: skipped, the MA-3 FM path has no PCM */
+        int n;
+        e->type = EVENT_TYPE_RESOURCE;
+        e->id = rd_u8(r);
+        if (e->id == 0xF0) n = rd_u16(r);
+        else if (e->id < 0x80) n = 1 + m->exstCount;
+        else n = 1;
+        if (r->off + n > r->start + r->len) {
+            r->err = 1;
+            r->off = r->start + r->len;
+        } else
+            r->off += n;
+        return;
+    }
     if ((e->status & 0x3F) != 63) {
         /* note */
         e->type = EVENT_TYPE_NOTE;
@@ -1484,28 +1534,20 @@ static void parse_event(Mld *m, int track, Rd *r, MEvent *e)
     case EV_CUEPOINT:
         e->cuepoint = e->param;
         break;
-    case EV_EXPRESSION:
-        e->volume *= volume_to_amplitude((e->param & 0x3F) / 63.0f);
-        break;
-    case EV_MASTER_BALANCE:
-        m->masterPan = e->param < 64 ? e->param / 64.0f - 1 : (e->param - 64) / 63.0f;
-        e->panpot = m->masterPan;
-        break;
     case EV_MASTER_TUNE:
-        m->masterTune = ((e->param & 0x7F) - 64) / 64.0f;
-        e->semitones = m->masterTune;
+        e->semitones = ((e->param & 0x7F) - 64) / 64.0f;
         break;
     case EV_MASTER_VOLUME:
-        m->masterVolume = volume_to_amplitude(e->param / 100.0f);
-        e->volume = m->masterVolume;
+        e->volume = volume_to_amplitude((e->param & 0x7F) / 127.0f);
         break;
-    case EV_PANPOT: {
+    case EV_PANPOT:
+    case EV_WAVE_PANPOT: {
         int p = e->param & 0x3F;
-        e->panpot = (p < 32 ? p / 32.0f - 1 : (p - 32) / 31.0f) * m->masterPan;
+        e->panpot = p < 32 ? p / 32.0f - 1 : (p - 32) / 31.0f;
         break;
     }
     case EV_PITCHBEND:
-        e->semitones = ((e->param & 0x3F) - 32) / 3200.0f * m->masterTune;
+        e->semitones = ((e->param & 0x3F) - 32) / 3200.0f;
         break;
     case EV_PITCHBEND_RANGE:
         e->range = (float) (e->param & 0x3F);
@@ -1514,7 +1556,8 @@ static void parse_event(Mld *m, int track, Rd *r, MEvent *e)
         e->program = e->param & 0x3F;
         break;
     case EV_VOLUME:
-        e->volume = volume_to_amplitude((e->param & 0x3F) / 63.0f) * m->masterVolume;
+    case EV_WAVE_VOLUME:
+        e->volume = volume_to_amplitude((e->param & 0x3F) / 63.0f);
         break;
     case EV_X_DRUM_ENABLE:
         e->channel = e->param >> 3 & 15;
@@ -1537,11 +1580,9 @@ static void mld_free(Mld *m)
 static int mld_parse(Mld *m, const uint8_t *src, int srclen)
 {
     Rd r, h;
-    int length, i, numTracks, nAdpcm = 0, contentType;
+    int length, i, numTracks, nAdpcm = 0, contentType, wait;
     memset(m, 0, sizeof(*m));
-    m->masterPan = 0.0f;
-    m->masterTune = 1.0f;
-    m->masterVolume = 1.0f;
+    m->exstCount = 1;
     if (srclen < 8 || memcmp(src, "melo", 4) != 0) return -1;
     length = (int) ((uint32_t) src[4] << 24 | src[5] << 16 | src[6] << 8 | src[7]);
     if (length < 0 || 8 + length > srclen) return -1;
@@ -1570,6 +1611,8 @@ static int mld_parse(Mld *m, const uint8_t *src, int srclen)
         } else if (id == 0x63756570) { /* cuep */
             for (i = 0; i < numTracks; i++)
                 m->cuep[i] = rd_u32(&c);
+        } else if (id == 0x65787374) { /* exst */
+            if (c.len >= 2) m->exstCount = rd_u16(&c);
         } else if (id == 0x6E6F7465) { /* note */
             m->note = rd_u16(&c);
             if (m->note >> 1 != 0) goto fail;
@@ -1592,12 +1635,24 @@ static int mld_parse(Mld *m, const uint8_t *src, int srclen)
         t = rd_sub(&r, rd_u32(&r));
         if (r.err) goto fail;
         cue = t.off + m->cuep[i];
+        wait = -1;
         while (!rd_eof(&t)) {
             MEvent e;
+            /* playback starts at the "cuep" offset; a cuepoint-start event
+             * only marks the loop start (the intro before it is played) */
+            if (t.off == cue)
+                tr->cue = tr->n;
             parse_event(m, i, &t, &e);
             if (t.err) goto fail;
-            if (t.off == cue || (e.id == EV_CUEPOINT && e.type == EVENT_TYPE_EXT_B && e.cuepoint == 0))
-                tr->cue = tr->n;
+            if (wait >= 0) {
+                e.delta |= wait;
+                wait = -1;
+            }
+            if (e.type == EVENT_TYPE_EXT_B && e.id == EV_EXTENDED_WAIT) {
+                /* high byte of the next event's delta time */
+                wait = (e.param & 0xFF) << 8;
+                continue;
+            }
             if (track_add(tr, &e) != 0) goto fail;
         }
     }
@@ -1625,7 +1680,20 @@ typedef struct {
 
 typedef struct {
     int cuepoint, finished, offset, ticks;
+    int skipResched;
 } PTrack;
+
+/* track-control (0xDD) repeat sections: mode 0 snapshots every track,
+ * mode 1 jumps back to the snapshot the given number of times */
+typedef struct {
+    int offset, ticks, finished, valid;
+} TcSnap;
+
+typedef struct {
+    TcSnap tr[4];
+    long long snapTick;
+    int counter, active;
+} TcGroup;
 
 struct FkaMld {
     Mld mld;
@@ -1640,6 +1708,13 @@ struct FkaMld {
     long long position;
     int seeking;
     long long tickNow;
+    TcGroup tc[4];
+    int restart;            /* a track-control jump: re-run this tick */
+    int loop;               /* cuepoint looping enabled */
+    long long loopStart;    /* frame position of the cuepoint start */
+    long long shift;        /* frames jumped back by loops, not yet taken */
+    int jumped;             /* stop rendering at the loop point */
+    long long endPosition;  /* frame where the sequence ended (-1) */
 };
 
 static void set_tempo(FkaMld *p, int timebase, int tempo)
@@ -1704,26 +1779,122 @@ static void evt_note(FkaMld *p, PTrack *t, int index, const MEvent *e)
     n->gateTime = e->gateTime;
 }
 
+static int until_note(FkaMld *p);
+
+static int min_track_ticks(FkaMld *p)
+{
+    int i, found = 0, min = 0;
+    for (i = 0; i < p->mld.ntracks; i++) {
+        if (p->tr[i].finished) continue;
+        if (!found || p->tr[i].ticks < min) {
+            min = p->tr[i].ticks;
+            found = 1;
+        }
+    }
+    return found && min > 0 ? min : 0;
+}
+
+static int retry_ticks(FkaMld *p, PTrack *cur)
+{
+    int i, retry = -1, note;
+    for (i = 0; i < p->mld.ntracks; i++) {
+        PTrack *o = &p->tr[i];
+        if (o == cur || o->finished || o->ticks <= 0) continue;
+        if (retry == -1 || o->ticks < retry) retry = o->ticks;
+    }
+    note = until_note(p);
+    if (note > 0 && (retry == -1 || note < retry)) retry = note;
+    return retry <= 0 ? 1 : retry;
+}
+
+static void track_control(FkaMld *p, PTrack *t, int index, const MEvent *e)
+{
+    int g = (e->param >> 6) & 3, mode = e->param & 3, i, bit;
+    TcGroup *G = &p->tc[g];
+    if (mode == 0) {
+        int min = min_track_ticks(p);
+        G->snapTick = p->tickNow;
+        for (i = 0; i < p->mld.ntracks; i++) {
+            PTrack *l = &p->tr[i];
+            int d = l->ticks;
+            if (i != 0 && !l->finished) d = d > min ? d - min : 0;
+            G->tr[i].offset = l->offset;
+            G->tr[i].ticks = d > 0 ? d : 0;
+            G->tr[i].finished = l->finished;
+            G->tr[i].valid = 1;
+        }
+        set_track_offset(p, t, t->offset + 1, index);
+        if (!t->finished) {
+            t->ticks = p->mld.tracks[index].ev[t->offset].delta;
+            t->skipResched = 1;
+        }
+        return;
+    }
+    if (mode != 1 || !G->tr[0].valid) {
+        set_track_offset(p, t, t->offset + 1, index);
+        return;
+    }
+    if (G->snapTick == p->tickNow) {
+        t->ticks = retry_ticks(p, t);
+        t->skipResched = 1;
+        p->restart = 1;
+        return;
+    }
+    bit = 1 << g;
+    if (!(G->active & bit)) {
+        int c = (e->param >> 2) & 15;
+        G->counter = c == 0 ? -1 : c;
+        G->active |= bit;
+    } else
+        G->counter--;
+    if (G->counter == 0) {
+        G->active &= ~bit;
+        G->tr[0].valid = 0;
+        set_track_offset(p, t, t->offset + 1, index);
+        return;
+    }
+    for (i = 0; i < p->mld.ntracks; i++) {
+        PTrack *l = &p->tr[i];
+        l->offset = G->tr[i].offset;
+        l->ticks = G->tr[i].ticks;
+        l->finished = G->tr[i].finished || l->offset >= p->mld.tracks[i].n;
+        l->skipResched = 0;
+    }
+    p->restart = 1;
+}
+
 static void evt_ext_b(FkaMld *p, PTrack *t, int index, const MEvent *e)
 {
     int i;
     switch (e->id) {
     case EV_BANK_CHANGE:
         if (e->channel >= 0 && e->channel < NUM_CHANNELS && e->bank <= 255)
+        {
             p->s.ch[e->channel].prgBank = e->bank;
+            TR(("bank %d %d", e->channel, e->bank));
+        }
         break;
     case EV_CUEPOINT:
+        if (e->cuepoint == 1 && p->tr[0].cuepoint != -1) {
+            if (p->loop && p->position > p->loopStart) {
+                /* loop in place: the notes still sounding ring through */
+                for (i = 0; i < p->mld.ntracks; i++)
+                    set_track_offset(p, &p->tr[i], p->tr[i].cuepoint, i);
+                p->shift += p->position - p->loopStart;
+                p->jumped = 1;
+            } else
+                set_track_offset(p, t, t->offset + 1, index);
+            return;
+        }
         set_track_offset(p, t, t->offset + 1, index);
         if (e->cuepoint == 0) {
             for (i = 0; i < p->mld.ntracks; i++)
                 p->tr[i].cuepoint = p->tr[i].offset;
-            return;
+            p->loopStart = p->position;
         }
-        if (e->cuepoint == 1 && p->tr[0].cuepoint != -1)
-            p->finished = 1;
         return;
-    case EV_END_OF_TRACK:
-        t->finished = 1;
+    case EV_TRACK_CONTROL:
+        track_control(p, t, index, e);
         return;
     case EV_MASTER_VOLUME:
         sampler_master_volume(&p->s, e->volume);
@@ -1732,6 +1903,7 @@ static void evt_ext_b(FkaMld *p, PTrack *t, int index, const MEvent *e)
         sampler_master_tune(&p->s, e->semitones);
         break;
     case EV_PANPOT:
+    case EV_WAVE_PANPOT:
         sampler_panpot(&p->s, e->channel, e->panpot);
         break;
     case EV_PITCHBEND:
@@ -1742,7 +1914,10 @@ static void evt_ext_b(FkaMld *p, PTrack *t, int index, const MEvent *e)
         break;
     case EV_PROGRAM_CHANGE:
         if (e->channel >= 0 && e->channel < NUM_CHANNELS && e->program <= 255)
+        {
             p->s.ch[e->channel].prgProgram = e->program;
+            TR(("prog %d %d", e->channel, e->program));
+        }
         break;
     case EV_TIMEBASE_TEMPO:
         if (e->timebase != -1) {
@@ -1754,6 +1929,7 @@ static void evt_ext_b(FkaMld *p, PTrack *t, int index, const MEvent *e)
          * advances; skip the event instead of hanging */
         break;
     case EV_VOLUME:
+    case EV_WAVE_VOLUME:
         sampler_volume(&p->s, e->channel, e->volume);
         break;
     case EV_X_DRUM_ENABLE:
@@ -1766,12 +1942,11 @@ static void evt_ext_b(FkaMld *p, PTrack *t, int index, const MEvent *e)
     set_track_offset(p, t, t->offset + 1, index);
 }
 
-static void process(FkaMld *p, int index, int ticks)
+static void process(FkaMld *p, int index)
 {
     PTrack *t = &p->tr[index];
     MTrack *mt = &p->mld.tracks[index];
     if (t->finished) return;
-    t->ticks -= ticks;
     if (t->ticks > 0) return;
     while (t->ticks == 0) {
         const MEvent *e = &mt->ev[t->offset];
@@ -1790,6 +1965,12 @@ static void process(FkaMld *p, int index, int ticks)
             set_track_offset(p, t, t->offset + 1, index);
         }
         if (t->finished) return;
+        if (t->skipResched) {
+            t->skipResched = 0;
+            if (t->ticks == 0) continue;
+            return;
+        }
+        if (p->restart) return;
         t->ticks = mt->ev[t->offset].delta;
     }
 }
@@ -1837,14 +2018,24 @@ void fka_mld_reset(FkaMld *p)
         PTrack *t = &p->tr[i];
         t->cuepoint = -1;
         t->offset = p->mld.tracks[i].cue;
-        t->ticks = 0;
         t->finished = t->offset >= p->mld.tracks[i].n;
+        t->ticks = t->finished ? 0 : p->mld.tracks[i].ev[t->offset].delta;
+        t->skipResched = 0;
     }
+    memset(p->tc, 0, sizeof(p->tc));
+    for (i = 0; i < 4; i++)
+        p->tc[i].snapTick = -1;
+    p->restart = 0;
+    p->loopStart = 0;
+    p->shift = 0;
+    p->jumped = 0;
+    p->endPosition = -1;
     p->finished = 1;
     for (i = 0; i < p->mld.ntracks; i++) {
-        process(p, i, 0);
+        process(p, i);
         p->finished = p->finished && p->tr[i].finished;
     }
+    p->restart = 0;
 }
 
 FkaMld *fka_mld_open(const uint8_t *data, int len, float sample_rate)
@@ -1882,11 +2073,51 @@ void fka_mld_close(FkaMld *p)
  * skip). Returns the frames produced, -1 once playback has finished (the
  * buffer is still filled, with the release tails), like MLDPlayer.render.
  */
+int fka_mld_is_silent(FkaMld *p);
+
+static void retire_zero_gate(FkaMld *p)
+{
+    int i, j;
+    for (i = 0; i < 16; i++) {
+        PChan *c = &p->ch[i];
+        for (j = 0; j < c->nOut; j++) {
+            PNote *n = c->out[j];
+            if (n->gateTime != 0) continue;
+            sampler_key_off(&p->s, n->channel, n->key);
+            if (A4_MLD + n->key >= 0 && A4_MLD + n->key < 100)
+                c->on[A4_MLD + n->key] = NULL;
+            memmove(c->out + j, c->out + j + 1, (size_t) (c->nOut - j - 1) * sizeof(PNote *));
+            c->nOut--;
+            free(n);
+            j--;
+        }
+    }
+}
+
+/* release tails after the last event are capped (a "forever" note) */
+#define TAIL_SECONDS 4
+
+static int live_output(FkaMld *p)
+{
+    if (p->seeking || fka_mld_is_silent(p)) return 0;
+    return p->endPosition < 0 ||
+           p->position - p->endPosition < (long long) (TAIL_SECONDS * p->sampleRate);
+}
+
 int fka_mld_render(FkaMld *p, float *out, int frames)
 {
     int ret = 0, i, j;
-    if (p->finished) p->pendingFrames = (float) frames;
+    if (p->finished && p->pendingFrames <= 0) {
+        if (!live_output(p)) return -1;
+        /* the sequence is over but notes are still releasing */
+        p->pendingFrames = (float) frames;
+    }
     while (frames > 0) {
+        if (p->jumped) {
+            /* loop point: the caller rebases the frames after it */
+            p->jumped = 0;
+            if (ret > 0) return ret;
+        }
         while (p->pendingFrames > 0) {
             int f = (int) fd_floor(p->pendingFrames);
             if (f > frames) f = frames;
@@ -1896,27 +2127,45 @@ int fka_mld_render(FkaMld *p, float *out, int frames)
             p->pendingFrames -= f;
             p->position += f;
             ret += f;
-            if (frames == 0) return p->finished ? -1 : ret;
+            if (frames == 0)
+                return ret > 0 ? ret : (p->finished && !live_output(p) ? -1 : ret);
+        }
+        if (p->finished) {
+            /* tail: keep rendering while the notes release */
+            if (!live_output(p)) return ret > 0 ? ret : -1;
+            p->pendingFrames += (float) frames;
+            continue;
         }
         if (p->pendingTicks > 0) {
+            int restarted = 0;
             p->tickNow += p->pendingTicks;
             for (i = 0; i < 16; i++)
                 for (j = 0; j < p->ch[i].nOut; j++)
                     p->ch[i].out[j]->gateTime -= p->pendingTicks;
+            retire_zero_gate(p);
             for (i = 0; i < p->mld.ntracks; i++)
-                process(p, i, p->pendingTicks);
-            for (i = 0; i < 16; i++) {
-                PChan *c = &p->ch[i];
-                for (j = 0; j < c->nOut; j++) {
-                    PNote *n = c->out[j];
-                    if (n->gateTime != 0) continue;
-                    sampler_key_off(&p->s, n->channel, n->key);
-                    if (A4_MLD + n->key >= 0 && A4_MLD + n->key < 100)
-                        c->on[A4_MLD + n->key] = NULL;
-                    memmove(c->out + j, c->out + j + 1, (size_t) (c->nOut - j - 1) * sizeof(PNote *));
-                    c->nOut--;
-                    free(n);
-                    j--;
+                if (!p->tr[i].finished) p->tr[i].ticks -= p->pendingTicks;
+            for (i = 0; i < p->mld.ntracks; i++) {
+                process(p, i);
+                if (p->restart) {
+                    p->restart = 0;
+                    restarted = 1;
+                    break;
+                }
+            }
+            if (restarted) {
+                p->pendingTicks = 0;
+                continue;
+            }
+        } else {
+            /* replayed tracks may land on zero-delay events: another pass
+             * without advancing time (zero-length notes expire here too) */
+            retire_zero_gate(p);
+            for (i = 0; i < p->mld.ntracks; i++) {
+                process(p, i);
+                if (p->restart) {
+                    p->restart = 0;
+                    break;
                 }
             }
         }
@@ -1924,7 +2173,9 @@ int fka_mld_render(FkaMld *p, float *out, int frames)
             int ut = until_track(p), un;
             if (ut == -1) {
                 p->finished = 1;
-                return ret;
+                if (p->endPosition < 0) p->endPosition = p->position;
+                p->pendingTicks = 0;
+                continue;
             }
             un = until_note(p);
             p->pendingTicks = un == -1 ? ut : (un < ut ? un : ut);
@@ -1932,6 +2183,18 @@ int fka_mld_render(FkaMld *p, float *out, int frames)
         }
     }
     return ret;
+}
+
+void fka_mld_set_loop(FkaMld *p, int enabled)
+{
+    p->loop = enabled;
+}
+
+long long fka_mld_take_shift(FkaMld *p)
+{
+    long long v = p->shift;
+    p->shift = 0;
+    return v;
 }
 
 int fka_mld_is_silent(FkaMld *p)
