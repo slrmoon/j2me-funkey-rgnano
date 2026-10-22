@@ -82,9 +82,11 @@ export ARM_CLDC_PLATFORM=${ARM_CLDC_PLATFORM:-linux_arm_vfp}
 export ARM_TOOLCHAIN_DIR=${ARM_TOOLCHAIN_DIR:-$ROOT/.toolchains/funkey-s}
 export CROSS_CC CROSS_CXX CROSS_CPP CROSS_AR CROSS_AS CROSS_LD
 export CROSS_RANLIB CROSS_STRIP CROSS_OBJCOPY CROSS_OBJDUMP CROSS_NM
-# Allwinner V3s: Cortex-A7 with NEON and VFPv4 (32 double registers, FMA)
-export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard"}
-export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-mcpu=cortex-a7 -mfpu=neon-vfpv4"}
+# Allwinner V3s: Cortex-A7 with NEON and VFPv4 (32 double registers, FMA).
+# -march=armv7ve enables the hardware udiv/sdiv: the SDK compiler defaults to
+# armv7-a, which turns every division into an __aeabi_uidiv call.
+export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard"}
+export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4"}
 export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS -lz"}
 export MIDP_CMDLINE_CFLAGS=${MIDP_CMDLINE_CFLAGS:-"$ARM_CFLAGS"}
 export BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s}

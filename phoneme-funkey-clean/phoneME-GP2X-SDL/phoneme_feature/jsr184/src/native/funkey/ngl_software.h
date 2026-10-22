@@ -1947,9 +1947,14 @@ static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
 
     /* Pick the finest subpixel grid whose edge values fit in 32 bits:
      * |E| <= 2 * (2 * M * sub)^2 < 2^31  =>  M * sub < 16384. */
-    maxabs = fmaxf(fmaxf(fabsf(fax), fabsf(fay)),
-                   fmaxf(fmaxf(fabsf(fbx), fabsf(fby)),
-                         fmaxf(fabsf(fcx), fabsf(fcy))));
+    /* inline max (fmaxf is a libm call here); NaN coordinates after the
+     * first are ignored, as with fmaxf */
+    maxabs = fabsf(fax);
+    if (fabsf(fay) > maxabs) maxabs = fabsf(fay);
+    if (fabsf(fbx) > maxabs) maxabs = fabsf(fbx);
+    if (fabsf(fby) > maxabs) maxabs = fabsf(fby);
+    if (fabsf(fcx) > maxabs) maxabs = fabsf(fcx);
+    if (fabsf(fcy) > maxabs) maxabs = fabsf(fcy);
     if (maxabs * 16.0f < 16000.0f) shift = 4;
     else if (maxabs * 4.0f < 16000.0f) shift = 2;
     else {
