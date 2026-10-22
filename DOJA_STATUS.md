@@ -57,3 +57,4 @@
 - Device log: once music starts the VM thread gets ~1.2 s of CPU per 10 s while the process uses 70-97%: the MA-3 synth (audio thread) eats the CPU; Rockman keeps ~40 FM voices sounding, 4 operators each, at the chip rate 49.5 kHz.
 - Test switch: `PHONEME_MLD_MIDI=1` or the file `/mnt/FunKey/.pm/mld-midi` turns native MLD off (DoJa falls back to MLD -> MIDI -> EAS). User confirmed: no lag with it.
 - Fast mode (default): one synth pass per two chip ticks (envelope/LFO/phase rates scaled), 1.8-1.9x faster (x86 and qemu-arm). `PHONEME_MLD_EXACT=1` keeps the bit-exact path (tools set it; all 44 MLDs still identical). Fast vs exact spectra below 8 kHz correlate 0.99+ (one file 0.88).
+- Voice limit 16 in fast mode (quietest released, else oldest held note stolen): 3.2x faster than exact in total; median spectral correlation 0.98; dense jingles (01, 30, 31, 43) lose 15-30% level even at 32 voices. Change `MAX_VOICES` in fka_mld.c (24 = 2.5x, median 0.99).
