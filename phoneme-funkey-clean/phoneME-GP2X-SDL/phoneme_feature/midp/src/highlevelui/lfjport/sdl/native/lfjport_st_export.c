@@ -357,7 +357,9 @@ static int OverlayVolume = 100;
 static int OverlaySynthSel;      /* index into OverlaySynths */
 static const char *OverlayConfigPath;
 static int FrameLimitFps = 30;
-static Uint32 FrameLimitLastTicks;
+/* Deadline of the next frame in microseconds of SDL_GetTicks time; 0 means
+ * "start a new schedule" (after start-up, a limit change or the menu). */
+static unsigned long long FrameLimitNext;
 
 /* MIDI synth presets (fkaudio engine ids: 1 wavetable, 2 FM, 3 hybrid) */
 static const struct {
@@ -465,28 +467,40 @@ static void configure_frame_limit(void) {
     const char *fpsText = getenv("PHONEME_FPS_LIMIT");
     OverlayFpsSel = find_fps_limit_index(fpsText);
     FrameLimitFps = OverlayFpsLimits[OverlayFpsSel].fps;
-    FrameLimitLastTicks = 0;
+    FrameLimitNext = 0;
 }
 
+/*
+ * Frames are released on a fixed grid of 1/FPS seconds instead of "at least
+ * 1/FPS after the previous frame". With uneven frame costs (typical for 3D:
+ * 5 ms, 45 ms, 5 ms, ...) the old rule waited after every fast frame even when
+ * the slow one had already used up the time, so a game that could do 40 FPS
+ * got 25 at a 30 limit. A late frame may now be made up by the next ones, up
+ * to 50 ms (or two frame periods) of lag. Larger lag (loading, the menu, a
+ * game that simply cannot reach the limit) is capped at that amount rather
+ * than reset, so a stall never turns into a burst and an overloaded game is
+ * never delayed.
+ */
 static void wait_frame_limit(void) {
-    Uint32 now;
-    Uint32 frameMs;
-    Uint32 elapsed;
+    unsigned long long now;
+    unsigned long long frameUs;
+    unsigned long long maxLag;
 
-    if (FrameLimitFps <= 0) return;
-
-    frameMs = (Uint32)((1000 + (FrameLimitFps / 2)) / FrameLimitFps);
-    if (frameMs == 0) return;
-
-    now = SDL_GetTicks();
-    if (FrameLimitLastTicks != 0) {
-        elapsed = now - FrameLimitLastTicks;
-        if (elapsed < frameMs) {
-            SDL_Delay(frameMs - elapsed);
-            now = SDL_GetTicks();
-        }
+    if (FrameLimitFps <= 0) {
+        FrameLimitNext = 0;
+        return;
     }
-    FrameLimitLastTicks = now;
+    frameUs = 1000000ULL / (unsigned long long)FrameLimitFps;
+    maxLag = frameUs * 2ULL > 50000ULL ? frameUs * 2ULL : 50000ULL;
+    now = (unsigned long long)SDL_GetTicks() * 1000ULL;
+    if (FrameLimitNext == 0) {
+        FrameLimitNext = now;            /* start the schedule */
+    } else if (now > FrameLimitNext + maxLag) {
+        FrameLimitNext = now - maxLag;   /* forget lag beyond the budget */
+    } else if (now < FrameLimitNext) {
+        SDL_Delay((Uint32)((FrameLimitNext - now + 999ULL) / 1000ULL));
+    }
+    FrameLimitNext += frameUs;
 }
 
 static void configure_logical_screen_size(void) {
@@ -795,7 +809,7 @@ static void overlay_set_fps_index(int index) {
     if (index >= OVERLAY_FPS_LIMIT_COUNT) index = 0;
     OverlayFpsSel = index;
     FrameLimitFps = OverlayFpsLimits[index].fps;
-    FrameLimitLastTicks = 0;
+    FrameLimitNext = 0;
 }
 
 static void overlay_save_config(void) {
@@ -1760,7 +1774,7 @@ void PhoneMEOverlayRunModal(void) {
         if (OverlayVisible) SDL_Delay(16);
     }
     MediaSDL_PauseAll(0);
-    FrameLimitLastTicks = 0;
+    FrameLimitNext = 0;
     PhoneMEOverlayRefresh();
 }
 
