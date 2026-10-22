@@ -25,6 +25,8 @@ typedef struct FkaPcm {
     int win_cap;
     int mp3_start;           /* first audio frame (after ID3 / Info frame) */
     int mp3_delay, mp3_to_skip; /* encoder delay to trim (gapless loops) */
+    void *mld;               /* FkaMld: i-mode melody synthesised while playing */
+    float *mld_buf;
 } FkaPcm;
 
 typedef struct {

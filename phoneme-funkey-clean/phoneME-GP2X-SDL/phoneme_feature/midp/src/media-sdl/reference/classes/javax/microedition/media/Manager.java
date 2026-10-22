@@ -58,6 +58,7 @@ public final class Manager {
         "audio/amr", "audio/amr-nb",
         "audio/mpeg", "audio/mp3", "audio/x-mp3",
         "application/vnd.smaf", "application/x-smaf", "audio/mmf",
+        "audio/x-mld", "audio/mld",
         "audio/imelody", "text/x-imelody", "audio/x-imelody",
         "audio/x-nokia-ota", "application/vnd.nokia.ringing-tone",
         "audio/x-rtttl", "audio/rtttl"

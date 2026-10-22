@@ -10,9 +10,11 @@
  *   AMR-NB (opencore, when FKA_HAVE_AMR)
  *   MP3  (minimp3, decoded while playing)
  *   SMF / RMID, SMAF, iMelody, Nokia OTA, RTTTL, JSR-135 tone sequences
+ *   MLD  (i-mode / DoJa melody: Yamaha MA-3 FM synthesis, fka_mld.c)
  */
 #include "fka_decode.h"
 #include "fka.h"
+#include "fka_mld.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -546,10 +548,81 @@ static int mp3_next(FkaPcm *p, int keep_from)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* MLD: rendered by the MA-3 synth while playing                       */
+/* ------------------------------------------------------------------ */
+
+#define MLD_CHUNK 1024
+
+static int decode_mld(const uint8_t *d, int n, FkaPcm *out)
+{
+    long long frames;
+    memset(out, 0, sizeof(*out));
+    frames = fka_mld_count_frames(d, n, (float) FKA_RATE);
+    if (frames <= 0) return -1;
+    out->mld = fka_mld_open(d, n, (float) FKA_RATE);
+    out->win_cap = 4 * MLD_CHUNK;
+    out->win = (int16_t *) malloc((size_t) out->win_cap * sizeof(int16_t));
+    out->mld_buf = (float *) malloc(2 * MLD_CHUNK * sizeof(float));
+    if (out->mld == NULL || out->win == NULL || out->mld_buf == NULL) {
+        fka_mld_close((FkaMld *) out->mld);
+        free(out->win);
+        free(out->mld_buf);
+        memset(out, 0, sizeof(*out));
+        return -1;
+    }
+    out->rate = FKA_RATE;
+    out->length = frames;
+    return 0;
+}
+
+static void mld_rewind(FkaPcm *p)
+{
+    fka_mld_reset((FkaMld *) p->mld);
+    p->win_start = 0;
+    p->win_len = 0;
+}
+
+static int mld_next(FkaPcm *p, int64_t keep_from)
+{
+    int64_t drop = keep_from - p->win_start;
+    int got, i;
+    if (p->win_start + p->win_len >= p->length) return 0;
+    if (drop < 0) drop = 0;
+    if (drop > p->win_len) drop = p->win_len;
+    if (p->win_len - drop + MLD_CHUNK > p->win_cap) drop = p->win_len + MLD_CHUNK - p->win_cap;
+    if (drop > 0) {
+        memmove(p->win, p->win + drop, (size_t) (p->win_len - drop) * sizeof(int16_t));
+        p->win_len -= (int) drop;
+        p->win_start += drop;
+    }
+    got = fka_mld_render((FkaMld *) p->mld, p->mld_buf, MLD_CHUNK);
+    if (got < 0) got = MLD_CHUNK;   /* finished: the tail is still in the buffer */
+    if (p->win_start + p->win_len + got > p->length)
+        got = (int) (p->length - p->win_start - p->win_len);
+    for (i = 0; i < got; ++i) {
+        /* mono: average of the MA-3 stereo pair, rounded half up */
+        float v = (p->mld_buf[2 * i] + p->mld_buf[2 * i + 1]) * 0.5f * 32767.0f;
+        int s = (int) (v >= 0 ? v + 0.5f : v - 0.5f);
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+        p->win[p->win_len++] = (int16_t) s;
+    }
+    return got;
+}
+
 const int16_t *fka_pcm_at(FkaPcm *p, int64_t idx)
 {
     if (idx < 0 || (p->length >= 0 && idx >= p->length)) return NULL;
     if (p->whole) return p->win + idx;
+    if (p->mld != NULL) {
+        if (idx < p->win_start) mld_rewind(p);
+        while (idx + 1 >= p->win_start + p->win_len) {
+            if (mld_next(p, idx > 0 ? idx - 1 : 0) == 0) break;
+        }
+        if (idx >= p->win_start + p->win_len) return NULL;
+        return p->win + (idx - p->win_start);
+    }
     if (idx < p->win_start) mp3_rewind(p);
     while (idx + 1 >= p->win_start + p->win_len) {
         if (mp3_next(p, (int) (idx > 0 ? idx - 1 : 0)) == 0) break;
@@ -560,6 +633,8 @@ const int16_t *fka_pcm_at(FkaPcm *p, int64_t idx)
 
 void fka_pcm_free(FkaPcm *p)
 {
+    if (p->mld != NULL) fka_mld_close((FkaMld *) p->mld);
+    free(p->mld_buf);
     free(p->win);
     free(p->mp3);
     free(p->data);
@@ -613,6 +688,11 @@ int fka_decode(const uint8_t *data, int len, const char *hint, FkaContent *out)
         out->kind = FKA_KIND_SONG;
         out->type = "audio/midi";
         return fka_parse_smf(data, len, &out->song);
+    }
+    if (len > 8 && memcmp(data, "melo", 4) == 0) {
+        out->kind = FKA_KIND_PCM;
+        out->type = "audio/x-mld";
+        return decode_mld(data, len, &out->pcm);
     }
     if (memcmp(data, "MMMD", 4) == 0) {
         out->kind = FKA_KIND_SONG;

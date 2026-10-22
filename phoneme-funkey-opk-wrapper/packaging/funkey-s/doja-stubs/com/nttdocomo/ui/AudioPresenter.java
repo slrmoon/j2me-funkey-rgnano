@@ -172,6 +172,15 @@ public class AudioPresenter implements MediaPresenter {
         String type = "audio/midi";
         byte[] play = data;
         if (data[0] == 'm' && data[1] == 'e' && data[2] == 'l' && data[3] == 'o') {
+            /* native MA-3 synthesis in fkaudio */
+            if (com.funkey.doja.DoJaRuntime.TRACE) {
+                System.out.println("DoJa trace: MLD sound bytes=" + data.length);
+            }
+            Player direct = createPrepared(data, "audio/x-mld", r);
+            if (direct != null) {
+                return direct;
+            }
+            System.out.println("DoJa: native MLD failed, using the MIDI conversion");
             if (r instanceof MediaManager.FkMediaSound) {
                 MediaManager.FkMediaSound s = (MediaManager.FkMediaSound) r;
                 if (s.midi == null && s.wav == null) {
@@ -199,6 +208,10 @@ public class AudioPresenter implements MediaPresenter {
         } else if (data[0] == 'M' && data[1] == 'M' && data[2] == 'M' && data[3] == 'D') {
             type = "application/vnd.smaf";
         }
+        return createPrepared(play, type, r);
+    }
+
+    private Player createPrepared(byte[] play, String type, MediaResource r) {
         try {
             Player p = Manager.createPlayer(new ByteArrayInputStream(play), type);
             p.realize();
@@ -239,7 +252,10 @@ public class AudioPresenter implements MediaPresenter {
         try {
             Object c = p.getControl("VolumeControl");
             if (c instanceof VolumeControl) {
-                ((VolumeControl) c).setLevel(volume);
+                /* DoJa volume is a linear gain, MMAPI levels follow a
+                 * square law in fkaudio */
+                int level = (int) (Math.sqrt(volume / 100.0) * 100.0 + 0.5);
+                ((VolumeControl) c).setLevel(level);
             }
         } catch (Throwable t) {
         }
@@ -350,6 +366,8 @@ public class AudioPresenter implements MediaPresenter {
             }
         } else if (key == LOOP_COUNT) {
             loopCount = value;
+        } else if (key == CHANGE_TEMPO || key == TRANSPOSE_KEY) {
+            com.funkey.doja.Stub.log("AudioPresenter.setAttribute(" + key + ")");
         }
     }
 
