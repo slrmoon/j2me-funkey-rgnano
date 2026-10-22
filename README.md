@@ -37,8 +37,9 @@ Based on the upstream phoneME-GP2X-SDL source at:
 
 - **MIDP 2.0 / CLDC 1.1** runtime (phoneME) with a game browser launcher.
 - **3D: JSR 184 (M3G)** on a software OpenGL ES 1.x renderer written for the
-  FunKey (single Cortex-A7, RGB565): integer rasterizer, texture cache, fog,
-  lighting, sprites, render-to-texture. See [3D (M3G)](#3d-m3g).
+  FunKey (single Cortex-A7, RGB565): integer rasterizer with a NEON span
+  loop, texture cache, fog, lighting, sprites, render-to-texture.
+  See [3D (M3G)](#3d-m3g).
 - **Sound: MMAPI (JSR 135)** on a new audio engine with the handset MIDI synth
   (Sonivox EAS), all common phone formats and the vendor sound APIs.
   See [Sound](#sound).
@@ -46,7 +47,8 @@ Based on the upstream phoneME-GP2X-SDL source at:
   movable view for cropped modes. See [Scaling](#scaling).
 - **In-game menu** (Power button) that freezes the game while open.
 - **Debug options** in the launcher and the in-game menu: log file, detailed
-  logs, FPS counter and an on-device log viewer. See [Debugging](#debugging).
+  logs, FPS counter, CPU profiler and an on-device log viewer.
+  See [Debugging](#debugging).
 
 ## In-game menu
 
@@ -149,8 +151,20 @@ nothing to move"*.
 
 ### 6. FPS
 
-Frame limit (Off / 20 / 25 / 30 / 50 / 60). 30 is the default; some games run
-too fast without a limit, heavy 3D games may feel smoother at 20–25.
+Frame limit (Off / 20 / 25 / 30 / 50 / 60). 30 is the default.
+
+Most phone games keep their own pace (they measure time), but some simple
+ones move one step per frame and were tuned for 15–20 FPS handsets: without
+a limit they run too fast. The limit pauses the whole game, not just the
+picture, so such games keep their normal speed.
+
+- Game too fast → 20 or 25.
+- Game keeps its own pace (speed does not change with the limit) → 30 or Off.
+
+Frames are released on a fixed 1/FPS schedule: a slow frame is made up by
+the following fast ones, so a game that can reach the limit really gets it
+even when frames are uneven (typical for 3D). A lower limit does not make a
+slow game faster.
 
 ### Quick recipes
 
@@ -217,8 +231,21 @@ and mipmaps), lighting, fog, sprites, alpha blending, depth test, culling,
 released when the game drops them (finalizers), so long sessions do not
 run out of memory.
 
-Heavy 3D games depend on CPU speed; if a game is slow, try a lower FPS
-limit and the *Pixel* filter (cheapest).
+Speed. The FunKey has one Cortex-A7 core and no GPU, so every pixel is
+drawn by the CPU. The renderer is tuned for that:
+
+- a span fast path for the common states (one nearest texture,
+  replace/modulate, alpha blending, depth test), with a NEON loop that
+  draws 4 pixels at a time;
+- vertex cache, combined model-view-projection per draw, clip codes per
+  vertex, off-screen triangles rejected early;
+- built for Cortex-A7 (`-march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4`,
+  hardware divide).
+
+In Rally Master Pro (240×320) these changes raised the frame rate in races
+by about 1.5–2×. Heavy scenes are still CPU-bound: if a game is slow, use the
+*Pixel* filter (cheapest scaling) and send a [profiler](#profiler-output)
+report.
 
 ## Repository structure
 
@@ -297,6 +324,10 @@ FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
 ./build-funkey-s.sh
 ```
 
+Compiler flags are not tracked by make: after changing `ARM_CFLAGS` (or
+pulling a commit that changes them in `build-funkey-s.sh`) delete
+`phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s` and build again.
+
 Main runtime outputs:
 
 - `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/midp/bin/arm/runMidlet`
@@ -335,7 +366,10 @@ Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funk
 ## Known issues
 
 - **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may need a different key profile (in-game menu → Controls, or `PHONEME_KEY_PROFILE` in `r.sh`).
-- **3D speed** — complex M3G scenes are CPU-bound on the single Cortex-A7.
+- **3D speed** — complex M3G scenes are still CPU-bound on the single
+  Cortex-A7 (no GPU). Games that use filtered or mipmapped textures take the
+  slower general path. Perspective is corrected every 16 pixels, which can
+  bend textures slightly on large surfaces seen at a steep angle.
 - **Not supported**: Motorola `com.motorola.game` (GameScreen API), Mobile XMF music, video, camera/recording.
 
 ## Debugging
