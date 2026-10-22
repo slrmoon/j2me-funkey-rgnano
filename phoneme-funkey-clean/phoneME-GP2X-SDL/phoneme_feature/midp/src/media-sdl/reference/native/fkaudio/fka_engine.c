@@ -220,6 +220,14 @@ static int64_t duration(Player *p)
     return -1;
 }
 
+/* Lets every sounding note finish its release. Sonivox EAS implements All
+ * Notes Off (CC 123) as a fast mute, so notes_off() cut the decay of the last
+ * notes (cymbals, timpani, gunshots...) the moment a song ended or looped. */
+static void notes_release(Player *p)
+{
+    if (p->stream != NULL) fka_eas_silence(p->stream, 0);
+}
+
 /* end of media reached: loop or stop */
 static void reached_end(Player *p)
 {
@@ -234,7 +242,7 @@ static void reached_end(Player *p)
             double carry = p->song_us - (double) p->c.song.duration;
             int ch;
             uint8_t m[3];
-            notes_off(p);
+            notes_release(p);
             for (ch = 0; ch < 16 && p->stream != NULL; ++ch) {
                 m[0] = (uint8_t) (0xb0 | ch); m[1] = 121; m[2] = 0;   /* reset controllers */
                 fka_eas_write(p->stream, m, 3);
@@ -246,7 +254,7 @@ static void reached_end(Player *p)
         p->playing = 0;
         p->at_end = 1;
         p->loops_done = 0;
-        if (p->kind == FKA_KIND_SONG) notes_off(p);
+        if (p->kind == FKA_KIND_SONG) notes_release(p);
         else p->fade_target = 0;
     }
 }
