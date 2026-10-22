@@ -1,54 +1,85 @@
 package com.nttdocomo.ui;
 
+public class Sprite {
+    Image image;
+    int x;
+    int y;
+    int sx;
+    int sy;
+    int width;
+    int height;
+    boolean visible = true;
+    int flipMode;
 
-public class Sprite extends Object {
-
-    public Sprite(com.nttdocomo.ui.Image p0) {
-    super();
+    protected Sprite() {
     }
 
-    public Sprite(com.nttdocomo.ui.Image p0, int p1, int p2, int p3, int p4) {
-    super();
+    public Sprite(Image img) {
+        setImage(img);
     }
 
-    public int getHeight() {
-    return 0;
+    public Sprite(Image img, int px, int py, int w, int h) {
+        setImage(img, px, py, w, h);
     }
 
-    public int getWidth() {
-    return 0;
+    public void setLocation(int px, int py) {
+        x = px;
+        y = py;
+    }
+
+    public void setImage(Image img) {
+        if (img == null) {
+            throw new NullPointerException("image");
+        }
+        image = img;
+        sx = 0;
+        sy = 0;
+        width = img.getWidth();
+        height = img.getHeight();
+    }
+
+    public void setImage(Image img, int px, int py, int w, int h) {
+        if (img == null) {
+            throw new NullPointerException("image");
+        }
+        image = img;
+        sx = px;
+        sy = py;
+        width = w;
+        height = h;
+    }
+
+    public void setVisible(boolean v) {
+        visible = v;
+    }
+
+    public boolean isVisible() {
+        return visible;
+    }
+
+    public void setFlipMode(int mode) {
+        if (mode < 0 || mode > 7) {
+            throw new IllegalArgumentException("flipMode");
+        }
+        flipMode = mode;
     }
 
     public int getX() {
-    return 0;
+        return x;
     }
 
     public int getY() {
-    return 0;
+        return y;
     }
 
-    public void setFlipMode(int p0) {
-    // no-op
+    public int getWidth() {
+        return width;
     }
 
-    public void setImage(com.nttdocomo.ui.Image p0) {
-    // no-op
+    public int getHeight() {
+        return height;
     }
 
-    public void setImage(com.nttdocomo.ui.Image p0, int p1, int p2, int p3, int p4) {
-    // no-op
+    public void setRotation(int[] rotation) {
     }
-
-    public void setLocation(int p0, int p1) {
-    // no-op
-    }
-
-    public void setRotation(int[] p0) {
-    // no-op
-    }
-
-    public void setVisible(boolean p0) {
-    // no-op
-    }
-
 }

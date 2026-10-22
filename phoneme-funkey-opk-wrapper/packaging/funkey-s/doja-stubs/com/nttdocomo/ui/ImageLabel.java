@@ -1,26 +1,31 @@
 package com.nttdocomo.ui;
 
-
-public class ImageLabel extends com.nttdocomo.ui.Component {
+public final class ImageLabel extends Component {
+    private Image image;
 
     public ImageLabel() {
-    super();
     }
 
-    public ImageLabel(com.nttdocomo.ui.Image p0) {
-    super();
+    public ImageLabel(Image img) {
+        image = img;
     }
 
-    public void setImage(com.nttdocomo.ui.Image p0) {
-    // no-op
+    public void setImage(Image img) {
+        image = img;
+        changed();
     }
 
-    public void setLocation(int p0, int p1) {
-    // no-op
+    int prefWidth() {
+        return image == null ? 0 : image.getWidth();
     }
 
-    public void setSize(int p0, int p1) {
-    // no-op
+    int prefHeight() {
+        return image == null ? 0 : image.getHeight();
     }
 
+    void paint(javax.microedition.lcdui.Graphics g, int px, int py, boolean focused) {
+        if (image != null && !image.disposed) {
+            g.drawImage(image.drawable(), px, py, Graphics.TL);
+        }
+    }
 }

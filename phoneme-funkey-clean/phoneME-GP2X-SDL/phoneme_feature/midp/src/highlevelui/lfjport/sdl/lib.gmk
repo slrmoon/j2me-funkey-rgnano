@@ -32,5 +32,6 @@
 vpath % $(SUBSYSTEM_LFJPORT_DIR)/sdl/native
 
 SUBSYSTEM_LCDLF_NATIVE_FILES += \
-    lfjport_st_export.c
+    lfjport_st_export.c \
+    lfjport_profile.c
 

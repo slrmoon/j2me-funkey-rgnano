@@ -1,162 +1,91 @@
 package com.nttdocomo.opt.ui;
 
+import com.nttdocomo.opt.ui.j3d.AffineTrans;
+import com.nttdocomo.ui.FkBridge2;
+import com.nttdocomo.ui.Graphics;
+import com.nttdocomo.ui.Image;
+import com.nttdocomo.ui.MediaImage;
 
-public class Graphics2 {
+/**
+ * Optional graphics extensions; every Graphics handed out by the runtime
+ * is a Graphics2.
+ */
+public class Graphics2 extends Graphics {
+    public static final int CM_NORMAL = 0;
+    public static final int CM_ZOOM = 256;
+    public static final int OP_REPL = 0;
+    public static final int OP_ADD = 1;
+    public static final int OP_SUB = 2;
 
-    public void clearClip() {
-    // no-op
+    private long lastSync;
+
+    public Graphics2() {
     }
 
-    public void clearRect(int p0, int p1, int p2, int p3) {
-    // no-op
+    public void setOrigin(int x, int y) {
+        super.setOrigin(x, y);
     }
 
-    public void clipRect(int p0, int p1, int p2, int p3) {
-    // no-op
+    public void setCoordinateMode(int mode) {
     }
 
-    public void copyArea(int p0, int p1, int p2, int p3, int p4, int p5) {
-    // no-op
+    public void setRenderMode(int operator, int srcRatio, int dstRatio) {
+        if (operator < OP_REPL || operator > OP_SUB) {
+            throw new IllegalArgumentException("operator");
+        }
+        FkBridge2.setRenderMode(this, operator, srcRatio, dstRatio);
     }
 
-    public void dispose() {
-    // no-op
+    public Image getImage(int x, int y, int width, int height) {
+        return getImageRegion(x, y, width, height);
     }
 
-    public void drawArc(int p0, int p1, int p2, int p3, int p4, int p5) {
-    // no-op
+    public void drawNthImage(MediaImage image, int k, int x, int y) {
+        drawImage(image.getImage(), x, y);
     }
 
-    public void drawImage(com.nttdocomo.ui.Image p0, int p1, int p2) {
-    // no-op
+    public static int getIntermediateColor(int c1, int c2, int ratio) {
+        if (ratio < 0) {
+            ratio = 0;
+        } else if (ratio > 255) {
+            ratio = 255;
+        }
+        int r = (((c1 >> 16) & 255) * (255 - ratio) + ((c2 >> 16) & 255) * ratio) / 255;
+        int g = (((c1 >> 8) & 255) * (255 - ratio) + ((c2 >> 8) & 255) * ratio) / 255;
+        int b = ((c1 & 255) * (255 - ratio) + (c2 & 255) * ratio) / 255;
+        return (r << 16) | (g << 8) | b;
     }
 
-    public void drawImage(com.nttdocomo.ui.Image p0, int p1, int p2, int p3, int p4, int p5, int p6) {
-    // no-op
+    public void drawImage(Image image, AffineTrans at, int x, int y, int width, int height) {
+        drawImage(image, toMatrix(at), x, y, width, height);
     }
 
-    public void drawImage(com.nttdocomo.ui.Image p0, com.nttdocomo.opt.ui.j3d.AffineTrans p1) {
-    // no-op
+    public void drawImage(Image image, AffineTrans at) {
+        drawImage(image, toMatrix(at));
     }
 
-    public void drawImage(com.nttdocomo.ui.Image p0, com.nttdocomo.opt.ui.j3d.AffineTrans p1, int p2, int p3, int p4, int p5) {
-    // no-op
+    private static int[] toMatrix(AffineTrans at) {
+        /* AffineTrans uses 4096 = 1.0, the same as the int[] matrix */
+        return new int[] { at.m00, at.m01, at.m03, at.m10, at.m11, at.m13 };
     }
 
-    public void drawLine(int p0, int p1, int p2, int p3) {
-    // no-op
+    public int getSyncUnlockInterval() {
+        return 0;
     }
 
-    public void drawNthImage(com.nttdocomo.ui.MediaImage p0, int p1, int p2, int p3) {
-    // no-op
+    public int syncUnlock(int interval) {
+        long now = System.currentTimeMillis();
+        long wait = lastSync + interval - now;
+        if (interval > 0 && wait > 0 && wait <= interval) {
+            try {
+                Thread.sleep(wait);
+            } catch (InterruptedException ie) {
+            }
+            now = System.currentTimeMillis();
+        }
+        int elapsed = lastSync == 0 ? interval : (int) (now - lastSync);
+        lastSync = now;
+        unlock(true);
+        return elapsed;
     }
-
-    public void drawNumber(int p0, int p1, int p2, int p3) {
-    // no-op
-    }
-
-    public void drawRect(int p0, int p1, int p2, int p3) {
-    // no-op
-    }
-
-    public void drawScaledImage(com.nttdocomo.ui.Image p0, int p1, int p2, int p3, int p4, int p5, int p6, int p7, int p8) {
-    // no-op
-    }
-
-    public void drawSpriteSet(com.nttdocomo.opt.ui.SpriteSet p0) {
-    // no-op
-    }
-
-    public void drawString(java.lang.String p0, int p1, int p2) {
-    // no-op
-    }
-
-    public void fillArc(int p0, int p1, int p2, int p3, int p4, int p5) {
-    // no-op
-    }
-
-    public void fillPolygon(int[] p0, int[] p1, int p2) {
-    // no-op
-    }
-
-    public void fillRect(int p0, int p1, int p2, int p3) {
-    // no-op
-    }
-
-    public int getColorOfName(int p0) {
-    return 0;
-    }
-
-    public int getColorOfRGB(int p0, int p1, int p2) {
-    return 0;
-    }
-
-    public int getColorOfRGB(int p0, int p1, int p2, int p3) {
-    return 0;
-    }
-
-    public com.nttdocomo.ui.Image getImage(int p0, int p1, int p2, int p3) {
-    return null;
-    }
-
-    public int getIntermediateColor(int p0, int p1, int p2) {
-    return 0;
-    }
-
-    public int getPixel(int p0, int p1) {
-    return 0;
-    }
-
-    public int getRGBPixel(int p0, int p1) {
-    return 0;
-    }
-
-    public int[] getRGBPixels(int p0, int p1, int p2, int p3, int[] p4, int p5) {
-    return null;
-    }
-
-    public void lock() {
-    // no-op
-    }
-
-    public void setClip(int p0, int p1, int p2, int p3) {
-    // no-op
-    }
-
-    public void setColor(int p0) {
-    // no-op
-    }
-
-    public void setCoordinateMode(int p0) {
-    // no-op
-    }
-
-    public void setFlipMode(int p0) {
-    // no-op
-    }
-
-    public void setFont(com.nttdocomo.ui.Font p0) {
-    // no-op
-    }
-
-    public void setOrigin(int p0, int p1) {
-    // no-op
-    }
-
-    public void setPictoColorEnabled(boolean p0) {
-    // no-op
-    }
-
-    public void setPixel(int p0, int p1) {
-    // no-op
-    }
-
-    public void setRenderMode(int p0, int p1, int p2) {
-    // no-op
-    }
-
-    public void unlock(boolean p0) {
-    // no-op
-    }
-
 }

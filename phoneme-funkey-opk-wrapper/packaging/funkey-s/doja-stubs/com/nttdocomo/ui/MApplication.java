@@ -1,58 +1,42 @@
 package com.nttdocomo.ui;
 
+/** Stand-by application ("i-appli stand-by"); runs like a normal application. */
+public abstract class MApplication extends IApplication {
+    public static final int MODE_CHANGED_EVENT = 1;
+    public static final int WAKEUP_TIMER_EVENT = 2;
+    public static final int CLOCK_TICK_EVENT = 3;
+    public static final int FOLD_CHANGED_EVENT = 4;
 
-public class MApplication extends com.nttdocomo.ui.IApplication {
+    private int wakeup = -1;
 
     public MApplication() {
-    super();
     }
 
-    public void deactivate() {
-    // no-op
+    public void processSystemEvent(int type, int param) {
     }
 
-    public int getLaunchType() {
-    return 0;
+    public final void sleep() {
     }
 
-    public java.lang.String getSourceURL() {
-    return null;
+    public final void setWakeupTimer(int minutes) {
+        wakeup = minutes;
     }
 
-    public int getWakeupTimer() {
-    return 0;
+    public final int getWakeupTimer() {
+        return wakeup;
     }
 
-    public void launch(int p0, java.lang.String[] p1) {
-    // no-op
+    public final void resetWakeupTimer() {
+        wakeup = -1;
     }
 
-    public void processSystemEvent(int p0, int p1) {
-    // no-op
+    public final void setClockTick(boolean enabled) {
     }
 
-    public void resetWakeupTimer() {
-    // no-op
+    public final void deactivate() {
     }
 
-    public void resume() {
-    // no-op
+    public final boolean isActive() {
+        return true;
     }
-
-    public void setClockTick(boolean p0) {
-    // no-op
-    }
-
-    public void setWakeupTimer(int p0) {
-    // no-op
-    }
-
-    public void sleep() {
-    // no-op
-    }
-
-    public void terminate() {
-    // no-op
-    }
-
 }

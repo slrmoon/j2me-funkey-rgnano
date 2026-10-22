@@ -68,6 +68,10 @@
 #if ENABLE_DYNAMIC_NATIVE_METHODS || ENABLE_JVMPI_PROFILE
 #include <dlfcn.h>
 #endif
+#if defined(__linux__) && defined(__arm__)
+#include <dlfcn.h>      /* crash dump: library of the faulting pc */
+#include <ucontext.h>
+#endif
 
 // IMPL_NOTE: the offset of PC value in ucontext_t structure
 // is different for every particular platform and OS.
@@ -429,6 +433,64 @@ static void print_siginfo(siginfo_t *si) {
 	      name, si->si_errno, si->si_code, si->si_addr);
 }
 
+#if defined(__linux__) && defined(__arm__) && ENABLE_COMPILER && ENABLE_APPENDED_CALLINFO
+/* Crash in JIT-compiled code: name the Java method and dump the code
+ * around the faulting instruction (offsets are from the method entry). */
+static void print_compiled_method(unsigned long pc) {
+  CompiledMethodDesc* desc =
+      (CompiledMethodDesc*) CompiledMethodCache::item_for_address((address) pc);
+  if (desc == NULL) {
+    return;
+  }
+  CompiledMethod::Raw cm = desc;
+  Method::Raw m = cm().method();
+  if (m.is_null()) {
+    return;
+  }
+  InstanceClass::Raw holder = m().holder();
+  Symbol::Raw kname = holder().name();
+  Symbol::Raw mname = m().name();
+  unsigned long entry = (unsigned long) cm().entry();
+  jvm_fprintf(stderr, "compiled method %.*s.%.*s (bytecodes %d) entry=%08lx pc=entry+0x%lx\n",
+              (int) kname().length(), (char*) kname().utf8_data(),
+              (int) mname().length(), (char*) mname().utf8_data(),
+              (int) m().code_size(), entry, pc - entry);
+  unsigned long from = (pc - 256 > entry) ? pc - 256 : entry;
+  jvm_fprintf(stderr, "code %08lx:", from);
+  for (unsigned long a = from; a < pc + 16; a += 4) {
+    jvm_fprintf(stderr, " %08lx", (unsigned long) *(juint*) a);
+  }
+  jvm_fprintf(stderr, "\n");
+}
+#endif
+
+/* Profiler (MIDP lfjport_profile.c): "Class.method" of the JIT code at pc.
+ * Called from the VM thread at a safe point, never from a signal. */
+extern "C" int jvm_describe_compiled_pc(unsigned long pc, char *buf, int size) {
+#if ENABLE_COMPILER && ENABLE_APPENDED_CALLINFO
+  CompiledMethodDesc* desc =
+      (CompiledMethodDesc*) CompiledMethodCache::item_for_address((address) pc);
+  if (desc == NULL) {
+    return 0;
+  }
+  CompiledMethod::Raw cm = desc;
+  Method::Raw m = cm().method();
+  if (m.is_null()) {
+    return 0;
+  }
+  InstanceClass::Raw holder = m().holder();
+  Symbol::Raw kname = holder().name();
+  Symbol::Raw mname = m().name();
+  snprintf(buf, size, "%.*s.%.*s",
+               (int) kname().length(), (char*) kname().utf8_data(),
+               (int) mname().length(), (char*) mname().utf8_data());
+  return 1;
+#else
+  (void) pc; (void) buf; (void) size;
+  return 0;
+#endif
+}
+
 static void print_ucontext(void* context) {
 #if defined(__NetBSD__)
   ucontext_t* uc = (ucontext_t*) context;
@@ -466,7 +528,70 @@ static void print_ucontext(void* context) {
   jvm_fprintf(stderr, "\n");
 #endif
 
-#endif // __NetBSD__
+#elif defined(__linux__) && defined(__arm__)
+  /* Where it crashed: registers, then every word on the native stack that
+   * points into the executable (return addresses), so a crash report can
+   * be turned into function names with addr2line on runMidlet. */
+  extern char __executable_start, etext;
+  ucontext_t* uc = (ucontext_t*) context;
+  mcontext_t* mc = &uc->uc_mcontext;
+  unsigned long lo = (unsigned long) &__executable_start;
+  unsigned long hi = (unsigned long) &etext;
+  unsigned long *sp = (unsigned long *) mc->arm_sp;
+  int i, found = 0;
+  jvm_fprintf(stderr, "pc=%08lx lr=%08lx sp=%08lx fp=%08lx ip=%08lx\n",
+              (unsigned long) mc->arm_pc, (unsigned long) mc->arm_lr,
+              (unsigned long) mc->arm_sp, (unsigned long) mc->arm_fp,
+              (unsigned long) mc->arm_ip);
+  jvm_fprintf(stderr, "r0=%08lx r1=%08lx r2=%08lx r3=%08lx r4=%08lx r5=%08lx\n",
+              (unsigned long) mc->arm_r0, (unsigned long) mc->arm_r1,
+              (unsigned long) mc->arm_r2, (unsigned long) mc->arm_r3,
+              (unsigned long) mc->arm_r4, (unsigned long) mc->arm_r5);
+  {
+    /* pc outside runMidlet: name the shared library and nearest symbol.
+     * Dl_info/dladdr are GNU extensions the headers hide here, so use a
+     * layout-compatible struct and look dladdr up at run time. */
+    struct PmDlInfo {
+      const char *dli_fname; void *dli_fbase;
+      const char *dli_sname; void *dli_saddr;
+    };
+    typedef int (*PmDladdr)(const void *, PmDlInfo *);
+    void *self = dlopen(NULL, RTLD_NOW);
+    PmDladdr pm_dladdr = self != NULL ? (PmDladdr) dlsym(self, "dladdr") : NULL;
+    unsigned long where[2];
+    const char *what[2] = { "pc", "lr" };
+    where[0] = (unsigned long) mc->arm_pc;
+    where[1] = (unsigned long) mc->arm_lr;
+    for (i = 0; pm_dladdr != NULL && i < 2; i++) {
+      PmDlInfo info;
+      if (pm_dladdr((void *) where[i], &info) != 0 && info.dli_fname != NULL) {
+        jvm_fprintf(stderr, "%s in %s (base %08lx) %s+0x%lx\n", what[i],
+                    info.dli_fname, (unsigned long) info.dli_fbase,
+                    info.dli_sname != NULL ? info.dli_sname : "?",
+                    info.dli_saddr != NULL ?
+                      where[i] - (unsigned long) info.dli_saddr : 0UL);
+      }
+    }
+  }
+  jvm_fprintf(stderr, "r6=%08lx r7=%08lx r8=%08lx r9=%08lx r10=%08lx\n",
+              (unsigned long) mc->arm_r6, (unsigned long) mc->arm_r7,
+              (unsigned long) mc->arm_r8, (unsigned long) mc->arm_r9,
+              (unsigned long) mc->arm_r10);
+#if ENABLE_COMPILER && ENABLE_APPENDED_CALLINFO
+  if ((unsigned long) mc->arm_pc < lo || (unsigned long) mc->arm_pc >= hi) {
+    print_compiled_method((unsigned long) mc->arm_pc);
+  }
+#endif
+  jvm_fprintf(stderr, "text=%08lx-%08lx stack:", lo, hi);
+  for (i = 0; sp != NULL && i < 512 && found < 24; i++) {
+    unsigned long w = sp[i];
+    if (w >= lo && w < hi) {
+      jvm_fprintf(stderr, " %08lx", w);
+      found++;
+    }
+  }
+  jvm_fprintf(stderr, "\n");
+#endif // __NetBSD__ / linux-arm
 }
 
 #if ENABLE_PAGE_PROTECTION
