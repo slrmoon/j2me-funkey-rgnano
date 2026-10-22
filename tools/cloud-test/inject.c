@@ -47,3 +47,10 @@ int SDL_Flip(SDL_Surface *s) {
   shot_maybe(s, SDL_GetTicks());
   return real(s);
 }
+/* the launcher blocks in SDL_WaitEvent: poll so scripted keys get through */
+int SDL_WaitEvent(SDL_Event *e) {
+  for (;;) {
+    if (SDL_PollEvent(e)) return 1;
+    SDL_Delay(10);
+  }
+}

@@ -32,10 +32,17 @@ Based on the upstream phoneME-GP2X-SDL source at:
 2. Place it in the `emulators` folder on your FunKey/RG Nano SD card
 3. Create a `java` folder in the root of the SD card
 4. Put your `.jar` files into that `java/` folder
+5. DoJa (i-mode i-appli) games go into the same `java/` folder: keep the
+   `.jam` next to the `.jar` (same name, or the only `.jam` in its folder),
+   optionally with the `.sp` scratchpad. They show up with an `i` mark.
 
 ## Features
 
 - **MIDP 2.0 / CLDC 1.1** runtime (phoneME) with a game browser launcher.
+- **DoJa (NTT DoCoMo i-appli)** games in the same launcher: `com.nttdocomo.*`
+  runtime (Canvas/Graphics/Panel/Dialog, timers, scratchpad, Shift-JIS,
+  Japanese bitmap fonts), screen size from the `.jam` `DrawArea`, and MLD
+  melodies on a Yamaha MA-3 FM synthesizer. See `DOJA_STATUS.md`.
 - **3D: JSR 184 (M3G)** on a software OpenGL ES 1.x renderer written for the
   FunKey (single Cortex-A7, RGB565): integer rasterizer with a NEON span
   loop, texture cache, fog, lighting, sprites, render-to-texture.
@@ -189,7 +196,7 @@ only a hint, games often get it wrong):
 
 | Kind | Formats |
 |---|---|
-| Music | MIDI (SMF 0/1/2, RMID), SMAF / MMF (Yamaha, incl. ADPCM voices), iMelody, Nokia OTA / Smart Messaging, RTTTL, JSR 135 tone sequences |
+| Music | MIDI (SMF 0/1/2, RMID), SMAF / MMF (Yamaha, incl. ADPCM voices), iMelody, Nokia OTA / Smart Messaging, RTTTL, JSR 135 tone sequences, i-mode MLD (Yamaha MA-3 FM synth) |
 | Sampled | WAV (8/16/24/32-bit, float, A-law, µ-law, IMA and MS ADPCM), AU, AMR-NB, MP3 |
 
 **APIs**: MMAPI 1.1 (`Manager`, `Player`, `PlayerListener`, Volume / MIDI /
@@ -446,5 +453,8 @@ It shows how many frames the game draws per second, after the FPS limit.
 |---|---|---|
 | [Sonivox EAS](https://github.com/pedrolcl/sonivox) | Apache 2.0 | MIDI synthesizer |
 | [minimp3](https://github.com/lieff/minimp3) | CC0 | MP3 decoding |
+| Keitai Wiki MLD / MA-3 music implementation (Guy Perfect, SquirrelJME) | Unlicense / MPL 2.0 | MLD sequencer and MA-3 FM synth (C port) |
+| fdlibm 5.3 | Sun (free use with notice) | log/pow in the MLD synth |
+| Shinonome bitmap fonts | Public domain | DoJa Japanese text |
 | opencore-amr | Apache 2.0 | AMR-NB decoding |
 | Nokia M3G core (from phoneME) | EPL 1.0 | 3D scene graph |

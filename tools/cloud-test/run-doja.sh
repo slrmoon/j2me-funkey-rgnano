@@ -3,7 +3,7 @@
 # for MIDlets.
 # usage: run-doja.sh <game.jam|game.jar> <seconds> "<keys>"
 #   keys: "ms:sdl_keysym:d|u,..."  (see run.sh)
-# env:  T=/root/tc  HOME_DIR=$T/run/home (unsquashed doja.opk)
+# env:  T=/root/tc  HOME_DIR=$T/run/home (unsquashed pm.opk)
 #       SP_DIR   scratchpad directory (default $T/run/sp)
 #       LCD=WxH  override the DrawArea from the .jam
 #       other variables as in run.sh (SHOT_DIR, SHOT_MS, AOUT, VMARGS, FPS)
