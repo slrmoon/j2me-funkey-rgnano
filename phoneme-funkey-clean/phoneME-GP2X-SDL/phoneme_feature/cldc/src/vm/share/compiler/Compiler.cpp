@@ -525,6 +525,63 @@ ReturnOop Compiler::allocate_and_compile(const int compiled_code_factor
  *           - process_compilation_queue()
  *           - end_compile()
  */
+
+// PHONEME_TRACE_COMPILE=1: one stderr line per compilation event (product
+// builds too), to find methods compiled over and over.
+static int jit_trace = -1;
+static void jit_trace_method(const char* what, Method* m, int extra) {
+  if (jit_trace < 0) {
+    jit_trace = getenv("PHONEME_TRACE_COMPILE") != NULL;
+  }
+  if (!jit_trace || m == NULL || m->is_null()) {
+    return;
+  }
+  Symbol::Raw n = m->name();
+  InstanceClass::Raw h = m->holder();
+  Symbol::Raw hn = h().name();
+  fprintf(stderr, "[jit] %s %.*s.%.*s size=%d %d t=%d\n", what,
+          (int)hn().length(), (char*)hn().utf8_data(),
+          (int)n().length(), (char*)n().utf8_data(),
+          (int)m->code_size(), extra, (int)Os::java_time_millis());
+}
+
+// Methods whose compilation keeps failing with out_of_memory (the code
+// buffer estimate is too small, the double_size flag only doubles it once):
+// retry with a growing buffer, then give up on the method. Without this a
+// big hot game loop (5 KB of bytecode, OSR at its loop) was recompiled
+// every few ms for ever: half the CPU in the JIT, the loop interpreted.
+struct JitFailure {
+  int key;
+  int count;
+};
+static JitFailure jit_failures[16];
+
+static int jit_method_key(Method* m) {
+  Symbol::Raw n = m->name();
+  InstanceClass::Raw h = m->holder();
+  Symbol::Raw hn = h().name();
+  unsigned int k = (unsigned int)m->code_size() * 31u + 7u;
+  const int nl = n().length(), hl = hn().length();
+  const char* np = (const char*)n().utf8_data();
+  const char* hp = (const char*)hn().utf8_data();
+  for (int i = 0; i < nl; i++) k = k * 131u + (unsigned char)np[i];
+  for (int i = 0; i < hl; i++) k = k * 131u + (unsigned char)hp[i];
+  return (int)(k | 1u);
+}
+
+static JitFailure* jit_failure_for(int key, bool create) {
+  JitFailure* free_slot = NULL;
+  for (int i = 0; i < 16; i++) {
+    if (jit_failures[i].key == key) return &jit_failures[i];
+    if (jit_failures[i].key == 0 && free_slot == NULL) free_slot = &jit_failures[i];
+  }
+  if (!create) return NULL;
+  if (free_slot == NULL) free_slot = &jit_failures[key & 15];
+  free_slot->key = key;
+  free_slot->count = 0;
+  return free_slot;
+}
+
 ReturnOop Compiler::compile(Method* method, int active_bci JVM_TRAPS) {
   // Bail out if the method is impossible to compile
   if (method->is_impossible_to_compile()) {
@@ -544,9 +601,30 @@ ReturnOop Compiler::compile(Method* method, int active_bci JVM_TRAPS) {
   if( method->is_double_size() ) {
     compiled_code_factor <<= 1;
   }
+  const int fail_key = jit_method_key(method);
+  {
+    JitFailure* f = jit_failure_for(fail_key, false);
+    if (f != NULL && f->count > 0) {
+      compiled_code_factor <<= (f->count < 3 ? f->count : 3);
+    }
+  }
 
+  jit_trace_method("start", method, active_bci);
   CompiledMethod::Raw result =
     try_to_compile( method, active_bci, compiled_code_factor JVM_MUST_SUCCEED);
+  jit_trace_method(result.not_null() ? "done" : (is_suspended() ? "suspended" : "failed"),
+                   method, (int)_failure);
+  if (result.is_null() && !is_suspended() && _failure == out_of_memory) {
+    JitFailure* f = jit_failure_for(fail_key, true);
+    if (++f->count > 4) {
+      set_impossible_to_compile(method, "keeps running out of memory");
+      jit_trace_method("given-up", method, f->count);
+      f->key = 0;
+    }
+  } else if (result.not_null()) {
+    JitFailure* f = jit_failure_for(fail_key, false);
+    if (f != NULL) f->key = 0;
+  }
 
   EventLogger::log(EventLogger::COMPILE_END);
   return result();
@@ -1136,6 +1214,9 @@ inline void Compiler::optimize_code( JVM_SINGLE_ARG_TRAPS ) {
 
 void Compiler::abort_suspended_compilation( void ) {
   if( is_suspended() ) {
+    if (jit_trace > 0) {
+      fprintf(stderr, "[jit] abort suspended t=%d\n", (int)Os::java_time_millis());
+    }
     GUARANTEE(!is_active(), "sanity");
     _failure = none;
     terminate( NULL );
@@ -1179,6 +1260,9 @@ ReturnOop Compiler::resume_compilation(Method *method JVM_TRAPS) {
     result = _failure == none ? current_compiled_method()->obj() : NULL;
     compiler.update_performance_counters(true, result);
   }
+  jit_trace_method(result != NULL ? "resumed-done" :
+                   (_failure == out_of_time ? "resumed-suspended" : "resumed-failed"),
+                   method, (int)_failure);
 
   if( _failure != out_of_time ) {
     terminate( result );
