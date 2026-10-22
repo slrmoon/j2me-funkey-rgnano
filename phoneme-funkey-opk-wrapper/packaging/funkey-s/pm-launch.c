@@ -335,6 +335,27 @@ typedef struct {
     int is_favorite;
 } GameEntry;
 
+/*
+ * Platforms the runtime can start. A game is DoJa (i-mode i-appli) when
+ * a .jam descriptor with an AppClass belongs to its jar, MIDP otherwise.
+ */
+enum { PLATFORM_MIDP = 0, PLATFORM_DOJA = 1 };
+
+typedef struct {
+    const char *id;
+    const char *main_class;   /* NULL: MIDlet-1 of the manifest */
+    const char *support_jar;  /* appended to the classpath, relative to PM_DIR */
+    const char *heap_mb;
+    const char *key_profile;  /* default key profile, NULL: guess from the jar */
+    const char *encoding;     /* microedition.encoding, NULL: default */
+    const char *tag;          /* shown before the name in the list */
+} Platform;
+
+static const Platform platforms[] = {
+    { "midp", NULL, NULL, "16", NULL, NULL, "" },
+    { "doja", "com.funkey.doja.DoJaMIDlet", "lib/doja-support.jar", "32", "doja", "SJIS", "i " }
+};
+
 static GameEntry games[MAX_GAMES];
 static int    game_count = 0;
 static int    game_sel   = 0;        /* selected index in browser */
@@ -529,6 +550,7 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev);
 static char *trim_line(char *text);
 static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size);
 static int read_jam_value(const char *jam_path, const char *key, char *out, size_t out_size);
+static void shell_quote(const char *src, char *dst, size_t dst_size);
 static int find_key_profile(const char *id);
 static void enter_selected_folder(void);
 static int leave_folder(void);
@@ -578,6 +600,84 @@ static void add_favorites_folder(void) {
     game_count++;
 }
 
+static int jar_has_class(const char *jar_path, const char *class_name) {
+    char entry[300];
+    char quoted[PATH_MAX * 4];
+    char cmd[PATH_MAX * 4 + 400];
+    char line[512];
+    FILE *p;
+    int i, found = 0;
+
+    if (class_name == NULL || class_name[0] == '\0') return 0;
+    for (i = 0; class_name[i] != '\0' && i < 250; i++)
+        entry[i] = class_name[i] == '.' ? '/' : class_name[i];
+    entry[i] = '\0';
+    strcat(entry, ".class");
+    shell_quote(jar_path, quoted, sizeof(quoted));
+    snprintf(cmd, sizeof(cmd), "unzip -l %s 2>/dev/null", quoted);
+    p = popen(cmd, "r");
+    if (p == NULL) return 0;
+    while (fgets(line, sizeof(line), p) != NULL) {
+        if (strstr(line, entry) != NULL) found = 1;
+    }
+    pclose(p);
+    return found;
+}
+
+/*
+ * The .jam of a jar: <name>.jam next to it, or the only .jam of the folder
+ * when its AppClass is inside the jar (dumps often name them differently).
+ */
+static int find_jam_for_jar(const char *jar_path, char *out, size_t out_size) {
+    char candidate[PATH_MAX];
+    char dir[PATH_MAX];
+    char only[PATH_MAX] = "";
+    char cls[256];
+    int jar_len = strlen(jar_path), count = 0;
+    const char *slash;
+    DIR *d;
+    struct dirent *ent;
+    struct stat st;
+
+    out[0] = '\0';
+    if (jar_len < 5) return 0;
+    snprintf(candidate, sizeof(candidate), "%.*s.jam", jar_len - 4, jar_path);
+    if (stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
+        snprintf(out, out_size, "%s", candidate);
+        return 1;
+    }
+    snprintf(candidate, sizeof(candidate), "%.*s.JAM", jar_len - 4, jar_path);
+    if (stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
+        snprintf(out, out_size, "%s", candidate);
+        return 1;
+    }
+    slash = strrchr(jar_path, '/');
+    if (slash == NULL) return 0;
+    snprintf(dir, sizeof(dir), "%.*s", (int) (slash - jar_path), jar_path);
+    d = opendir(dir);
+    if (d == NULL) return 0;
+    while ((ent = readdir(d)) != NULL) {
+        int len = strlen(ent->d_name);
+        if (len > 4 && strcasecmp(ent->d_name + len - 4, ".jam") == 0) {
+            count++;
+            snprintf(only, sizeof(only), "%s/%s", dir, ent->d_name);
+        }
+    }
+    closedir(d);
+    if (count != 1) return 0;
+    if (!read_jam_value(only, "AppClass", cls, sizeof(cls))) return 0;
+    if (!jar_has_class(jar_path, cls)) return 0;
+    snprintf(out, out_size, "%s", only);
+    return 1;
+}
+
+static int is_ascii_text(const char *t) {
+    for (; *t; t++) {
+        if ((unsigned char) *t < 0x20 || (unsigned char) *t > 0x7e) return 0;
+    }
+    return 1;
+}
+
 static void add_game(const char *full_path, const char *name) {
     int jar_len;
     char rel_path[PATH_MAX];
@@ -611,9 +711,9 @@ static void add_game(const char *full_path, const char *name) {
         snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, full_path);
         read_midlet_name_from_jad(jad_path, games[game_count].title,
                                   sizeof(games[game_count].title));
-        snprintf(jam_path, sizeof(jam_path), "%.*s.jam", jar_len - 4, full_path);
-        if (read_jam_value(jam_path, "AppClass", games[game_count].app_class,
-                           sizeof(games[game_count].app_class))) {
+        if (find_jam_for_jar(full_path, jam_path, sizeof(jam_path))
+                && read_jam_value(jam_path, "AppClass", games[game_count].app_class,
+                                  sizeof(games[game_count].app_class))) {
             games[game_count].is_doja = 1;
             snprintf(games[game_count].jam_path, sizeof(games[game_count].jam_path),
                      "%s", jam_path);
@@ -623,8 +723,23 @@ static void add_game(const char *full_path, const char *name) {
                            sizeof(games[game_count].app_param));
             read_jam_value(jam_path, "AppVer", games[game_count].app_ver,
                            sizeof(games[game_count].app_ver));
-            read_jam_value(jam_path, "AppName", games[game_count].title,
-                           sizeof(games[game_count].title));
+            /* AppName is Shift-JIS; the launcher font only has ASCII */
+            {
+                char app_name[100];
+                if (read_jam_value(jam_path, "AppName", app_name, sizeof(app_name))
+                        && is_ascii_text(app_name)) {
+                    snprintf(games[game_count].title, sizeof(games[game_count].title),
+                             "%s%s", platforms[PLATFORM_DOJA].tag, app_name);
+                } else {
+                    games[game_count].title[0] = '\0';
+                }
+            }
+            {
+                char base[PATH_MAX];
+                snprintf(base, sizeof(base), "%s", games[game_count].label);
+                snprintf(games[game_count].label, sizeof(games[game_count].label),
+                         "%s%s", platforms[PLATFORM_DOJA].tag, base);
+            }
         }
     }
     game_count++;
@@ -1144,9 +1259,11 @@ static int suggest_key_profile_for_jar(const char *jar_path) {
     for (i = 0; i < KEY_PROFILE_COUNT; i++) scores[i] = 0;
     if (!jar_path || !jar_path[0]) return 0;
 
-#if ENABLE_DOJA_SUPPORT
-    return find_key_profile("doja");
-#endif
+    {
+        char jam[PATH_MAX];
+        if (find_jam_for_jar(jar_path, jam, sizeof(jam)))
+            return find_key_profile(platforms[PLATFORM_DOJA].key_profile);
+    }
 
     score_profile_text(jar_path, strlen(jar_path), scores);
     shell_quote(jar_path, quoted, sizeof(quoted));
@@ -2064,8 +2181,14 @@ static int launch_game_once(int idx) {
     /* extract MIDlet main class from JAR manifest */
     char main_class[256] = {0};
     char jad_path[PATH_MAX];
-    if (games[idx].is_doja) {
-        snprintf(main_class, sizeof(main_class), "%s", "com.funkey.doja.DoJaMIDlet");
+    const Platform *plat = &platforms[games[idx].is_doja ? PLATFORM_DOJA : PLATFORM_MIDP];
+    {
+        char stale[PATH_MAX];
+        snprintf(stale, sizeof(stale), "%s/main-class", PM_DIR);
+        unlink(stale);   /* never reuse the class of the previous game */
+    }
+    if (plat->main_class != NULL) {
+        snprintf(main_class, sizeof(main_class), "%s", plat->main_class);
     } else {
         int jar_len = strlen(jar_path);
         snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, jar_path);
@@ -2088,7 +2211,7 @@ static int launch_game_once(int idx) {
                                   sizeof(games[idx].title));
     }
 
-    {
+    if (plat->main_class == NULL) {
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/main-class", PM_DIR);
         FILE *mf = fopen(path, "r");
@@ -2112,7 +2235,7 @@ static int launch_game_once(int idx) {
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
     setenv("PHONEME_RMS_HOME", rms_home, 1);
-    setenv("PHONEME_HEAP_MB", games[idx].is_doja ? "32" : "16", 1);
+    setenv("PHONEME_HEAP_MB", plat->heap_mb, 1);
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
@@ -2288,25 +2411,31 @@ static int launch_game_once(int idx) {
                     fclose(jf);
                 }
             }
+            if (plat->support_jar != NULL) {
+                snprintf(classpath, sizeof(classpath), "%s:%s/%s",
+                         jar_path, PM_DIR, plat->support_jar);
+            } else {
+                snprintf(classpath, sizeof(classpath), "%s", jar_path);
+            }
+            if (plat->encoding != NULL) {
+                snprintf(prop_encoding, sizeof(prop_encoding),
+                         "-Dmicroedition.encoding=%s", plat->encoding);
+            } else {
+                prop_encoding[0] = '\0';
+            }
             if (games[idx].is_doja) {
-                snprintf(classpath, sizeof(classpath), "%s:%s/lib/doja-support.jar",
-                         jar_path, PM_DIR);
                 snprintf(prop_app, sizeof(prop_app), "-Ddoja.app.class=%s",
                          games[idx].app_class);
                 snprintf(prop_param, sizeof(prop_param), "-Ddoja.app.param=%s",
                          games[idx].app_param);
                 snprintf(prop_ver, sizeof(prop_ver), "-Ddoja.app.ver=%s",
                          games[idx].app_ver);
-                snprintf(prop_encoding, sizeof(prop_encoding),
-                         "-Dmicroedition.encoding=SJIS");
                 snprintf(prop_scratchpad, sizeof(prop_scratchpad),
                          "-Ddoja.scratchpad.path=%s", doja_scratchpad_path);
             } else {
-                snprintf(classpath, sizeof(classpath), "%s", jar_path);
                 prop_app[0] = '\0';
                 prop_param[0] = '\0';
                 prop_ver[0] = '\0';
-                prop_encoding[0] = '\0';
                 prop_scratchpad[0] = '\0';
             }
         if (games[idx].is_doja) {

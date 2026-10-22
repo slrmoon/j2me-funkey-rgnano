@@ -43,7 +43,7 @@ RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
 APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
 BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
 RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
-ENABLE_DOJA_SUPPORT=${FUNKEY_ENABLE_DOJA_SUPPORT:-0}
+ENABLE_DOJA_SUPPORT=${FUNKEY_ENABLE_DOJA_SUPPORT:-1}
 
 if [ "$BUNDLE_MIDLET" = "1" ]; then
     RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-0}
@@ -518,7 +518,7 @@ stop_midlet() {
 
 trap 'stop_midlet; exit 0' INT TERM HUP
 
-echo "pm launcher v24 doja-midi-audio-v7"
+echo "pm launcher v25 midp+doja"
 echo "Starting phoneME FunKey runtime"
 date
 echo "APP_DIR=$APP_DIR"

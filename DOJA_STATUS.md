@@ -1,5 +1,11 @@
 # DoJa (i-appli) branch — status
 
+## One launcher (2026-10-22)
+- `pm.opk` contains DoJa support (`FUNKEY_ENABLE_DOJA_SUPPORT=1` by default); the separate `doja.opk` / `package-doja-opk.sh` and the `/mnt/doja` folder are gone: every game lives in `/mnt/java`.
+- A jar is DoJa when it has a `.jam` with AppClass: `<name>.jam` next to it, or the only `.jam` of the folder whose AppClass is inside the jar. Otherwise MIDP.
+- `pm-launch.c` has a platform table (main class, support jar, heap, default key profile, encoding, list tag); DoJa games get the `doja` key profile by default, MIDP games keep the guessed one (before, a DoJa-enabled build gave every game the doja profile). Fixed: a DoJa launch could reuse the previous MIDP game's main-class file.
+- Tested in qemu through the real launcher: MotherLoad (MIDP) and Rockman Puzzle Battle (DoJa) start from the same list.
+
 ## Done (2026-10-22)
 - Merged `origin/main` into `doja` (M3G, fkaudio/EAS audio, scaling, menu, frame limiter). Old media-sdl/TiMidity path is gone; DoJa sound goes through MMAPI → fkaudio (MLD is converted to MIDI in Java by `MldPcmDecoder`).
 - New DoJa runtime (hand-written, `packaging/funkey-s/doja-stubs/`):
