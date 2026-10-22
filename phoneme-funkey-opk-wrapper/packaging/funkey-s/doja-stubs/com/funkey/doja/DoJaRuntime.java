@@ -443,7 +443,7 @@ public final class DoJaRuntime implements Runnable {
         }
     }
 
-    static final boolean TRACE = "1".equals(sysprop("doja.trace"));
+    public static final boolean TRACE = "1".equals(sysprop("doja.trace"));
 
     private static void dispatch(Event e) {
         if (TRACE) {

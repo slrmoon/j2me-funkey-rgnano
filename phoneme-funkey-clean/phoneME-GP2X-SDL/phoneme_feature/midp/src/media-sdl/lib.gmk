@@ -128,6 +128,7 @@ FKA_ENGINE_FILES = \
     fka_formats.c \
     fka_smaf.c \
     fka_decode.c \
+    fka_mld.c \
     fka_eas.c
 
 # wt_22khz.c and wt_200k_samples.c are #included by wt_200k_G.c
@@ -169,6 +170,9 @@ SUBSYSTEM_MEDIA_NATIVE_FILES += $(FKA_ENGINE_FILES) $(FKA_EAS_FILES)
 # the global build is gnu89; EAS and the engine are C99
 $(patsubst %.c,$(OBJ_DIR)/%.o,$(FKA_ENGINE_FILES) $(FKA_EAS_FILES)): \
     override CFLAGS += -std=gnu99 -fno-strict-aliasing
+
+# MLD / MA-3 synth: Java float semantics (no FMA contraction, wrapping ints)
+$(OBJ_DIR)/fka_mld.o: override CFLAGS += -ffp-contract=off -fwrapv -fno-fast-math
 
 ifeq ($(TARGET_CPU), arm)
 ifneq ($(wildcard $(FKA_NATIVE_DIR)/opencore-amrnb/libopencore-amrnb.a),)
