@@ -16,6 +16,7 @@
 #include "fka.h"
 #include "fka_mld.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -554,9 +555,29 @@ static int mp3_next(FkaPcm *p, int keep_from)
 
 #define MLD_CHUNK 1024
 
+/* Test switch: PHONEME_MLD_MIDI=1 or the file /mnt/FunKey/.pm/mld-midi makes
+ * native MLD decoding fail, so DoJa falls back to its MLD -> MIDI conversion
+ * (to tell whether the MA-3 synth is what overloads the CPU). */
+static int mld_native_disabled(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("PHONEME_MLD_MIDI");
+        FILE *f = NULL;
+        v = (e != NULL && e[0] != '\0' && e[0] != '0');
+        if (!v && (f = fopen("/mnt/FunKey/.pm/mld-midi", "r")) != NULL) {
+            v = 1;
+            fclose(f);
+        }
+        if (v) fprintf(stderr, "fkaudio: native MLD off, MIDI conversion\n");
+    }
+    return v;
+}
+
 static int decode_mld(const uint8_t *d, int n, FkaPcm *out)
 {
     long long frames;
+    if (mld_native_disabled()) return -1;
     memset(out, 0, sizeof(*out));
     frames = fka_mld_count_frames(d, n, (float) FKA_RATE);
     if (frames < 0) return -1;
