@@ -141,6 +141,8 @@ typedef struct {
     unsigned int *vcache_stamp;
     int vcache_cap;
     unsigned int vcache_draw;
+    /* projection * modelview, set per draw (see ngl_sw_xform_begin) */
+    float mvp[16];
     /* Per-draw lighting setup (see ngl_sw_light_begin). */
     float normal_matrix[9];
     float light_dir[8][3];   /* directional: normalized direction */
@@ -368,6 +370,21 @@ static float ngl_sw_dot3(const float *a, const float *b) {
 static int ngl_sw_light_index(GLenum light) {
     int index = (int)light - (int)GL_LIGHT0;
     return index >= 0 && index < 8 ? index : -1;
+}
+
+/* Per-draw projection * modelview (column-major, like GL). */
+static void ngl_sw_xform_begin(void) {
+    const float *p = ngl_sw.projection;
+    const float *m = ngl_sw.modelview;
+    int r, c;
+    for (c = 0; c < 4; ++c) {
+        for (r = 0; r < 4; ++r) {
+            ngl_sw.mvp[c * 4 + r] = p[0 * 4 + r] * m[c * 4 + 0] +
+                                    p[1 * 4 + r] * m[c * 4 + 1] +
+                                    p[2 * 4 + r] * m[c * 4 + 2] +
+                                    p[3 * 4 + r] * m[c * 4 + 3];
+        }
+    }
 }
 
 /*
@@ -1036,8 +1053,24 @@ static void ngl_sw_transform_vertex(int index, NGLVertex *out) {
     float tc[4];
     int unit;
     ngl_sw_vec(&ngl_sw.vertex, index, p, 4);
-    ngl_sw_transform_vec4(mv, ngl_sw.modelview, p);
-    ngl_sw_transform_vec4(clip, ngl_sw.projection, mv);
+    if (ngl_sw.lighting) {
+        /* lighting needs the eye-space position anyway */
+        ngl_sw_transform_vec4(mv, ngl_sw.modelview, p);
+        ngl_sw_transform_vec4(clip, ngl_sw.projection, mv);
+    } else {
+        const float *m = ngl_sw.mvp;
+        const float *e = ngl_sw.modelview;
+        if (p[3] == 1.0f) {
+            clip[0] = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+            clip[1] = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+            clip[2] = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
+            clip[3] = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+            mv[2] = e[2] * p[0] + e[6] * p[1] + e[10] * p[2] + e[14];
+        } else {
+            ngl_sw_transform_vec4(clip, m, p);
+            mv[2] = e[2] * p[0] + e[6] * p[1] + e[10] * p[2] + e[14] * p[3];
+        }
+    }
     out->x = clip[0];
     out->y = clip[1];
     out->z = clip[2];
@@ -1436,7 +1469,7 @@ static void ngl_sw_plane(NGLPlane *p, float va, float vb, float vc) {
 
 static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                             const int *tex_mips, int perspective, int smooth,
-                            int simple_write, unsigned int flat_color,
+                            int rgb_mask_all, unsigned int flat_color,
                             float inv_area, const NGLPlane *pz,
                             const NGLPlane *pinvw, const NGLPlane *pu,
                             const NGLPlane *pv, const NGLPlane *pcol,
@@ -1456,8 +1489,14 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     float dqx = 0.0f, duqx = 0.0f, dvqx = 0.0f, dzx;
     float dcx[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int y, ch;
+    /* 0: plain write, 1: SRC_ALPHA/ONE_MINUS_SRC_ALPHA, 2: other blend */
+    int blend_mode = 0;
 
-    if (!simple_write || ngl_sw.fog) return 0;
+    if (!rgb_mask_all || ngl_sw.fog) return 0;
+    if (ngl_sw.blend) {
+        blend_mode = (ngl_sw.blend_src == GL_SRC_ALPHA &&
+                      ngl_sw.blend_dst == GL_ONE_MINUS_SRC_ALPHA) ? 1 : 2;
+    }
     if (depth_on && ngl_sw.depth_func != GL_LEQUAL &&
             ngl_sw.depth_func != GL_LESS && ngl_sw.depth_func != GL_ALWAYS) return 0;
     if (NGL_SW_TEXTURE_UNITS > 1 && tex_unit[1] != NULL) return 0;
@@ -1639,6 +1678,18 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                     continue;
                 }
                 if (depth_write) depth_row[x] = (unsigned short)dv;
+                if (blend_mode == 1) {
+                    /* same result as ngl_sw_blend(); alpha 0 leaves the
+                     * pixel as it is (565 -> 8888 -> 565 round-trips) */
+                    unsigned int al = color >> 24;
+                    if (al == 0) continue;
+                    if (al != 255U) {
+                        color = ngl_sw_lerp8(ngl_sw_rgb565_to_argb(dst_row[x]),
+                                             color, al + (al >> 7));
+                    }
+                } else if (blend_mode == 2) {
+                    color = ngl_sw_blend(color, ngl_sw_rgb565_to_argb(dst_row[x]));
+                }
                 dst_row[x] = ngl_sw_rgb565(color);
             }
             u0 = u1;
@@ -1888,7 +1939,7 @@ static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
         }
     }
     if (ngl_sw_span_fast(tex_unit, tex_nearest, tex_mips, perspective, smooth,
-                         simple_write, flat_color, inv_area, &pz, &pinvw,
+                         rgb_mask_all, flat_color, inv_area, &pz, &pinvw,
                          pu, pv, pcol, minx, maxx, miny, maxy,
                          row0, row1, row2, a0, a1, a2, b0, b1, b2,
                          bias1, bias2)) {
@@ -2148,6 +2199,7 @@ static void ngl_sw_draw_indexed(GLenum mode, GLsizei count, GLenum type,
     }
     cached = max_index >= 0 && ngl_sw_vcache_reserve(max_index);
     ngl_sw_vcache_begin();
+    ngl_sw_xform_begin();
     ngl_sw_light_begin();
     for (i = 0; i + 2 < count; ++i) {
         int ia = indices != NULL ? ngl_sw_index(type, indices, i) : first + i;
