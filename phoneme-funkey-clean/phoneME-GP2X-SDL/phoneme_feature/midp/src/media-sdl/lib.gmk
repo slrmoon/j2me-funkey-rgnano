@@ -41,10 +41,10 @@ SUBSYSTEMS += $(SUBSYSTEM_MEDIA)
 
 # Javadoc source path
 SUBSYSTEM_MEDIA_SOURCEPATH += $(SUBSYSTEM_DIR)/media-sdl/reference/classes
-SUBSYSTEM_MEDIA_RESOURCES_DIR = $(SUBSYSTEM_DIR)/media-sdl/reference/resource
 
 SUBSYSTEM_MEDIA_PACKAGES = \
-    javax.microedition.media javax.microedition.media.control
+    javax.microedition.media javax.microedition.media.control \
+    javax.microedition.media.protocol
 
 MIDP_JAVADOC_SOURCEPATH += $(SUBSYSTEM_MEDIA_SOURCEPATH)
 MIDP_JAVADOC_PACKAGES +=  $(SUBSYSTEM_MEDIA_PACKAGES)
@@ -53,64 +53,128 @@ MIDP_JAVADOC_ALL += \
         -group "Media stuff" \
 	$(shell echo $(SUBSYSTEM_MEDIA_PACKAGES)|tr ' ' $(PATHSEP))
 
-# There are no modules for subsystem ( media )
 #
+# FunKey audio engine (fkaudio): own decoders and sequencer, Sonivox EAS
+# synthesizer (Apache 2.0, the MIDI engine of many handsets and Android)
+#
+FKA_NATIVE_DIR = $(SUBSYSTEM_DIR)/media-sdl/reference/native
+FKA_CLASSES_DIR = $(SUBSYSTEM_DIR)/media-sdl/reference/classes
 
-# vpath for ( media ) subsystem
-#
 vpath % \
-    $(SUBSYSTEM_DIR)/media-sdl/reference/native \
-    $(SUBSYSTEM_DIR)/media-sdl/reference/native/tinysoundfont \
-    $(SUBSYSTEM_DIR)/media-sdl/reference/native/timidity
+    $(FKA_NATIVE_DIR)/fkaudio \
+    $(FKA_NATIVE_DIR)/sonivox
+
+EXTRA_INCLUDES += \
+    -I$(FKA_NATIVE_DIR)/fkaudio \
+    -I$(FKA_NATIVE_DIR)/sonivox \
+    -I$(FKA_NATIVE_DIR)/sonivox/fakes
 
 # Java files for the ( media ) subsystem
 #
 SUBSYSTEM_MEDIA_JAVA_FILES += \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/Control.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/Controllable.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/Manager.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/MediaException.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/Player.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/ABBBasicPlayer.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/DoJaAudioBridge.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/GenericPlayer.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/MIDIPlayer.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/ToneSequencePlayer.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/PlayerListener.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/MIDletPauseListener.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/control/ToneControl.java \
-     $(SUBSYSTEM_DIR)/media-sdl/reference/classes/javax/microedition/media/control/VolumeControl.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/ui/FullCanvas.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/ui/DirectGraphics.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/ui/DirectUtils.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/ui/DeviceControl.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/sound/Sound.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/sound/ToneVerifier.java \
-      $(SUBSYSTEM_DIR)/media-sdl/reference/classes/com/nokia/mid/sound/SoundListener.java
+    $(FKA_CLASSES_DIR)/javax/microedition/media/Control.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/Controllable.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/Manager.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/MediaException.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/Player.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/PlayerListener.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/TimeBase.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/MIDletPauseListener.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/FkaNative.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/FkaPlayer.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/FkaEvents.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/FkaControls.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/ToneControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/VolumeControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/MIDIControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/MetaDataControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/PitchControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/RateControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/StopTimeControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/control/TempoControl.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/protocol/ContentDescriptor.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/protocol/DataSource.java \
+    $(FKA_CLASSES_DIR)/javax/microedition/media/protocol/SourceStream.java \
+    $(FKA_CLASSES_DIR)/com/nokia/mid/ui/FullCanvas.java \
+    $(FKA_CLASSES_DIR)/com/nokia/mid/ui/DirectGraphics.java \
+    $(FKA_CLASSES_DIR)/com/nokia/mid/ui/DirectUtils.java \
+    $(FKA_CLASSES_DIR)/com/nokia/mid/ui/DeviceControl.java \
+    $(FKA_CLASSES_DIR)/com/nokia/mid/sound/Sound.java \
+    $(FKA_CLASSES_DIR)/com/nokia/mid/sound/SoundListener.java \
+    $(FKA_CLASSES_DIR)/com/samsung/util/AudioClip.java \
+    $(FKA_CLASSES_DIR)/com/samsung/util/Vibration.java \
+    $(FKA_CLASSES_DIR)/com/samsung/util/LCDLight.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/misc/NativeMem.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/game/Sound.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/game/Melody.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/game/MelodyComposer.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/Control.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/Controllable.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/MediaException.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/Player.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/PlayerListener.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/Manager.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/SiemensPlayer.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/protocol/DataSource.java \
+    $(FKA_CLASSES_DIR)/com/motorola/midi/MidiPlayer.java
 
 # Native files for the ( media ) subsystem
 #
-SUBSYSTEM_MEDIA_NATIVE_FILES += \
-    media-sdl.c \
-    tsf_impl.c \
-    common.c \
-    instrum.c \
-    instrum_dls.c \
-    mix.c \
-    output.c \
-    playmidi.c \
-    readmidi.c \
-    resample.c \
-    tables.c \
-    timidity.c
+FKA_ENGINE_FILES = \
+    fka_kni.c \
+    fka_sdl.c \
+    fka_engine.c \
+    fka_song.c \
+    fka_formats.c \
+    fka_smaf.c \
+    fka_decode.c \
+    fka_eas.c
 
-MIDP_RESOURCES += media_sdl_resources
+# wt_22khz.c and wt_200k_samples.c are #included by wt_200k_G.c
+FKA_EAS_FILES = \
+    eas_chorus.c \
+    eas_config.c \
+    eas_dlssynth.c \
+    eas_filter_float.c \
+    eas_flog.c \
+    eas_fmengine.c \
+    eas_fmsndlib.c \
+    eas_fmsynth.c \
+    eas_fmtables.c \
+    eas_math.c \
+    eas_mdls.c \
+    eas_midi.c \
+    eas_mixbuf.c \
+    eas_mixer.c \
+    eas_pan.c \
+    eas_pcm.c \
+    eas_public.c \
+    eas_report.c \
+    eas_reverb.c \
+    eas_sf2.c \
+    eas_smf.c \
+    eas_sndlibmgt.c \
+    eas_tonecontrol.c \
+    eas_voicemgt.c \
+    eas_wtengine.c \
+    eas_wtsynth.c \
+    eas_xmf.c \
+    hostmm_ng.c \
+    hybrid_22khz_mcu.c \
+    rmidi.c \
+    wt_200k_G.c
 
-media_sdl_resources: $(LIBDIR)
-	@mkdir -p $(LIBDIR)/soundfont
-	@cp -R $(SUBSYSTEM_MEDIA_RESOURCES_DIR)/soundfont/. $(LIBDIR)/soundfont $(LOG)
+SUBSYSTEM_MEDIA_NATIVE_FILES += $(FKA_ENGINE_FILES) $(FKA_EAS_FILES)
 
-############################################################
-# Native files under MEDIA subsystem
-############################################################
-##  no native sources for media, therefore empty
+# the global build is gnu89; EAS and the engine are C99
+$(patsubst %.c,$(OBJ_DIR)/%.o,$(FKA_ENGINE_FILES) $(FKA_EAS_FILES)): \
+    override CFLAGS += -std=gnu99 -fno-strict-aliasing
+
+ifeq ($(TARGET_CPU), arm)
+ifneq ($(wildcard $(FKA_NATIVE_DIR)/opencore-amrnb/libopencore-amrnb.a),)
+$(OBJ_DIR)/fka_decode.o: override CFLAGS += -DFKA_HAVE_AMR -I$(FKA_NATIVE_DIR)/opencore-amrnb
+endif
+endif
+
+# zlib: compressed XMF inside EAS
+LIBS += -lz

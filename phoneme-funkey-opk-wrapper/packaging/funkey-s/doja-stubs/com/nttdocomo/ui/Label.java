@@ -1,54 +1,77 @@
 package com.nttdocomo.ui;
 
+import com.nttdocomo.lang.XString;
 
-public class Label extends com.nttdocomo.ui.Component {
+public final class Label extends Component {
+    public static final int LEFT = 0;
+    public static final int CENTER = 1;
+    public static final int RIGHT = 2;
+
+    String text = "";
+    int alignment = LEFT;
 
     public Label() {
-    super();
     }
 
-    public Label(java.lang.String p0) {
-    super();
+    public Label(XString t) {
+        this(t == null ? null : t.toString());
     }
 
-    public Label(java.lang.String p0, int p1) {
-    super();
+    public Label(String t) {
+        text = t == null ? "" : t;
     }
 
-    public int getHeight() {
-    return 0;
+    public Label(XString t, int align) {
+        this(t == null ? null : t.toString(), align);
     }
 
-    public int getWidth() {
-    return 0;
+    public Label(String t, int align) {
+        this(t);
+        setAlignment(align);
     }
 
-    public void setAlignment(int p0) {
-    // no-op
+    public void setText(XString t) {
+        setText(t == null ? null : t.toString());
     }
 
-    public void setBackground(int p0) {
-    // no-op
+    public void setText(String t) {
+        text = t == null ? "" : t;
+        changed();
     }
 
-    public void setFont(com.nttdocomo.ui.Font p0) {
-    // no-op
+    public void setAlignment(int align) {
+        if (align < LEFT || align > RIGHT) {
+            throw new IllegalArgumentException("alignment");
+        }
+        alignment = align;
+        changed();
     }
 
-    public void setForeground(int p0) {
-    // no-op
+    public void setFont(Font f) {
+        super.setFont(f);
     }
 
-    public void setLocation(int p0, int p1) {
-    // no-op
+    int prefWidth() {
+        return font().stringWidth(text) + 2;
     }
 
-    public void setSize(int p0, int p1) {
-    // no-op
+    int prefHeight() {
+        return font().getHeight() + 2;
     }
 
-    public void setText(java.lang.String p0) {
-    // no-op
+    void paint(javax.microedition.lcdui.Graphics g, int px, int py, boolean focused) {
+        int cw = getWidth();
+        if (background >= 0) {
+            g.setColor(background);
+            g.fillRect(px, py, cw, getHeight());
+        }
+        int tw = font().stringWidth(text);
+        int tx = px + 1;
+        if (alignment == CENTER) {
+            tx = px + (cw - tw) / 2;
+        } else if (alignment == RIGHT) {
+            tx = px + cw - tw - 1;
+        }
+        text(g, font(), text, tx, py + 1, foreground);
     }
-
 }

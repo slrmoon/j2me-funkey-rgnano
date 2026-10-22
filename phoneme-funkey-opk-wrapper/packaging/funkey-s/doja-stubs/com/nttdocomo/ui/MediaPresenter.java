@@ -1,7 +1,15 @@
 package com.nttdocomo.ui;
 
 public interface MediaPresenter {
-    void setMediaResource(MediaResource resource);
+    void setData(MediaData data);
+
+    MediaResource getMediaResource();
+
     void play();
+
     void stop();
+
+    void setAttribute(int key, int value);
+
+    void setMediaListener(MediaListener listener);
 }

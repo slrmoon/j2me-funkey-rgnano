@@ -9,6 +9,7 @@ if [ -d "$ROOT/phoneME-GP2X-SDL/phoneme_feature" ]; then
 else
     PHONEME_ROOT=${FUNKEY_PHONEME_ROOT:-$PHONEME_ROOT_DEFAULT}
 fi
+PHONEME_ROOT=$(CDPATH= cd -- "$PHONEME_ROOT" && pwd)
 MEHOME=$PHONEME_ROOT/phoneme_feature
 MIDP_BIN=$MEHOME/build_output_funkey_s/midp/bin/arm
 MIDP_CLASSES=$MEHOME/build_output_funkey_s/midp/classes.zip
@@ -19,7 +20,8 @@ RUNMIDLET_FALLBACK=${RUNMIDLET_FALLBACK:-$MEHOME/build_output_funkey_s/opk/phone
 CLDC_VM_FALLBACK=${CLDC_VM_FALLBACK:-}
 JDK_DIR=${JDK_DIR:-$ROOT/zulu7.24.0.1-jdk7.0.191-linux_x64}
 PACKAGE_ROOT=$MEHOME/build_output_funkey_s/opk
-OPK_BASENAME=${FUNKEY_OPK_BASENAME:-pm}
+OPK_BASENAME=${FUNKEY_OPK_BASENAME:-${FUNKEY_OPK_NAME:-pm}}
+OPK_NAME=$OPK_BASENAME
 STAGE_NAME=${FUNKEY_STAGE_NAME:-$OPK_BASENAME}
 LAUNCHER_BIN=${FUNKEY_LAUNCHER_BIN:-pm}
 APP_DIR=${FUNKEY_APP_DIR:-/mnt/FunKey/.pm}
@@ -28,8 +30,8 @@ RUNTIME_LOG=${FUNKEY_RUNTIME_LOG:-$APP_DIR/runmidlet.log}
 STAGE=$PACKAGE_ROOT/$STAGE_NAME
 OPK=$PACKAGE_ROOT/$OPK_BASENAME.opk
 HELLO_SRC=$ROOT/packaging/funkey-s/HelloMidlet.java
-NOKIA_STUB_SRC=$ROOT/packaging/funkey-s/nokia-stubs
 DOJA_STUB_SRC=$ROOT/packaging/funkey-s/doja-stubs
+DOJA_API_SRC=$ROOT/packaging/funkey-s/doja-api
 HELLO_BUILD=$PACKAGE_ROOT/hello-build
 FUNKEY_CC=${FUNKEY_CC:-}
 APP_JAR=${FUNKEY_MIDLET_JAR:-${1:-}}
@@ -126,46 +128,6 @@ jar_has_entry() {
     "$JDK_DIR/bin/jar" tf "$1" | grep -q "^$2$"
 }
 
-inject_nokia_stubs() {
-    if [ "${FUNKEY_NOKIA_STUBS:-auto}" = "0" ]; then
-        return
-    fi
-    if [ ! -d "$NOKIA_STUB_SRC" ]; then
-        return
-    fi
-    if jar_has_entry "$STAGE/midlets/a.jar" "com/nokia/mid/sound/Sound.class"; then
-        return
-    fi
-
-    echo "Injecting Nokia compatibility stubs"
-    mkdir -p "$HELLO_BUILD/nokia-stubs/classes" "$HELLO_BUILD/nokia-stubs/verified"
-    "$JDK_DIR/bin/javac" \
-        -source 1.4 -target 1.4 \
-        -bootclasspath "$MIDP_CLASSES" \
-        -classpath "$MIDP_CLASSES" \
-        -d "$HELLO_BUILD/nokia-stubs/classes" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/sound/Sound.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/sound/SoundListener.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/ui/DeviceControl.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/ui/DirectGraphics.java" \
-        "$NOKIA_STUB_SRC/com/nokia/mid/ui/DirectUtils.java"
-
-    "$PREVERIFY" \
-        -classpath "$MIDP_CLASSES:$CLDC_DIST/lib/cldc_classes.zip" \
-        -d "$HELLO_BUILD/nokia-stubs/verified" \
-        "$HELLO_BUILD/nokia-stubs/classes"
-
-    (
-        cd "$HELLO_BUILD/nokia-stubs/verified"
-        "$JDK_DIR/bin/jar" uf "$STAGE/midlets/a.jar" \
-            com/nokia/mid/sound/Sound.class \
-            com/nokia/mid/sound/SoundListener.class \
-            com/nokia/mid/ui/DeviceControl.class \
-            com/nokia/mid/ui/DirectGraphics.class \
-            com/nokia/mid/ui/DirectUtils.class \
-            com/nokia/mid/ui/DirectUtils\$DirectGraphicsImpl.class
-    )
-}
 
 build_doja_support() {
     if [ "$ENABLE_DOJA_SUPPORT" != "1" ]; then
@@ -177,7 +139,11 @@ build_doja_support() {
 
     echo "Building DoJa compatibility support"
     mkdir -p "$HELLO_BUILD/doja-stubs/classes" "$HELLO_BUILD/doja-stubs/verified" "$STAGE/lib"
-    find "$DOJA_STUB_SRC" -name '*.java' | sort > "$HELLO_BUILD/doja-stubs/sources.list"
+    # hand-written runtime (doja-stubs) + generated API skeletons (doja-api,
+    # tools/doja/gen_api_stubs.py)
+    rm -rf "$HELLO_BUILD/doja-stubs/classes" "$HELLO_BUILD/doja-stubs/verified"
+    mkdir -p "$HELLO_BUILD/doja-stubs/classes" "$HELLO_BUILD/doja-stubs/verified"
+    find "$DOJA_STUB_SRC" "$DOJA_API_SRC" -name '*.java' | sort > "$HELLO_BUILD/doja-stubs/sources.list"
     "$JDK_DIR/bin/javac" \
         -source 1.4 -target 1.4 \
         -bootclasspath "$MIDP_CLASSES" \
@@ -197,6 +163,13 @@ build_doja_support() {
         -classpath "$MIDP_CLASSES:$CLDC_DIST/lib/cldc_classes.zip" \
         -d "$HELLO_BUILD/doja-stubs/verified" \
         "$HELLO_BUILD/doja-stubs/classes"
+
+    # resources (bitmap fonts)
+    find "$DOJA_STUB_SRC" -name '*.bin' | while read -r rf; do
+        rel=${rf#"$DOJA_STUB_SRC"/}
+        mkdir -p "$HELLO_BUILD/doja-stubs/verified/$(dirname "$rel")"
+        cp "$rf" "$HELLO_BUILD/doja-stubs/verified/$rel"
+    done
 
     (
         cd "$HELLO_BUILD/doja-stubs/verified"
@@ -265,7 +238,6 @@ elif [ -n "$APP_JAR" ]; then
         echo "Could not infer MIDlet class. Set FUNKEY_MIDLET_MAIN=YourMidlet." >&2
         exit 1
     fi
-    inject_nokia_stubs
 else
     mkdir -p "$STAGE/midlets" "$HELLO_BUILD/classes" "$HELLO_BUILD/verified"
     BUILTIN_SRC=$HELLO_SRC
@@ -334,23 +306,7 @@ if [ -s "$TARGET_CLDC_BIN/cldc_vm" ] || { [ -n "$CLDC_VM_FALLBACK" ] && [ -s "$C
     copy_nonempty_file "$TARGET_CLDC_BIN/cldc_vm" "$STAGE/bin/cldc_vm" "$CLDC_VM_FALLBACK"
 fi
 cp -R "$MEHOME/build_output_funkey_s/midp/lib" "$STAGE/lib"
-rm -rf "$STAGE/lib/freepats"
-if [ -n "${FUNKEY_SOUNDFONT_SRC:-}" ]; then
-    if [ ! -s "$FUNKEY_SOUNDFONT_SRC" ]; then
-        echo "Missing non-empty SoundFont: $FUNKEY_SOUNDFONT_SRC" >&2
-        exit 1
-    fi
-    mkdir -p "$STAGE/lib/soundfont"
-    cp "$FUNKEY_SOUNDFONT_SRC" "$STAGE/lib/soundfont/default.sf2"
-    if [ -n "${FUNKEY_SOUNDFONT_LICENSE:-}" ]; then
-        if [ -d "$FUNKEY_SOUNDFONT_LICENSE" ]; then
-            cp -R "$FUNKEY_SOUNDFONT_LICENSE" "$STAGE/lib/soundfont/licenses"
-        elif [ -s "$FUNKEY_SOUNDFONT_LICENSE" ]; then
-            cp "$FUNKEY_SOUNDFONT_LICENSE" "$STAGE/lib/soundfont/LICENSE.txt"
-        fi
-    fi
-    echo "Bundled SoundFont: $FUNKEY_SOUNDFONT_SRC"
-fi
+rm -rf "$STAGE/lib/freepats" "$STAGE/lib/soundfont"
 build_doja_support
 cp -R "$MEHOME/build_output_funkey_s/midp/appdb" "$STAGE/appdb"
 echo "Compiling SDL launcher (browser mode)"
@@ -389,8 +345,7 @@ fi
         bin/installMidlet \
         bin/listMidlets.sh \
         bin/preverify \
-        lib/doja-support.jar \
-        lib/soundfont/default.sf2; do
+        lib/doja-support.jar; do
         if [ -f "$STAGE/$runtime_file" ]; then
             sha256sum "$STAGE/$runtime_file" | awk -v name="$runtime_file" '{ print $1 "  " name }'
         fi
@@ -454,13 +409,32 @@ else
     echo "appdb already exists, preserving" >> "$EARLY_LOG"
 fi
 export MIDP_HOME="$APP_DIR"
-export PHONEME_TIMIDITY_SYNTHETIC="${PHONEME_TIMIDITY_SYNTHETIC:-1}"
+export PHONEME_SYNTH="${PHONEME_SYNTH:-hybrid}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
-if [ "${PHONEME_DEBUG_LOGS:-0}" = "1" ]; then
-    export PHONEME_KEY_DEBUG="${PHONEME_KEY_DEBUG:-1}"
-    export PHONEME_EVENT_DEBUG="${PHONEME_EVENT_DEBUG:-1}"
-    export PHONEME_REFRESH_DEBUG="${PHONEME_REFRESH_DEBUG:-1}"
-fi
+# debug switches: shared with the launcher and the in-game Debug menu
+DEBUG_CFG="$APP_DIR/debug.cfg"
+RESTART_FLAG="$APP_DIR/restart-request"
+export PHONEME_DEBUG_CONFIG="$DEBUG_CFG"
+export PHONEME_RESTART_FLAG="$RESTART_FLAG"
+debug_on() {
+    # LOG defaults to on, everything else to off
+    if [ -f "$DEBUG_CFG" ] && grep -q "^$1=" "$DEBUG_CFG"; then
+        grep -q "^$1=1" "$DEBUG_CFG"
+    else
+        [ "$1" = "LOG" ]
+    fi
+}
+apply_debug_env() {
+    for pair in KEYS:PHONEME_KEY_DEBUG EVENTS:PHONEME_EVENT_DEBUG \
+                DISPLAY:PHONEME_DISPLAY_DEBUG AUDIO:PHONEME_AUDIO_TRACE \
+                PROFILE:PHONEME_PROFILE FPS:PHONEME_SHOW_FPS; do
+        if debug_on "${pair%%:*}"; then
+            export "${pair#*:}=1"
+        else
+            unset "${pair#*:}"
+        fi
+    done
+}
 export PHONEME_KEY_PROFILE="${PHONEME_KEY_PROFILE:-game}"
 DEFAULT_RUNMIDLET_HEAP_ARG='__RUNMIDLET_HEAP_ARG__'
 RUNMIDLET_HEAP_ARG=${PHONEME_RUNMIDLET_HEAP_ARG:-$DEFAULT_RUNMIDLET_HEAP_ARG}
@@ -522,9 +496,15 @@ fi
 echo "cd app bin" >> "$EARLY_LOG"
 cd "$APP_DIR/bin"
 echo "create main log" >> "$EARLY_LOG"
-: > "$LOG"
-echo "redirect main log" >> "$EARLY_LOG"
-exec >> "$LOG" 2>&1
+if debug_on LOG; then
+    [ -f "$LOG" ] && mv -f "$LOG" "$LOG.prev"
+    : > "$LOG"
+    echo "redirect main log" >> "$EARLY_LOG"
+    exec >> "$LOG" 2>&1
+else
+    echo "log file off" >> "$EARLY_LOG"
+    exec > /dev/null 2>&1
+fi
 
 child_pid=
 
@@ -558,20 +538,28 @@ if [ "__RUNTIME_ONLY__" = "1" ]; then
 fi
 MIDLET_CLASS=$(cat "$APP_DIR/midlets/main-class")
 echo "MIDLET_CLASS=$MIDLET_CLASS"
-if [ -n "${RUNMIDLET_HEAP_ARG:-}" ]; then
-    # Expand VM args into separate argv entries for runMidlet/JVM_ParseOneArg.
-    # shellcheck disable=SC2086
-    set -- $RUNMIDLET_HEAP_ARG
-    ./runMidlet "$@" -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
-else
-    ./runMidlet -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
-fi
-child_pid=$!
-echo "runMidlet pid: $child_pid"
-wait "$child_pid"
-status=$?
-child_pid=
-echo "runMidlet exit status: $status"
+# "Restart game" in the in-game menu leaves RESTART_FLAG and exits
+while :; do
+    rm -f "$RESTART_FLAG"
+    apply_debug_env
+    if [ -n "${RUNMIDLET_HEAP_ARG:-}" ]; then
+        # Expand VM args into separate argv entries for runMidlet/JVM_ParseOneArg.
+        # shellcheck disable=SC2086
+        set -- $RUNMIDLET_HEAP_ARG
+        ./runMidlet "$@" -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
+    else
+        ./runMidlet -classpathext "$APP_DIR/midlets/a.jar" internal "$MIDLET_CLASS" &
+    fi
+    child_pid=$!
+    echo "runMidlet pid: $child_pid"
+    wait "$child_pid"
+    status=$?
+    child_pid=
+    echo "runMidlet exit status: $status"
+    [ -f "$RESTART_FLAG" ] || break
+    echo "restart requested"
+done
+rm -f "$RESTART_FLAG"
 echo "$status" > "$APP_DIR/s"
 exit "$(cat "$APP_DIR/s" 2>/dev/null || echo 1)"
 EOF

@@ -1,5 +1,5 @@
 package com.nttdocomo.ui;
 
 public interface MediaSound extends MediaResource {
-    void use();
+    String AUDIO_3D_RESOURCES = "3d.resources";
 }

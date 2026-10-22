@@ -1,45 +1,71 @@
 package com.nttdocomo.ui;
 
-public class Frame extends javax.microedition.lcdui.Canvas {
-    private SoftKeyListener softKeyListener;
+/**
+ * Base of Canvas, Panel and Dialog. Frames are not MIDP displayables: the
+ * runtime host canvas shows the current frame.
+ */
+public abstract class Frame {
+    public static final int SOFT_KEY_1 = 0;
+    public static final int SOFT_KEY_2 = 1;
 
-    public int getWidth() {
-        return super.getWidth();
+    int background = 0xffffff;
+    String[] softLabels = new String[2];
+    boolean softLabelVisible = true;
+
+    public Frame() {
     }
 
-    public int getHeight() {
-        return super.getHeight();
+    public final int getWidth() {
+        return Display.getWidth();
     }
 
-    public void setSoftLabel(int key, String label) {
+    public final int getHeight() {
+        return Display.getHeight();
     }
 
-    public void setSoftKeyListener(SoftKeyListener listener) {
-        softKeyListener = listener;
+    public void setBackground(int color) {
+        background = color;
     }
 
-    protected void paint(javax.microedition.lcdui.Graphics g) {
-    }
-
-    protected void keyPressed(int keyCode) {
-        if (softKeyListener != null) {
-            int dojaKey = Display.mapMIDPKeyCode(keyCode);
-            if (dojaKey == Display.KEY_SOFT1) {
-                softKeyListener.softKeyPressed(0);
-            } else if (dojaKey == Display.KEY_SOFT2) {
-                softKeyListener.softKeyPressed(1);
-            }
+    public void setSoftLabel(int key, String caption) {
+        if (key != SOFT_KEY_1 && key != SOFT_KEY_2) {
+            throw new IllegalArgumentException("key");
         }
+        softLabels[key] = caption;
     }
 
-    protected void keyReleased(int keyCode) {
-        if (softKeyListener != null) {
-            int dojaKey = Display.mapMIDPKeyCode(keyCode);
-            if (dojaKey == Display.KEY_SOFT1) {
-                softKeyListener.softKeyReleased(0);
-            } else if (dojaKey == Display.KEY_SOFT2) {
-                softKeyListener.softKeyReleased(1);
-            }
+    public void setSoftLabelVisible(boolean visible) {
+        softLabelVisible = visible;
+    }
+
+    public String getSoftLabel(int key) {
+        if (key != SOFT_KEY_1 && key != SOFT_KEY_2) {
+            throw new IllegalArgumentException("key");
         }
+        return softLabels[key];
+    }
+
+    public boolean isSoftLabelVisible() {
+        return softLabelVisible;
+    }
+
+    public void processSoftKeyEvent(int type, int key) {
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* runtime hooks                                                       */
+
+    /** Paints the frame onto the host canvas (MIDP event thread). */
+    abstract void fkPaint(javax.microedition.lcdui.Graphics g);
+
+    /** Key event on the DoJa event thread; type 0 pressed, 1 released. */
+    abstract void fkKey(int type, int key);
+
+    /** Called on the DoJa event thread when the frame becomes current. */
+    void fkShown() {
+    }
+
+    /** Called on the DoJa event thread for a queued repaint. */
+    void fkRepaint() {
     }
 }

@@ -1,5 +1,4 @@
 /*
- *   
  * 
  * Copyright  1990-2007 Sun Microsystems, Inc. All Rights Reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER
@@ -88,7 +87,6 @@ public interface PlayerListener {
      */
     String STOPPED = "stopped";
 
-
     /**
      * Posted when a <code>Player</code> is stopped as responding to
      * the <code>setStopTime</code> call using the 
@@ -101,7 +99,6 @@ public interface PlayerListener {
      * <code>STOPPED_AT_TIME</code>.
      */
     String STOPPED_AT_TIME = "stoppedAtTime";
-
 
     /**
      * Posted when a <code>Player</code> has reached the
@@ -189,7 +186,6 @@ public interface PlayerListener {
      */
     String VOLUME_CHANGED = "volumeChanged";
 
-
     /**
      * Posted when the size of the video is changed either because
      * the source video size or the display size is changed.  
@@ -204,7 +200,7 @@ public interface PlayerListener {
      */
     String SIZE_CHANGED = "sizeChanged";
 
-
+    
     /**
      * Posted when an error had occurred.
      * When this event is received, the <code>eventData</code> parameter
@@ -222,7 +218,6 @@ public interface PlayerListener {
      * Value <code>closed</code> is assigned to <code>CLOSED</code>.
      */
     String CLOSED = "closed";
-
 
     /**
      * Posted when recording is started.
@@ -286,7 +281,6 @@ public interface PlayerListener {
      * <code>BUFFERING_STOPPED</code>.
      */
     String BUFFERING_STOPPED = "bufferingStopped";
-
 
     /**
      * This method is called to deliver an event to a registered

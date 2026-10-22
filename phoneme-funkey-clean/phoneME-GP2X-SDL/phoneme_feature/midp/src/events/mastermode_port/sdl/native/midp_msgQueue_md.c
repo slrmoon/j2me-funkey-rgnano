@@ -43,11 +43,7 @@ static int KeyHoldCounts[384];
 static int KeyboardPhysicalDown[512];
 static int KeyboardPhysicalKey[512];
 static int CurrentProfileSel = 0;
-static long SignalCalls = 0;
-static long SignalNoEvent = 0;
-static long SignalDelivered = 0;
-static long SignalWaitForever = 0;
-static long SignalLastTrace = 0;
+static int IgnoreJoystick = 0;
 static const int OverlayBindMap[12] = {
   0, 4, 2, 6, 12, 13, 14, 15, 10, 11, 8, 9
 };
@@ -106,6 +102,9 @@ static const RuntimeKeyProfilePreset RuntimeKeyProfiles[] = {
 int PhoneMEOverlayHandleSDLEvent(SDL_Event *event);
 int PhoneMEOverlayConsumeShutdown(void);
 void PhoneMEOverlayRefresh(void);
+int PhoneMEOverlayIsVisible(void);
+void PhoneMEOverlayRunModal(void);
+void PhoneMEProfileTick(void);
 
 int PhoneMEInputGetBindCount()
 {
@@ -225,6 +224,7 @@ void InitGP2XKeys()
   const char *KeyProfile = getenv("PHONEME_KEY_PROFILE");
   KeyDebug = (getenv("PHONEME_KEY_DEBUG") != NULL);
   EventDebug = (getenv("PHONEME_EVENT_DEBUG") != NULL);
+  IgnoreJoystick = (getenv("PHONEME_IGNORE_JOYSTICK") != NULL);
   PhoneKeyProfile = (KeyProfile != NULL) && (strcmp(KeyProfile, "phone") == 0);
   for (i = 0; i < 8; i++) {
     JoyAxisKeys[i] = KEYMAP_KEY_INVALID;
@@ -303,10 +303,9 @@ static void SetKeyEvent(int Key, int Action, MidpReentryData* pNewSignal, MidpEv
   pNewMidpEvent->type = MIDP_KEY_EVENT;
   pNewMidpEvent->CHR = Key;
   pNewMidpEvent->ACTION = Action;
-  SignalDelivered++;
   if (EventDebug) {
-    fprintf(stderr, "MIDP key event: %s(%d) %s(%d) delivered=%ld\n",
-            KeyName(Key), Key, ActionName(Action), Action, SignalDelivered);
+    fprintf(stderr, "MIDP key event: %s(%d) %s(%d)\n",
+            KeyName(Key), Key, ActionName(Action), Action);
   }
 }
 
@@ -368,27 +367,6 @@ static int SetPhysicalKeyEvent(int Physical, int Key, int Pressed,
   }
   SetKeyEvent(StoredKey, KEYMAP_STATE_RELEASED, pNewSignal, pNewMidpEvent);
   return 1;
-}
-
-static void TraceSignalLoop(jlong timeout, int delivered)
-{ long Now = (long)JVM_JavaMilliSeconds();
-  SignalCalls++;
-  if (timeout == -1) {
-    SignalWaitForever++;
-  }
-  if (!delivered) {
-    SignalNoEvent++;
-  }
-  if (!EventDebug) {
-    return;
-  }
-  if ((SignalLastTrace == 0) || ((Now - SignalLastTrace) >= 1000)) {
-    fprintf(stderr,
-            "midp_signal: timeout=%ld calls=%ld noevent=%ld delivered=%ld wait_forever=%ld\n",
-            (long)timeout, SignalCalls, SignalNoEvent, SignalDelivered,
-            SignalWaitForever);
-    SignalLastTrace = Now;
-  }
 }
 
 int KeyboardCheck(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent)
@@ -585,12 +563,35 @@ static int RequestGracefulShutdown(MidpReentryData* pNewSignal,
   return 1;
 }
 
+/* Keys held when the menu opened had their key-up eaten by the menu: queue
+ * the releases so the game does not see them stuck down. */
+static void ReleasePhysicalKeys(void)
+{
+  int i;
+  for (i = 0; i < 512; i++) {
+    if (KeyboardPhysicalDown[i]) {
+      SDL_Event up;
+      memset(&up, 0, sizeof(up));
+      up.type = SDL_KEYUP;
+      up.key.type = SDL_KEYUP;
+      up.key.state = SDL_RELEASED;
+      up.key.keysym.sym = (SDLKey) i;
+      SDL_PushEvent(&up);
+    }
+  }
+}
+
 int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent)
 { if (event->type == SDL_QUIT)
      { return RequestGracefulShutdown(pNewSignal, pNewMidpEvent);
      }
   if (PhoneMEOverlayHandleSDLEvent(event)) {
     PhoneMEOverlayRefresh();
+    if (PhoneMEOverlayIsVisible()) {
+      /* menu opened: freeze the game (and its audio) until it closes */
+      PhoneMEOverlayRunModal();
+      ReleasePhysicalKeys();
+    }
     if (PhoneMEOverlayConsumeShutdown()) {
       return RequestGracefulShutdown(pNewSignal, pNewMidpEvent);
     }
@@ -599,6 +600,12 @@ int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMid
   if ((event->type == SDL_KEYDOWN) || (event->type == SDL_KEYUP))
      { return KeyboardCheck(event, pNewSignal, pNewMidpEvent);
      }
+  if (IgnoreJoystick) {
+     if ((event->type == SDL_JOYBUTTONDOWN) || (event->type == SDL_JOYBUTTONUP) ||
+         (event->type == SDL_JOYAXISMOTION) || (event->type == SDL_JOYHATMOTION)) {
+       return 0;
+     }
+  }
   if ((event->type == SDL_JOYBUTTONDOWN) || (event->type == SDL_JOYBUTTONUP))
      { return JoystickButtonCheck(event, pNewSignal, pNewMidpEvent);
      }
@@ -626,26 +633,18 @@ int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMid
  *       caller immediately regardless of the if a signal was sent.
  *  -1 = Do not timeout. Block until a signal is sent to MIDP.
  */
-void checkForSystemSignal(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent, jlong timeout) 
+void checkForSystemSignal(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent, jlong timeout)
 { SDL_Event event;
-  jlong currentTime = JVM_JavaMilliSeconds(), stopTime;
-  if (timeout == -1)
-     { while (SDL_WaitEvent(&event))
-          { if (CheckEvent(&event, pNewSignal, pNewMidpEvent))
-               { TraceSignalLoop(timeout, 1);
-                 return;
-               }
+  jlong stopTime = JVM_JavaMilliSeconds() + (timeout > 0 ? timeout : 0);
+  PhoneMEProfileTick();
+  for (;;)
+     { if (SDL_PollEvent(&event))
+          { if (CheckEvent(&event, pNewSignal, pNewMidpEvent)) return;
+            continue;   /* drain the queue before sleeping */
           }
-       TraceSignalLoop(timeout, 0);
-       return;
+       if (timeout == 0) return;
+       if (timeout > 0 && JVM_JavaMilliSeconds() >= stopTime) return;
+       /* nothing pending: yield the CPU instead of spinning */
+       SDL_Delay(timeout == -1 ? 10 : 1);
      }
-  do { if (SDL_PollEvent(&event))
-          { if (CheckEvent(&event, pNewSignal, pNewMidpEvent))
-               { TraceSignalLoop(timeout, 1);
-                 return;
-               }
-          }
-       stopTime = JVM_JavaMilliSeconds();
-     } while((stopTime - currentTime) < timeout);
-  TraceSignalLoop(timeout, 0);
 }

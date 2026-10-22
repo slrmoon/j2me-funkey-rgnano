@@ -2,91 +2,117 @@ package com.nttdocomo.ui;
 
 import com.funkey.doja.DoJaRuntime;
 
-public final class Display {
+public class Display {
     public static final int KEY_PRESSED_EVENT = 0;
     public static final int KEY_RELEASED_EVENT = 1;
     public static final int RESUME_VM_EVENT = 4;
+    public static final int RESET_VM_EVENT = 5;
     public static final int UPDATE_VM_EVENT = 6;
     public static final int TIMER_EXPIRED_EVENT = 7;
+    public static final int MEDIA_EVENT = 8;
+    protected static final int MIN_VENDOR_EVENT = 64;
+    protected static final int MAX_VENDOR_EVENT = 127;
+    public static final int POINTER_MOVED_EVENT = 64;
+    public static final int FINGER_MOVED_EVENT = 65;
 
-    public static final int KEY_0 = 0x00;
-    public static final int KEY_1 = 0x01;
-    public static final int KEY_2 = 0x02;
-    public static final int KEY_3 = 0x03;
-    public static final int KEY_4 = 0x04;
-    public static final int KEY_5 = 0x05;
-    public static final int KEY_6 = 0x06;
-    public static final int KEY_7 = 0x07;
-    public static final int KEY_8 = 0x08;
-    public static final int KEY_9 = 0x09;
-    public static final int KEY_ASTERISK = 0x0a;
-    public static final int KEY_POUND = 0x0b;
-    public static final int KEY_LEFT = 0x10;
-    public static final int KEY_UP = 0x11;
-    public static final int KEY_RIGHT = 0x12;
-    public static final int KEY_DOWN = 0x13;
-    public static final int KEY_SELECT = 0x14;
-    public static final int KEY_SOFT1 = 0x15;
-    public static final int KEY_SOFT2 = 0x16;
-    public static final int KEY_CLEAR = 0x20;
+    public static final int KEY_0 = 0;
+    public static final int KEY_1 = 1;
+    public static final int KEY_2 = 2;
+    public static final int KEY_3 = 3;
+    public static final int KEY_4 = 4;
+    public static final int KEY_5 = 5;
+    public static final int KEY_6 = 6;
+    public static final int KEY_7 = 7;
+    public static final int KEY_8 = 8;
+    public static final int KEY_9 = 9;
+    public static final int KEY_ASTERISK = 10;
+    public static final int KEY_POUND = 11;
+    public static final int KEY_LEFT = 16;
+    public static final int KEY_UP = 17;
+    public static final int KEY_RIGHT = 18;
+    public static final int KEY_DOWN = 19;
+    public static final int KEY_SELECT = 20;
+    public static final int KEY_SOFT1 = 21;
+    public static final int KEY_SOFT2 = 22;
+    public static final int KEY_IAPP = 24;
+    public static final int KEY_UPPER_LEFT = 26;
+    public static final int KEY_UPPER_RIGHT = 27;
+    public static final int KEY_LOWER_RIGHT = 28;
+    public static final int KEY_LOWER_LEFT = 29;
+    public static final int KEY_PAGE_UP = 30;
+    public static final int KEY_PAGE_DOWN = 31;
+    public static final int KEY_CLEAR = 32;
+    public static final int KEY_MAIL = 33;
+    public static final int KEY_MEMO = 34;
+    public static final int KEY_MENU = 35;
+    public static final int KEY_I_MODE = 36;
+    public static final int KEY_PHONE_BOOK = 37;
+    public static final int KEY_CALENDAR = 38;
+    public static final int KEY_VOICE = 39;
+    public static final int KEY_MANNER_MODE = 40;
+    public static final int KEY_DRIVE_MODE = 41;
+    public static final int KEY_GPS = 42;
+    public static final int KEY_ROLL_LEFT = 48;
+    public static final int KEY_ROLL_RIGHT = 49;
+    public static final int KEY_SUB1 = 50;
+    public static final int KEY_SUB2 = 51;
+    public static final int KEY_SUB3 = 52;
+    public static final int KEY_MY_SELECT = 53;
+    public static final int KEY_CAMERA = 56;
+    public static final int KEY_CAMERA_ZOOM_IN = 57;
+    public static final int KEY_CAMERA_ZOOM_OUT = 58;
+    public static final int KEY_CAMERA_SELECT = 59;
+    public static final int KEY_CAMERA_LIGHT = 60;
+    public static final int KEY_CAMERA_SHOT = 61;
+    protected static final int MIN_VENDOR_KEY = 0x1a;
+    protected static final int MAX_VENDOR_KEY = 0x1f;
+    protected static final int MIN_OPTION_KEY = 0x1a;
+    protected static final int MAX_OPTION_KEY = 0x3f;
 
-    private Display() {
+    private static Frame current;
+
+    protected Display() {
+    }
+
+    public static Frame getCurrent() {
+        return current;
     }
 
     public static int getWidth() {
-        javax.microedition.lcdui.Displayable d = DoJaRuntime.getMIDPDisplay().getCurrent();
-        return d == null ? 240 : d.getWidth();
+        return DoJaRuntime.drawWidth();
     }
 
     public static int getHeight() {
-        javax.microedition.lcdui.Displayable d = DoJaRuntime.getMIDPDisplay().getCurrent();
-        return d == null ? 240 : d.getHeight();
+        return DoJaRuntime.drawHeight();
+    }
+
+    public static boolean isColor() {
+        return true;
+    }
+
+    public static int numColors() {
+        return 65536;
     }
 
     public static void setCurrent(Frame frame) {
-        DoJaRuntime.getMIDPDisplay().setCurrent(frame);
-    }
-
-    static int mapMIDPKeyCode(int keyCode) {
-        switch (keyCode) {
-        case -1:
-        case -17:
-            return KEY_UP;
-        case -2:
-        case -18:
-            return KEY_DOWN;
-        case -3:
-        case -19:
-            return KEY_LEFT;
-        case -4:
-        case -20:
-            return KEY_RIGHT;
-        case -5:
-        case -13:
-            return KEY_SELECT;
-        case -6:
-            return KEY_SOFT1;
-        case -7:
-            return KEY_SOFT2;
-        case -8:
-            return KEY_CLEAR;
-        case '*':
-            return KEY_ASTERISK;
-        case '#':
-            return KEY_POUND;
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9':
-            return keyCode - '0';
-        default:
-            return keyCode;
+        if (frame == null) {
+            throw new NullPointerException("frame");
         }
+        if (frame instanceof Dialog) {
+            throw new IllegalArgumentException("dialog");
+        }
+        if (current == frame) {
+            return;
+        }
+        current = frame;
+        final Frame f = frame;
+        DoJaRuntime.postRun(new Runnable() {
+            public void run() {
+                if (current == f) {
+                    f.fkShown();
+                }
+            }
+        });
+        DoJaRuntime.frameChanged();
     }
 }

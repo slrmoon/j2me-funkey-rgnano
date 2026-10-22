@@ -8,7 +8,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-FUNKEY_SDK_DIR="$(cd "$(dirname "$0")" && pwd)/FunKey-sdk-2.3.0"
+FUNKEY_SDK_DIR=${FUNKEY_SDK_DIR:-"$(cd "$(dirname "$0")" && pwd)/FunKey-sdk-2.3.0"}
 
 if [ ! -d "$FUNKEY_SDK_DIR" ]; then
     echo "FunKey SDK not found: $FUNKEY_SDK_DIR" >&2
@@ -22,7 +22,7 @@ if [ -x "$FUNKEY_SDK_DIR/relocate-sdk.sh" ]; then
     "$FUNKEY_SDK_DIR/relocate-sdk.sh"
 fi
 
-ENV_SETUP=$(find "$FUNKEY_SDK_DIR" -maxdepth 2 -type f -name 'environment-setup*' | head -n 1)
+ENV_SETUP=$(find -L "$FUNKEY_SDK_DIR" -maxdepth 2 -type f -name 'environment-setup*' | head -n 1)
 if [ -z "$ENV_SETUP" ]; then
     echo "Could not find environment-setup in FUNKEY_SDK_DIR=$FUNKEY_SDK_DIR" >&2
     exit 1
@@ -69,7 +69,10 @@ echo "SDK target triplet: $ARM_TRIPLET"
 SDK_TARGET_FLAGS=${CFLAGS:-}
 SDK_TARGET_LDFLAGS=${LDFLAGS:-}
 
-if command -v sdl-config >/dev/null 2>&1; then
+SDK_SDL_CONFIG="$FUNKEY_SDK_DIR/arm-funkey-linux-musleabihf/sysroot/usr/bin/sdl-config"
+if [ -x "$SDK_SDL_CONFIG" ]; then
+    export SDL_CONFIG="$SDK_SDL_CONFIG"
+elif command -v sdl-config >/dev/null 2>&1; then
     export SDL_CONFIG=$(command -v sdl-config)
 fi
 
@@ -79,11 +82,13 @@ export ARM_CLDC_PLATFORM=${ARM_CLDC_PLATFORM:-linux_arm_vfp}
 export ARM_TOOLCHAIN_DIR=${ARM_TOOLCHAIN_DIR:-$ROOT/.toolchains/funkey-s}
 export CROSS_CC CROSS_CXX CROSS_CPP CROSS_AR CROSS_AS CROSS_LD
 export CROSS_RANLIB CROSS_STRIP CROSS_OBJCOPY CROSS_OBJDUMP CROSS_NM
-export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard"}
-export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-march=armv7-a -mfpu=vfpv3-d16"}
-export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS"}
+# Allwinner V3s: Cortex-A7 with NEON and VFPv4 (32 double registers, FMA).
+# -march=armv7ve enables the hardware udiv/sdiv: the SDK compiler defaults to
+# armv7-a, which turns every division into an __aeabi_uidiv call.
+export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard"}
+export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4"}
+export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS -lz"}
 export MIDP_CMDLINE_CFLAGS=${MIDP_CMDLINE_CFLAGS:-"$ARM_CFLAGS"}
-export SDL_MIXER_EXTRA_LIBS=${SDL_MIXER_EXTRA_LIBS:--lmikmod}
 export BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s}
 export USE_LIBFLOAT=false
 export GCC_VERSION=

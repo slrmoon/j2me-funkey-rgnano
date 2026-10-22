@@ -1,40 +1,57 @@
 package com.nttdocomo.ui;
 
-import java.util.Timer;
-import java.util.TimerTask;
+import com.funkey.doja.DoJaRuntime;
+import com.nttdocomo.util.TimeKeeper;
 
-public abstract class ShortTimer {
-    private Timer timer;
+/**
+ * Timer that delivers Display.TIMER_EXPIRED_EVENT to a canvas.
+ */
+public final class ShortTimer implements TimeKeeper {
+    private Canvas canvas;
+    private int id;
     private int interval;
     private boolean repeat;
+    private java.util.Timer timer;
+    private volatile boolean pending;
+    private boolean disposed;
 
-    public abstract void timerExpired();
-
-    public static ShortTimer getShortTimer(final Canvas canvas, final int param,
-            int interval, boolean repeat) {
-        ShortTimer timer = new ShortTimer() {
-            public void timerExpired() {
-                if (canvas != null) {
-                    canvas.processEvent(Display.TIMER_EXPIRED_EVENT, param);
-                }
-            }
-        };
-        timer.interval = interval;
-        timer.repeat = repeat;
-        return timer;
+    protected ShortTimer() {
     }
 
-    public void start() {
-        start(interval);
+    public static ShortTimer getShortTimer(Canvas canvas, int timerId, int interval, boolean repeat) {
+        if (canvas == null) {
+            throw new NullPointerException("canvas");
+        }
+        if (interval <= 0) {
+            throw new IllegalArgumentException("interval");
+        }
+        ShortTimer t = new ShortTimer();
+        t.canvas = canvas;
+        t.id = timerId;
+        t.interval = interval;
+        t.repeat = repeat;
+        return t;
     }
 
-    public void start(int interval) {
-        stop();
-        this.interval = interval;
-        timer = new Timer();
-        TimerTask task = new TimerTask() {
+    public int getMinTimeInterval() {
+        return 10;
+    }
+
+    public int getResolution() {
+        return 10;
+    }
+
+    public synchronized void start() {
+        if (disposed) {
+            throw new UIException(UIException.ILLEGAL_STATE, "disposed");
+        }
+        if (timer != null) {
+            return;
+        }
+        timer = new java.util.Timer();
+        java.util.TimerTask task = new java.util.TimerTask() {
             public void run() {
-                timerExpired();
+                fire();
             }
         };
         if (repeat) {
@@ -44,7 +61,28 @@ public abstract class ShortTimer {
         }
     }
 
-    public void stop() {
+    private void fire() {
+        if (!repeat) {
+            synchronized (this) {
+                if (timer != null) {
+                    timer.cancel();
+                    timer = null;
+                }
+            }
+        }
+        if (pending) {
+            return;
+        }
+        pending = true;
+        DoJaRuntime.postRun(new Runnable() {
+            public void run() {
+                pending = false;
+                canvas.processEvent(Display.TIMER_EXPIRED_EVENT, id);
+            }
+        });
+    }
+
+    public synchronized void stop() {
         if (timer != null) {
             timer.cancel();
             timer = null;
@@ -53,5 +91,6 @@ public abstract class ShortTimer {
 
     public void dispose() {
         stop();
+        disposed = true;
     }
 }

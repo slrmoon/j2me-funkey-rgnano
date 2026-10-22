@@ -2365,7 +2365,18 @@ Assembler::Register VirtualStackFrame::get_literal(int imm32,
   LiteralElementStream les(this);
   for ( ; !les.eos() ; les.next()) {
     if (les.value() == imm32) {
-        return les.reg();
+#if ENABLE_ARM_VFP
+      /* Callers use the result as a core register (str, mov, ...). A VFP
+       * register holding the same bits (0.0f == 0, 1.0f == 0x3f800000)
+       * would be encoded as some core register instead and the code would
+       * read garbage; CompilerLiteralAccessor::has_literal() already skips
+       * them. Seen as a crash in Planet Riders 3D ("this.c = 0" after
+       * fconst_0 left 0 in s16). */
+      if (les.reg() > Assembler::r15) {
+        continue;
+      }
+#endif
+      return les.reg();
     }
   }
   Assembler::Register reg = RegisterAllocator::allocate();

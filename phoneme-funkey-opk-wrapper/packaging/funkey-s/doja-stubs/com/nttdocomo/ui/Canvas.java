@@ -1,83 +1,149 @@
 package com.nttdocomo.ui;
 
-public class Canvas extends Frame {
-    public static final int KEY_PRESSED_EVENT = Display.KEY_PRESSED_EVENT;
-    public static final int KEY_RELEASED_EVENT = Display.KEY_RELEASED_EVENT;
-    public static final int KEY_UP = Display.KEY_UP;
-    public static final int KEY_DOWN = Display.KEY_DOWN;
-    public static final int KEY_LEFT = Display.KEY_LEFT;
-    public static final int KEY_RIGHT = Display.KEY_RIGHT;
-    public static final int KEY_SELECT = Display.KEY_SELECT;
-    public static final int KEY_SOFT1 = Display.KEY_SOFT1;
-    public static final int KEY_SOFT2 = Display.KEY_SOFT2;
+import com.funkey.doja.DoJaRuntime;
 
-    private javax.microedition.lcdui.Image backBuffer;
-    private Graphics backGraphics;
-    private int backgroundColor = 0xffffff;
+/**
+ * Low-level drawing frame. The canvas owns an off-screen surface the size
+ * of the draw area; paint() and getGraphics() draw into it and the host
+ * canvas shows it after paint() returns or when a lock is released.
+ */
+public abstract class Canvas extends Frame {
+    public static final int IME_COMMITTED = 0;
+    public static final int IME_CANCELED = 1;
 
-    protected void paint(javax.microedition.lcdui.Graphics g) {
-        if (backBuffer != null) {
-            g.drawImage(backBuffer, 0, 0,
-                    javax.microedition.lcdui.Graphics.LEFT | javax.microedition.lcdui.Graphics.TOP);
-            return;
-        }
-        paint(new Graphics(g));
+    private javax.microedition.lcdui.Image surface;
+    int lockCount;
+    private boolean inPaint;
+    private boolean flushInPaint;
+    private volatile boolean repaintQueued;
+    private boolean everPainted;
+
+    public Canvas() {
     }
 
-    public void paint(Graphics g) {
+    javax.microedition.lcdui.Image surface() {
+        if (surface == null) {
+            int w = Display.getWidth();
+            int h = Display.getHeight();
+            surface = javax.microedition.lcdui.Image.createImage(w, h);
+            javax.microedition.lcdui.Graphics g = surface.getGraphics();
+            g.setColor(background & 0xffffff);
+            g.fillRect(0, 0, w, h);
+        }
+        return surface;
     }
 
     public Graphics getGraphics() {
-        ensureBackBuffer();
-        return backGraphics;
+        return FkBridge.newGraphics(this);
     }
 
-    public void setBackground(int rgb) {
-        backgroundColor = rgb;
-        ensureBackBuffer();
-        int old = backGraphics.getColor();
-        backGraphics.setColor(rgb);
-        backGraphics.fillRect(0, 0, getWidth(), getHeight());
-        backGraphics.setColor(old);
+    public abstract void paint(Graphics g);
+
+    public void repaint() {
+        if (!repaintQueued) {
+            repaintQueued = true;
+            DoJaRuntime.postRepaint(this);
+        }
+    }
+
+    public void repaint(int x, int y, int width, int height) {
+        if (width < 0 || height < 0) {
+            throw new IllegalArgumentException("size");
+        }
+        if (width == 0 || height == 0) {
+            return;
+        }
         repaint();
-    }
-
-    protected void keyPressed(int keyCode) {
-        super.keyPressed(keyCode);
-        int dojaKey = Display.mapMIDPKeyCode(keyCode);
-        processEvent(Display.KEY_PRESSED_EVENT, dojaKey);
-    }
-
-    protected void keyReleased(int keyCode) {
-        super.keyReleased(keyCode);
-        int dojaKey = Display.mapMIDPKeyCode(keyCode);
-        processEvent(Display.KEY_RELEASED_EVENT, dojaKey);
-    }
-
-    protected void keyRepeated(int keyCode) {
-        int dojaKey = Display.mapMIDPKeyCode(keyCode);
-        processEvent(Display.KEY_PRESSED_EVENT, dojaKey);
     }
 
     public void processEvent(int type, int param) {
     }
 
-    public void imeOn(String text, int mode, int max) {
+    public int getKeypadState() {
+        return DoJaRuntime.keypadState();
     }
 
-    private void ensureBackBuffer() {
-        if (backBuffer == null) {
-            backBuffer = javax.microedition.lcdui.Image.createImage(getWidth(), getHeight());
-            backGraphics = new Graphics(backBuffer.getGraphics(), this);
-            int old = backGraphics.getColor();
-            backGraphics.setColor(backgroundColor);
-            backGraphics.fillRect(0, 0, getWidth(), getHeight());
-            backGraphics.setColor(old);
+    public int getKeypadState(int group) {
+        if (group < 0) {
+            throw new IllegalArgumentException("group");
+        }
+        return DoJaRuntime.keypadState(group);
+    }
+
+    public void imeOn(String text, int displayMode, int inputMode) {
+        imeOn(text, displayMode, inputMode, 0);
+    }
+
+    public void imeOn(final String text, int displayMode, int inputMode, int inputSize) {
+        /* no text input on the handheld: hand back the initial text */
+        DoJaRuntime.postRun(new Runnable() {
+            public void run() {
+                if (text != null && text.length() > 0) {
+                    processIMEEvent(IME_COMMITTED, text);
+                } else {
+                    processIMEEvent(IME_CANCELED, null);
+                }
+            }
+        });
+    }
+
+    public void processIMEEvent(int type, String text) {
+    }
+
+    public void setBackground(int color) {
+        super.setBackground(color);
+    }
+
+    /* ------------------------------------------------------------------ */
+
+    void fkPaint(javax.microedition.lcdui.Graphics g) {
+        g.drawImage(surface(), 0, 0, Graphics.TL);
+    }
+
+    void fkKey(int type, int key) {
+        processEvent(type, key);
+    }
+
+    void fkShown() {
+        if (!everPainted) {
+            repaint();
+        } else {
+            DoJaRuntime.present();
         }
     }
 
-    javax.microedition.lcdui.Graphics backBufferGraphics() {
-        ensureBackBuffer();
-        return backBuffer.getGraphics();
+    void fkRepaint() {
+        repaintQueued = false;
+        everPainted = true;
+        Graphics g = FkBridge.newGraphics(this);
+        inPaint = true;
+        flushInPaint = false;
+        try {
+            paint(g);
+        } finally {
+            inPaint = false;
+        }
+        if (Display.getCurrent() == this) {
+            DoJaRuntime.present();
+        }
+    }
+
+    /** unlock() reached zero or was forced. */
+    void flushFromGraphics() {
+        everPainted = true;
+        if (inPaint) {
+            flushInPaint = true;
+            return;
+        }
+        if (Display.getCurrent() == this) {
+            DoJaRuntime.present();
+        }
+    }
+
+    /** Something was drawn into the surface. */
+    void drawn() {
+        if (lockCount == 0 && !inPaint && Display.getCurrent() == this) {
+            DoJaRuntime.requestAutoPresent();
+        }
     }
 }

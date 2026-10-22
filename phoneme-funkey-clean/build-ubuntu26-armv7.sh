@@ -141,7 +141,7 @@ require_arm_lib() {
         echo "Install the ARM SDL development packages, for example:" >&2
         echo "  sudo dpkg --add-architecture armhf" >&2
         echo "  sudo apt update" >&2
-        echo "  sudo apt install libsdl1.2-dev:armhf libsdl-image1.2-dev:armhf libsdl-mixer1.2-dev:armhf" >&2
+        echo "  sudo apt install libsdl1.2-dev:armhf libsdl-image1.2-dev:armhf" >&2
         exit 1
     fi
 }
@@ -266,7 +266,7 @@ sync_opk_stage_runtime() {
 
     rm -rf "$opk_stage/lib"
     cp -R "$MIDP_OUTPUT_DIR/lib" "$opk_stage/lib"
-    rm -rf "$opk_stage/lib/freepats"
+    rm -rf "$opk_stage/lib/freepats" "$opk_stage/lib/soundfont"
 
     if [ -d "$MIDP_OUTPUT_DIR/appdb" ]; then
         rm -rf "$opk_stage/appdb"
@@ -281,8 +281,7 @@ sync_opk_stage_runtime() {
         {
             printf 'pm-runtime-v1\n'
             date +%s
-            wc -c "$opk_stage/bin/runMidlet" "$opk_stage/bin/cldc_vm" \
-                "$opk_stage/lib/soundfont/default.sf2" 2>/dev/null || true
+            wc -c "$opk_stage/bin/runMidlet" "$opk_stage/bin/cldc_vm" 2>/dev/null || true
         } > "$opk_stage/runtime-version"
     fi
 }
@@ -322,7 +321,6 @@ echo "Checking ARM cross compiler..."
 create_arm_toolchain_shim
 require_arm_lib libSDL.so
 require_arm_lib libSDL_image.so
-require_arm_lib libSDL_mixer.so
 
 mkdir -p "$BUILD_OUTPUT_DIR"
 
@@ -394,12 +392,17 @@ run_make \
     CLDC_DIST_DIR="$ARM_CLDC_DIST_DIR" \
     JSR_120_DIR="$MEHOME/jsr120" \
     PROJECT_JSR_120_DIR="$MEHOME/jsr120" \
+    USE_JSR_120="${FUNKEY_USE_JSR_120:-true}" \
+    USE_JSR_184="${FUNKEY_USE_JSR_184:-true}" \
+    JSR_184_DIR="$MEHOME/jsr184" \
+    PROJECT_JSR_184_DIR="$MEHOME/jsr184" \
+    SWERVE_DIR="$MEHOME/jsr184/src/native/upstream/m3g" \
+    FUNKEY_ENABLE_M3G_NATIVE="${FUNKEY_ENABLE_M3G_NATIVE:-true}" \
     TOOLS_DIR="$MEHOME/tools" \
     TARGET_CPU=arm \
     USE_MULTIPLE_ISOLATES="$MIDP_USE_MULTIPLE_ISOLATES" \
     GNU_TOOLS_DIR="$ARM_TOOLCHAIN_DIR" \
     CMDLINE_CFLAGS="$MIDP_CMDLINE_CFLAGS" \
-    SDL_MIXER_EXTRA_LIBS="${SDL_MIXER_EXTRA_LIBS:-}" \
     USE_LIBFLOAT="$USE_LIBFLOAT"
 
 sync_opk_stage_runtime

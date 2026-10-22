@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include "pm-unicode-font.h"
 
 /* ── screen ─────────────────────────────────────────── */
 #define SCR_W  240
@@ -26,12 +29,19 @@
 #ifndef BROWSE_DIR
 #define BROWSE_DIR "/mnt/java"
 #endif
-#ifndef RUNTIME_LOG
-#define RUNTIME_LOG PM_DIR "/runmidlet.log"
-#endif
 #define BIND_DIR   PM_DIR "/keybinds"
 #define BIN_DIR    PM_DIR "/bin"
+#define RMS_DIR    PM_DIR "/rms"
 #define FAVORITES_FILE PM_DIR "/favorites.txt"
+#define DEBUG_FILE     PM_DIR "/debug.cfg"
+#define RESTART_FLAG   PM_DIR "/restart-request"
+#ifdef RUNTIME_LOG
+#define LOG_FILE       RUNTIME_LOG
+#else
+#define LOG_FILE       PM_DIR "/runmidlet.log"
+#endif
+#define LOG_PREV_FILE  PM_DIR "/runmidlet.prev.log"
+
 static char java_dir[PATH_MAX] = BROWSE_DIR;
 
 /* ── MIDP key codes (from phoneME keymap_input.h) ───── */
@@ -63,14 +73,6 @@ static const char *bind_names[] = {
     NULL
 };
 
-static const char *bind_labels[] = {
-    "FK UP", "FK DOWN", "FK LEFT", "FK RIGHT",
-    "FK A", "FK B", "FK X", "FK Y",
-    "FK L1", "FK R1",
-    "FK START", "FK SELECT",
-    NULL
-};
-
 static const char *bind_gp2x_env[] = {
     "J2ME_GP2X_JOYU", "J2ME_GP2X_JOYD",
     "J2ME_GP2X_JOYL", "J2ME_GP2X_JOYR",
@@ -90,7 +92,16 @@ static const int bind_defaults[] = {
 };
 
 #define BIND_COUNT  ((int)(sizeof(bind_defaults) / sizeof(bind_defaults[0])))
-#define BIND_ROW_OFFSET 4
+#define SETTINGS_ROW_COUNT 7
+#define SETTINGS_ROW_ZOOM 0
+#define SETTINGS_ROW_SIZE 1
+#define SETTINGS_ROW_SCREEN 2
+#define SETTINGS_ROW_FPS 3
+#define SETTINGS_ROW_PROFILE 4
+#define SETTINGS_ROW_KEYS 5
+#define SETTINGS_ROW_DELETE 6
+#define KEY_EDIT_PROFILE_ROW 0
+#define KEY_EDIT_ROW_OFFSET 1
 
 typedef struct {
     const char *id;
@@ -197,6 +208,11 @@ typedef struct {
     const char *label;
 } DisplayModePreset;
 
+typedef struct {
+    const char *id;
+    const char *label;
+} FpsPreset;
+
 static const ScalePreset scale_presets[] = {
     { "zoom-075", "75%", "zoom", 750 },
     { "zoom-100", "100%", "zoom", 1000 },
@@ -284,10 +300,22 @@ static const DisplayModePreset display_modes[] = {
     { "fill", "Stretch" },
     { "crop", "Crop fill" },
     { "center", "Center" },
-    { "zoom", "Manual zoom" }
+    { "zoom", "Manual zoom" },
+    { "integer", "Integer" }
 };
 
 #define DISPLAY_MODE_COUNT ((int)(sizeof(display_modes) / sizeof(display_modes[0])))
+
+static const FpsPreset fps_limits[] = {
+    { "off", "Off" },
+    { "20", "20 FPS" },
+    { "25", "25 FPS" },
+    { "30", "30 FPS" },
+    { "50", "50 FPS" },
+    { "60", "60 FPS" }
+};
+
+#define FPS_LIMIT_COUNT ((int)(sizeof(fps_limits) / sizeof(fps_limits[0])))
 
 /* ── game list ──────────────────────────────────────── */
 #define MAX_GAMES   512
@@ -314,31 +342,179 @@ static int    game_scroll = 0;       /* first visible line */
 static char   current_rel_dir[PATH_MAX] = "";
 static int    browsing_favorites = 0;
 
+#define NAV_STACK_MAX 64
+typedef struct {
+    char path[PATH_MAX];
+    int scroll;
+    int is_favorites_folder;
+} BrowserReturn;
+
+static BrowserReturn nav_stack[NAV_STACK_MAX];
+static int nav_depth = 0;
+
 /* ── current key bindings (loaded / defaults) ───────── */
 static int    binds[BIND_COUNT];
 static int    scale_sel = 0;
 static int    source_sel = 0;
 static int    display_mode_sel = 5;
+static int    fps_limit_sel = 3;
 static int    sound_volume = 100;
+static char   synth_id[16] = "hybrid";   /* MIDI synth preset, set in the in-game menu */
+static char   filter_id[16] = "sharp";   /* scaling filter, set in the in-game menu */
+static int    pan_x, pan_y;              /* view position for cropped modes, -1000..1000 */
 static int    key_profile_sel = 0;
 static int    bind_sel   = 0;        /* selected row in settings */
 static int    bind_scroll = 0;
 static int    capture_mode = 0;       /* 1 = waiting for key press to bind */
+static int    key_edit_mode = 0;      /* 0 = settings menu, 1 = key rows */
+static int    delete_confirm = 0;
 
 /* ── state ──────────────────────────────────────────── */
-enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING };
+enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING, STATE_RESOLUTION,
+       STATE_DEBUG, STATE_LOGVIEW };
 static int state = STATE_BROWSER;
+static int launching_game_idx = -1;
 
 /* ── SDL objects ────────────────────────────────────── */
 static SDL_Surface *screen = NULL;
 
-/* ── colours ───────────────────────────────────────── */
-static SDL_Color clr_bg     = {0x10, 0x18, 0x20, 0};
-static SDL_Color clr_title  = {0x7d, 0xf9, 0xff, 0};
-static SDL_Color clr_text   = {0xff, 0xff, 0xff, 0};
-static SDL_Color clr_sel    = {0x00, 0xff, 0x88, 0};
-static SDL_Color clr_dim    = {0x60, 0x70, 0x78, 0};
-static SDL_Color clr_warn   = {0xff, 0x60, 0x60, 0};
+#define PM_FONT_ADVANCE 8
+#define PM_ASCII_ADVANCE 8
+#define PM_FONT_LINE_H  11
+#define PM_COLOR_FAVORITE 0xffcc33ff
+
+static const unsigned char *pm_select_font_bitmap(uint32_t cp) {
+    int i;
+    int count = (int)(uintptr_t)PmFontBitmaps[0];
+    unsigned char hi = (unsigned char)((cp >> 8) & 0xff);
+    unsigned char lo = (unsigned char)(cp & 0xff);
+
+    for (i = 1; i <= count; i++) {
+        const unsigned char *font = PmFontBitmaps[i];
+        if (hi == font[PM_FONT_CODE_RANGE_HIGH] &&
+            lo >= font[PM_FONT_CODE_FIRST_LOW] &&
+            lo <= font[PM_FONT_CODE_LAST_LOW]) {
+            return font;
+        }
+    }
+    return NULL;
+}
+
+static uint32_t pm_next_utf8(const char **text) {
+    const unsigned char *s = (const unsigned char *)*text;
+    uint32_t cp;
+    static const uint16_t cp1251_extra[64] = {
+        0x0402,0x0403,0x201a,0x0453,0x201e,0x2026,0x2020,0x2021,
+        0x20ac,0x2030,0x0409,0x2039,0x040a,0x040c,0x040b,0x040f,
+        0x0452,0x2018,0x2019,0x201c,0x201d,0x2022,0x2013,0x2014,
+        0x0000,0x2122,0x0459,0x203a,0x045a,0x045c,0x045b,0x045f,
+        0x00a0,0x040e,0x045e,0x0408,0x00a4,0x0490,0x00a6,0x00a7,
+        0x0401,0x00a9,0x0404,0x00ab,0x00ac,0x00ad,0x00ae,0x0407,
+        0x00b0,0x00b1,0x0406,0x0456,0x0491,0x00b5,0x00b6,0x00b7,
+        0x0451,0x2116,0x0454,0x00bb,0x0458,0x0405,0x0455,0x0457
+    };
+
+    if (s[0] < 0x80) {
+        *text += 1;
+        return s[0];
+    }
+    if ((s[0] & 0xe0) == 0xc0 && (s[1] & 0xc0) == 0x80) {
+        cp = ((uint32_t)(s[0] & 0x1f) << 6) | (uint32_t)(s[1] & 0x3f);
+        *text += 2;
+        return cp;
+    }
+    if ((s[0] & 0xf0) == 0xe0 && (s[1] & 0xc0) == 0x80 &&
+        (s[2] & 0xc0) == 0x80) {
+        cp = ((uint32_t)(s[0] & 0x0f) << 12) |
+             ((uint32_t)(s[1] & 0x3f) << 6) |
+             (uint32_t)(s[2] & 0x3f);
+        *text += 3;
+        return cp;
+    }
+    if ((s[0] & 0xf8) == 0xf0 && (s[1] & 0xc0) == 0x80 &&
+        (s[2] & 0xc0) == 0x80 && (s[3] & 0xc0) == 0x80) {
+        cp = ((uint32_t)(s[0] & 0x07) << 18) |
+             ((uint32_t)(s[1] & 0x3f) << 12) |
+             ((uint32_t)(s[2] & 0x3f) << 6) |
+             (uint32_t)(s[3] & 0x3f);
+        *text += 4;
+        return cp;
+    }
+
+    if (s[0] >= 0xc0) {
+        *text += 1;
+        return 0x0410 + (uint32_t)(s[0] - 0xc0);
+    }
+    if (s[0] >= 0x80) {
+        cp = cp1251_extra[s[0] - 0x80];
+        *text += 1;
+        return cp != 0 ? cp : '?';
+    }
+
+    *text += 1;
+    return '?';
+}
+
+static void pm_draw_glyph(SDL_Surface *dst, int x, int y, uint32_t cp, Uint32 color) {
+    const unsigned char *font = pm_select_font_bitmap(cp);
+    int width, height, first, glyph, row, col;
+    unsigned long first_pixel, map_len;
+
+    if (cp < 0x80) {
+        characterColor(dst, (Sint16)x, (Sint16)y, (char)cp, color);
+        return;
+    }
+
+    if (font == NULL) {
+        characterColor(dst, (Sint16)x, (Sint16)y, '?', color);
+        return;
+    }
+
+    width = font[PM_FONT_WIDTH];
+    height = font[PM_FONT_HEIGHT];
+    first = (font[PM_FONT_CODE_RANGE_HIGH] << 8) | font[PM_FONT_CODE_FIRST_LOW];
+    glyph = (int)cp - first;
+    first_pixel = (unsigned long)glyph * width * height;
+    map_len = (((unsigned long)(font[PM_FONT_CODE_LAST_LOW] -
+                font[PM_FONT_CODE_FIRST_LOW] + 1) * width * height) + 7) >> 3;
+
+    for (row = 0; row < height; row++) {
+        for (col = 0; col < width; col++) {
+            unsigned long pixel = first_pixel + (unsigned long)row * width + col;
+            unsigned long byte_index = pixel >> 3;
+            int bit = (int)(pixel & 7);
+            if (byte_index < map_len &&
+                (font[PM_FONT_DATA + byte_index] & (0x80 >> bit)) != 0 &&
+                x + col >= 0 && x + col < dst->w &&
+                y + row >= 0 && y + row < dst->h) {
+                pixelColor(dst, (Sint16)(x + col), (Sint16)(y + row), color);
+            }
+        }
+    }
+}
+
+static int pm_stringColor(SDL_Surface *dst, Sint16 x, Sint16 y,
+                          const char *text, Uint32 color) {
+    int pen_x = x;
+    const char *p = text;
+
+    if (p != NULL) {
+        const unsigned char *scan = (const unsigned char *)p;
+        while (*scan != '\0' && *scan < 0x80) scan++;
+        if (*scan == '\0') {
+            return stringColor(dst, x, y, text, color);
+        }
+    }
+
+    while (p && *p) {
+        uint32_t cp = pm_next_utf8(&p);
+        pm_draw_glyph(dst, pen_x, y, cp, color);
+        pen_x += (cp < 0x80) ? PM_ASCII_ADVANCE : PM_FONT_ADVANCE;
+    }
+    return 0;
+}
+
+#define stringColor pm_stringColor
 
 /* ── forward decls ──────────────────────────────────── */
 static void scan_games(void);
@@ -566,9 +742,52 @@ static const char *game_display_name(int idx) {
     return "";
 }
 
+static void push_browser_return(void) {
+    BrowserReturn *ret;
+    if (game_count <= 0 || game_sel < 0 || game_sel >= game_count) return;
+    if (nav_depth >= NAV_STACK_MAX) {
+        memmove(&nav_stack[0], &nav_stack[1],
+                sizeof(nav_stack[0]) * (NAV_STACK_MAX - 1));
+        nav_depth = NAV_STACK_MAX - 1;
+    }
+
+    ret = &nav_stack[nav_depth++];
+    snprintf(ret->path, sizeof(ret->path), "%s",
+             games[game_sel].path ? games[game_sel].path : "");
+    ret->scroll = game_scroll;
+    ret->is_favorites_folder = games[game_sel].is_favorites_folder;
+}
+
+static void restore_browser_return(const BrowserReturn *ret) {
+    int i;
+    if (ret == NULL || game_count <= 0) return;
+
+    for (i = 0; i < game_count; i++) {
+        if (ret->is_favorites_folder) {
+            if (!games[i].is_favorites_folder) continue;
+        } else if (games[i].is_favorites_folder ||
+                   strcmp(games[i].path ? games[i].path : "", ret->path) != 0) {
+            continue;
+        }
+
+        game_sel = i;
+        game_scroll = ret->scroll;
+        if (game_scroll < 0) game_scroll = 0;
+        if (game_scroll > game_sel) game_scroll = game_sel;
+        return;
+    }
+}
+
+static int pop_browser_return(BrowserReturn *ret) {
+    if (nav_depth <= 0 || ret == NULL) return 0;
+    *ret = nav_stack[--nav_depth];
+    return 1;
+}
+
 static void enter_selected_folder(void) {
     char next[PATH_MAX];
     if (game_count <= 0 || !games[game_sel].is_dir) return;
+    push_browser_return();
     if (games[game_sel].is_favorites_folder) {
         browsing_favorites = 1;
         scan_games();
@@ -587,12 +806,17 @@ static void enter_selected_folder(void) {
 
 static int leave_folder(void) {
     char *slash;
+    BrowserReturn ret;
+    int have_return;
     if (browsing_favorites) {
         browsing_favorites = 0;
+        have_return = pop_browser_return(&ret);
         scan_games();
+        if (have_return) restore_browser_return(&ret);
         return 1;
     }
     if (current_rel_dir[0] == '\0') return 0;
+    have_return = pop_browser_return(&ret);
     slash = strrchr(current_rel_dir, '/');
     if (slash != NULL) {
         *slash = '\0';
@@ -600,18 +824,13 @@ static int leave_folder(void) {
         current_rel_dir[0] = '\0';
     }
     scan_games();
+    if (have_return) restore_browser_return(&ret);
     return 1;
 }
 
 /* ─────────────────────────────────────────────────────
  *  key binding config read / write
  * ──────────────────────────────────────────────────── */
-static const char *game_stem(const char *path) {
-    const char *s = strrchr(path, '/');
-    if (s) s++; else s = path;
-    return s;
-}
-
 static char *trim_line(char *text) {
     char *end;
     while (*text == ' ' || *text == '\t') text++;
@@ -672,6 +891,65 @@ static int toggle_favorite(const char *path) {
     return 1;
 }
 
+static void remove_favorite_path(const char *path) {
+    FILE *favorites;
+    FILE *updated;
+    char line[PATH_MAX + 2];
+    char tmp_path[PATH_MAX];
+
+    if (path == NULL || path[0] == '\0') return;
+    favorites = fopen(FAVORITES_FILE, "r");
+    if (favorites == NULL) return;
+
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", FAVORITES_FILE);
+    updated = fopen(tmp_path, "w");
+    if (updated == NULL) {
+        fclose(favorites);
+        return;
+    }
+
+    while (fgets(line, sizeof(line), favorites) != NULL) {
+        char *saved_path = trim_line(line);
+        if (saved_path[0] == '\0' || strcmp(saved_path, path) == 0) continue;
+        fprintf(updated, "%s\n", saved_path);
+    }
+
+    fclose(favorites);
+    if (fclose(updated) != 0 || rename(tmp_path, FAVORITES_FILE) != 0) {
+        unlink(tmp_path);
+    }
+}
+
+static int delete_selected_game_files(void) {
+    char jar_path[PATH_MAX];
+    char jad_path[PATH_MAX];
+    size_t len;
+    int removed = 0;
+
+    if (game_sel < 0 || game_sel >= game_count || games[game_sel].is_dir ||
+        games[game_sel].path == NULL || games[game_sel].path[0] == '\0') {
+        return 0;
+    }
+
+    snprintf(jar_path, sizeof(jar_path), "%s", games[game_sel].path);
+    remove_favorite_path(jar_path);
+
+    if (unlink(jar_path) == 0) removed = 1;
+
+    len = strlen(jar_path);
+    if (len > 4 && strcasecmp(jar_path + len - 4, ".jar") == 0) {
+        snprintf(jad_path, sizeof(jad_path), "%.*s.jad", (int)(len - 4), jar_path);
+        if (unlink(jad_path) == 0) removed = 1;
+        snprintf(jad_path, sizeof(jad_path), "%.*s.JAD", (int)(len - 4), jar_path);
+        if (unlink(jad_path) == 0) removed = 1;
+    }
+
+    scan_games();
+    if (game_count > 0 && game_sel >= game_count) game_sel = game_count - 1;
+    if (game_scroll > game_sel) game_scroll = game_sel;
+    return removed;
+}
+
 static int read_midlet_name_from_jad(const char *jad_path, char *out, size_t out_size) {
     FILE *jad;
     char line[256];
@@ -725,65 +1003,6 @@ static int read_jam_value(const char *jam_path, const char *key, char *out, size
     }
     fclose(jam);
     return 0;
-}
-
-static const char *midp_key_label(int key) {
-    switch (key) {
-    case K_UP:     return "PHONE UP";
-    case K_DOWN:   return "PHONE DOWN";
-    case K_LEFT:   return "PHONE LEFT";
-    case K_RIGHT:  return "PHONE RIGHT";
-    case K_SELECT: return "PHONE FIRE";
-    case K_SOFT1:  return "SOFT L NOK -6";
-    case K_SOFT2:  return "SOFT R NOK -7";
-    case K_CLEAR:  return "PHONE CLEAR";
-    case K_GAMEA:  return "PHONE GAMEA";
-    case K_GAMEB:  return "PHONE GAMEB";
-    case K_GAMEC:  return "PHONE GAMEC";
-    case K_GAMED:  return "PHONE GAMED";
-    case K_SEND:   return "PHONE SEND";
-    case K_END:    return "PHONE END";
-    case K_GAME_UP:    return "PHONE GAME UP";
-    case K_GAME_DOWN:  return "PHONE GAME DOWN";
-    case K_GAME_LEFT:  return "PHONE GAME LEFT";
-    case K_GAME_RIGHT: return "PHONE GAME RIGHT";
-    case -21:      return "SOFT L MOTO -21";
-    case -22:      return "SOFT R MOTO -22";
-    case 21:       return "SOFT L 21";
-    case 22:       return "SOFT R 22";
-    case 42:       return "PHONE *";
-    case 35:       return "PHONE #";
-    case 48:       return "PHONE 0";
-    case 49:       return "PHONE 1";
-    case 50:       return "PHONE 2";
-    case 51:       return "PHONE 3";
-    case 52:       return "PHONE 4";
-    case 53:       return "PHONE 5";
-    case 54:       return "PHONE 6";
-    case 55:       return "PHONE 7";
-    case 56:       return "PHONE 8";
-    case 57:       return "PHONE 9";
-    default:       return NULL;
-    }
-}
-
-static int find_phone_key_index(int code) {
-    int i;
-    for (i = 0; i < PHONE_KEY_COUNT; i++) {
-        if (phone_key_options[i].code == code) return i;
-    }
-    return -1;
-}
-
-static void cycle_bind_value(int bind_index, int direction) {
-    int key_index;
-    if (bind_index < 0 || bind_index >= BIND_COUNT) return;
-    key_index = find_phone_key_index(binds[bind_index]);
-    if (key_index < 0) key_index = 0;
-    key_index += direction;
-    if (key_index < 0) key_index = PHONE_KEY_COUNT - 1;
-    if (key_index >= PHONE_KEY_COUNT) key_index = 0;
-    binds[bind_index] = phone_key_options[key_index].code;
 }
 
 static void apply_key_profile(int profile_index) {
@@ -1091,6 +1310,15 @@ static int find_key_profile(const char *id) {
     return 0;
 }
 
+static int find_fps_limit(const char *id) {
+    int i;
+    if (!id) return 3;
+    for (i = 0; i < FPS_LIMIT_COUNT; i++) {
+        if (strcmp(id, fps_limits[i].id) == 0) return i;
+    }
+    return 3;
+}
+
 static void load_binds(const char *game_name, const char *jar_path) {
     char path[PATH_MAX];
     FILE *f;
@@ -1102,7 +1330,11 @@ static void load_binds(const char *game_name, const char *jar_path) {
     scale_sel = 1;
     source_sel = 0;
     display_mode_sel = 5;
+    fps_limit_sel = 3;
     sound_volume = 100;
+    strcpy(synth_id, "hybrid");
+    strcpy(filter_id, "sharp");
+    pan_x = pan_y = 0;
     key_profile_sel = 0;
 
     if (!game_name) return;
@@ -1136,10 +1368,34 @@ static void load_binds(const char *game_name, const char *jar_path) {
             display_mode_sel = find_display_mode(value);
             continue;
         }
+        if (strcmp(key, "FPS_LIMIT") == 0) {
+            fps_limit_sel = find_fps_limit(value);
+            continue;
+        }
         if (strcmp(key, "VOLUME") == 0) {
             sound_volume = val;
             if (sound_volume < 0) sound_volume = 0;
             if (sound_volume > 100) sound_volume = 100;
+            continue;
+        }
+        if (strcmp(key, "FILTER") == 0) {
+            if (strcmp(value, "sharp") == 0 || strcmp(value, "smooth") == 0 ||
+                strcmp(value, "pixel") == 0) {
+                snprintf(filter_id, sizeof(filter_id), "%s", value);
+            }
+            continue;
+        }
+        if (strcmp(key, "PAN_X") == 0 || strcmp(key, "PAN_Y") == 0) {
+            if (val < -1000) val = -1000;
+            if (val > 1000) val = 1000;
+            if (key[4] == 'X') pan_x = val; else pan_y = val;
+            continue;
+        }
+        if (strcmp(key, "SYNTH") == 0) {
+            if (strcmp(value, "hybrid") == 0 || strcmp(value, "wavetable") == 0 ||
+                strcmp(value, "fm") == 0) {
+                snprintf(synth_id, sizeof(synth_id), "%s", value);
+            }
             continue;
         }
         if (strcmp(key, "PROFILE") == 0 || strcmp(key, "KEY_PROFILE") == 0) {
@@ -1172,7 +1428,12 @@ static void save_binds(const char *game_name) {
     fprintf(f, "SCALE=%s\n", current_scale_preset()->id);
     fprintf(f, "VIEW=%s\n", source_presets[source_sel].id);
     fprintf(f, "DISPLAY_MODE=%s\n", display_modes[display_mode_sel].id);
+    fprintf(f, "FPS_LIMIT=%s\n", fps_limits[fps_limit_sel].id);
     fprintf(f, "VOLUME=%d\n", sound_volume);
+    fprintf(f, "SYNTH=%s\n", synth_id);
+    fprintf(f, "FILTER=%s\n", filter_id);
+    fprintf(f, "PAN_X=%d\n", pan_x);
+    fprintf(f, "PAN_Y=%d\n", pan_y);
     fprintf(f, "PROFILE=%s\n", key_profiles[key_profile_sel].id);
 
     for (i = 0; i < BIND_COUNT; i++)
@@ -1182,20 +1443,167 @@ static void save_binds(const char *game_name) {
 }
 
 /* ─────────────────────────────────────────────────────
+ *  debug options (global, shared with the in-game menu)
+ *
+ *  Stored in DEBUG_FILE as KEY=0/1. The runtime reads the same file
+ *  (PHONEME_DEBUG_CONFIG) so the in-game menu can change it; switches the
+ *  runtime reads at start-up apply on the next launch.
+ * ──────────────────────────────────────────────────── */
+typedef struct {
+    const char *key;
+    const char *label;
+    const char *env;        /* set to "1" when on; NULL = handled here */
+    const char *hint1;
+    const char *hint2;
+    int def;
+} DebugOption;
+
+static const DebugOption debug_options[] = {
+    { "LOG",     "LOG FILE",    NULL,                    "Write runmidlet.log",  "previous: .prev.log",  1 },
+    { "KEYS",    "KEY LOG",     "PHONEME_KEY_DEBUG",     "Every button press",   "and its phone key",    0 },
+    { "EVENTS",  "EVENT LOG",   "PHONEME_EVENT_DEBUG",   "Key events delivered", "to the game",          0 },
+    { "DISPLAY", "DISPLAY LOG", "PHONEME_DISPLAY_DEBUG", "Screen init and the",  "scaling layout",       0 },
+    { "AUDIO",   "AUDIO LOG",   "PHONEME_AUDIO_TRACE",   "Audio device rate,",   "channels and buffer",  0 },
+    { "LAUNCH",  "LAUNCH LOG",  "PM_LAUNCH_TRACE",       "Settings the launcher","passes to the game",   0 },
+    { "PROFILE", "PROFILER",    "PHONEME_PROFILE",       "CPU use by function,", "to the log every 10 s",0 },
+    { "FPS",     "FPS COUNTER", "PHONEME_SHOW_FPS",      "Frame rate in the",    "top-left corner",      0 }
+};
+#define DEBUG_OPTION_COUNT ((int)(sizeof(debug_options) / sizeof(debug_options[0])))
+#define DEBUG_OPT_LOG 0
+#define DEBUG_OPT_FPS (DEBUG_OPTION_COUNT - 1)
+#define DEBUG_ROW_VIEW  DEBUG_OPTION_COUNT
+#define DEBUG_ROW_CLEAR (DEBUG_OPTION_COUNT + 1)
+#define DEBUG_ROW_COUNT (DEBUG_OPTION_COUNT + 2)
+
+static int debug_values[DEBUG_OPTION_COUNT];
+static int debug_sel = 0;
+static int debug_notice = 0;   /* 1 = "logs cleared" */
+
+static void load_debug(void) {
+    FILE *f;
+    char line[128];
+    int i;
+    for (i = 0; i < DEBUG_OPTION_COUNT; i++) debug_values[i] = debug_options[i].def;
+    f = fopen(DEBUG_FILE, "r");
+    if (!f) return;
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        for (i = 0; i < DEBUG_OPTION_COUNT; i++) {
+            if (strcmp(trim_line(line), debug_options[i].key) == 0) {
+                debug_values[i] = atoi(eq + 1) != 0;
+            }
+        }
+    }
+    fclose(f);
+}
+
+static void save_debug(void) {
+    FILE *f;
+    int i;
+    mkdir(PM_DIR, 0777);
+    f = fopen(DEBUG_FILE, "w");
+    if (!f) return;
+    for (i = 0; i < DEBUG_OPTION_COUNT; i++)
+        fprintf(f, "%s=%d\n", debug_options[i].key, debug_values[i]);
+    fclose(f);
+}
+
+static void apply_debug_env(void) {
+    int i;
+    for (i = 0; i < DEBUG_OPTION_COUNT; i++) {
+        if (debug_options[i].env == NULL) continue;
+        /* the runtime tests these with getenv() != NULL: unset means off */
+        if (debug_values[i]) setenv(debug_options[i].env, "1", 1);
+        else unsetenv(debug_options[i].env);
+    }
+    setenv("PHONEME_DEBUG_CONFIG", DEBUG_FILE, 1);
+    setenv("PHONEME_RESTART_FLAG", RESTART_FLAG, 1);
+}
+
+/* ── log viewer ─────────────────────────────────────── */
+#define LOGVIEW_COLS   29
+#define LOGVIEW_MAX    3000
+#define LOGVIEW_ROWS   18
+#define LOGVIEW_TAIL   (64 * 1024)
+
+static char logview_lines[LOGVIEW_MAX][LOGVIEW_COLS + 1];
+static int logview_count = 0;
+static int logview_top = 0;
+static int logview_prev = 0;    /* 0 = last run, 1 = run before */
+
+static void logview_push(const char *text, int len) {
+    if (logview_count >= LOGVIEW_MAX) {
+        memmove(logview_lines[0], logview_lines[1],
+                sizeof(logview_lines[0]) * (LOGVIEW_MAX - 1));
+        logview_count = LOGVIEW_MAX - 1;
+    }
+    memcpy(logview_lines[logview_count], text, len);
+    logview_lines[logview_count][len] = '\0';
+    logview_count++;
+}
+
+static void logview_load(void) {
+    FILE *f = fopen(logview_prev ? LOG_PREV_FILE : LOG_FILE, "rb");
+    char cur[LOGVIEW_COLS + 1];
+    int len = 0, c;
+    long size;
+
+    logview_count = 0;
+    logview_top = 0;
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    size = ftell(f);
+    if (size > LOGVIEW_TAIL) {
+        /* only the end matters; skip the partial first line */
+        fseek(f, size - LOGVIEW_TAIL, SEEK_SET);
+        while ((c = fgetc(f)) != EOF && c != '\n') {}
+    } else {
+        fseek(f, 0, SEEK_SET);
+    }
+    while ((c = fgetc(f)) != EOF) {
+        if (c == '\r') continue;
+        if (c == '\n') {
+            logview_push(cur, len);
+            len = 0;
+            continue;
+        }
+        if (c == '\t') c = ' ';
+        if (c < 32 || c > 126) c = '?';
+        if (len == LOGVIEW_COLS) {      /* wrap long lines */
+            logview_push(cur, len);
+            len = 0;
+            cur[len++] = ' ';
+        }
+        cur[len++] = (char)c;
+    }
+    if (len > 0) logview_push(cur, len);
+    fclose(f);
+    /* open at the end: the interesting part is usually the last lines */
+    logview_top = logview_count - LOGVIEW_ROWS;
+    if (logview_top < 0) logview_top = 0;
+}
+
+/* ─────────────────────────────────────────────────────
  *  draw helpers
  * ──────────────────────────────────────────────────── */
+static void draw_header_color(const char *title, int y, Uint32 color) {
+    stringColor(screen, 4, y, title, color);
+}
+
 static void draw_header(const char *title, int y) {
-    stringColor(screen, 4, y, title, 0x7df9ffff);
+    draw_header_color(title, y, 0x7df9ffff);
 }
 
 static int draw_item(int x, int y, const char *text, int selected) {
     if (selected) {
-        boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
+        boxColor(screen, 0, y - 1, SCR_W - 1, y + PM_FONT_LINE_H - 2, 0x003366ff);
         stringColor(screen, x, y, text, 0x00ff88ff);
     } else {
         stringColor(screen, x, y, text, 0xffffffff);
     }
-    return y + 11;
+    return y + PM_FONT_LINE_H;
 }
 
 #define VISIBLE_ITEMS  17
@@ -1216,19 +1624,18 @@ static void draw_browser(void) {
         snprintf(title, sizeof(title), "/%s", current_rel_dir);
         draw_header(title, y);
     }
-    y += 12;
+    y += PM_FONT_LINE_H + 1;
 
     if (game_count == 0) {
         if (browsing_favorites) {
             stringColor(screen, 4, y, "No favorites yet", 0xffffffff);
-            stringColor(screen, 4, y + 12, "SELECT adds games", 0x607078ff);
-            stringColor(screen, 4, y + 24, "B:Back", 0x607078ff);
+            stringColor(screen, 4, y + PM_FONT_LINE_H, "SELECT adds games", 0x607078ff);
+            stringColor(screen, 4, y + PM_FONT_LINE_H * 2, "B:Back", 0x607078ff);
         } else {
             char path[PATH_MAX];
             current_dir_path(path, sizeof(path));
             stringColor(screen, 4, y, path, 0xff6060ff);
-            stringColor(screen, 4, y + 2, "is empty", 0xff6060ff);
-            stringColor(screen, 4, y + 12,
+            stringColor(screen, 4, y + PM_FONT_LINE_H,
                         current_rel_dir[0] ? "B:back" : "Add .jar files to play",
                         0xffffffff);
         }
@@ -1250,33 +1657,37 @@ static void draw_browser(void) {
         }
         if (games[i].is_dir) {
             if (i == game_sel) {
-                boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
-                stringColor(screen, 6, y, name, 0x00ff88ff);
+                boxColor(screen, 0, y - 1, SCR_W - 1, y + PM_FONT_LINE_H - 2, 0x003366ff);
+                stringColor(screen, 6, y, name,
+                            games[i].is_favorites_folder ? PM_COLOR_FAVORITE : 0x00ff88ff);
+            } else if (games[i].is_favorites_folder) {
+                stringColor(screen, 6, y, name, PM_COLOR_FAVORITE);
             } else {
                 stringColor(screen, 6, y, name, 0x7df9ffff);
             }
-            y += 11;
+            y += PM_FONT_LINE_H;
         } else if (games[i].title[0] != '\0') {
             if (i == game_sel) {
-                boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
+                boxColor(screen, 0, y - 1, SCR_W - 1, y + PM_FONT_LINE_H - 2, 0x003366ff);
                 stringColor(screen, 6, y, name, 0x00ff88ff);
             } else {
                 stringColor(screen, 6, y, name, 0xffffffff);
             }
-            y += 11;
+            y += PM_FONT_LINE_H;
         } else {
             if (i == game_sel) {
-                boxColor(screen, 0, y - 1, SCR_W - 1, y + 9, 0x003366ff);
+                boxColor(screen, 0, y - 1, SCR_W - 1, y + PM_FONT_LINE_H - 2, 0x003366ff);
             }
             stringColor(screen, 6, y, name, 0xff6060ff);
-            y += 11;
+            y += PM_FONT_LINE_H;
         }
     }
 
     /* help bar */
-    y = SCR_H - 21;
+    y = SCR_H - 30;
     stringColor(screen, 2, y, "SELECT:Favorite", 0x607078ff);
-    y = SCR_H - 10;
+    stringColor(screen, 158, y, "Y:Debug", 0x607078ff);
+    y = SCR_H - 15;
     stringColor(screen, 2, y, "A:Run", 0x607078ff);
     stringColor(screen, 64, y, "START:Keys", 0x607078ff);
     stringColor(screen, 158, y,
@@ -1296,43 +1707,176 @@ static void draw_keybinds(void) {
     char buf[128];
     snprintf(buf, sizeof(buf), "Controls: %s", game_display_name(game_sel));
     draw_header(buf, y);
-    y += 12;
+    y += PM_FONT_LINE_H + 1;
+
+    if (!key_edit_mode) {
+        int i;
+        if (bind_sel < 0) bind_sel = SETTINGS_ROW_COUNT - 1;
+        if (bind_sel >= SETTINGS_ROW_COUNT) bind_sel = 0;
+        bind_scroll = 0;
+
+        for (i = 0; i < SETTINGS_ROW_COUNT && y < SCR_H - 24; i++) {
+            if (i == SETTINGS_ROW_ZOOM) {
+                snprintf(buf, sizeof(buf), "ZOOM   %s", current_scale_preset()->label);
+            } else if (i == SETTINGS_ROW_SIZE) {
+                snprintf(buf, sizeof(buf), "SIZE   %s", source_presets[source_sel].label);
+            } else if (i == SETTINGS_ROW_SCREEN) {
+                snprintf(buf, sizeof(buf), "SCREEN %s", display_modes[display_mode_sel].label);
+            } else if (i == SETTINGS_ROW_FPS) {
+                snprintf(buf, sizeof(buf), "FPS    %s", fps_limits[fps_limit_sel].label);
+            } else if (i == SETTINGS_ROW_PROFILE) {
+                snprintf(buf, sizeof(buf), "PROFILE %s", key_profiles[key_profile_sel].label);
+            } else if (i == SETTINGS_ROW_KEYS) {
+                snprintf(buf, sizeof(buf), "KEYS   edit bindings");
+            } else {
+                snprintf(buf, sizeof(buf), delete_confirm && bind_sel == SETTINGS_ROW_DELETE
+                         ? "DELETE press A again" : "DELETE JAR+JAD");
+            }
+            y = draw_item(4, y, buf, i == bind_sel);
+        }
+
+        y = SCR_H - 15;
+        stringColor(screen, 4, y,
+                    delete_confirm && bind_sel == SETTINGS_ROW_DELETE
+                    ? "A:confirm  B:cancel" : "A:select  B:save",
+                    0x607078ff);
+        SDL_Flip(screen);
+        return;
+    }
 
     if (bind_sel < bind_scroll) bind_scroll = bind_sel;
     if (bind_sel >= bind_scroll + VISIBLE_ITEMS) bind_scroll = bind_sel - VISIBLE_ITEMS + 1;
 
-    int i;
-    for (i = bind_scroll; i < PHONE_KEY_COUNT + BIND_ROW_OFFSET && y < SCR_H - 24; i++) {
-        if (i == 0) {
-            snprintf(buf, sizeof(buf), "ZOOM   %s", current_scale_preset()->label);
-        } else if (i == 1) {
-            snprintf(buf, sizeof(buf), "SIZE   %s", source_presets[source_sel].label);
-        } else if (i == 2) {
-            snprintf(buf, sizeof(buf), "SCREEN %s", display_modes[display_mode_sel].label);
-        } else if (i == 3) {
-            snprintf(buf, sizeof(buf), "PROFILE %s", key_profiles[key_profile_sel].label);
-        } else {
-            int phone_index = i - BIND_ROW_OFFSET;
-            char assigned[64];
-            format_phone_bindings(phone_key_options[phone_index].code,
-                                  assigned, sizeof(assigned));
-            snprintf(buf, sizeof(buf), "%-10s %s",
-                     phone_short_label(phone_key_options[phone_index].label),
-                     assigned);
+    {
+        int i;
+        int row_count = PHONE_KEY_COUNT + KEY_EDIT_ROW_OFFSET;
+        for (i = bind_scroll; i < row_count && y < SCR_H - 24; i++) {
+            if (i == KEY_EDIT_PROFILE_ROW) {
+                snprintf(buf, sizeof(buf), "PROFILE %s", key_profiles[key_profile_sel].label);
+            } else {
+                int phone_index = i - KEY_EDIT_ROW_OFFSET;
+                char assigned[64];
+                format_phone_bindings(phone_key_options[phone_index].code,
+                                      assigned, sizeof(assigned));
+                snprintf(buf, sizeof(buf), "%-10s %s",
+                         phone_short_label(phone_key_options[phone_index].label),
+                         assigned);
+            }
+            y = draw_item(4, y, buf, i == bind_sel);
         }
-        y = draw_item(4, y, buf, i == bind_sel);
     }
 
     /* capture prompt or help bar */
-    y = SCR_H - 10;
+    y = SCR_H - 15;
     if (capture_mode) {
-        stringColor(screen, 4, y - 14, "Press FunKey button to bind", 0x00ff88ff);
+        stringColor(screen, 4, y - PM_FONT_LINE_H, "Press FunKey button to bind", 0x00ff88ff);
         stringColor(screen, 4, y, "POWER:cancel", 0x607078ff);
     } else {
-        stringColor(screen, 4, y, "A:bind/change  B:save", 0x607078ff);
+        stringColor(screen, 4, y, "A:bind/change  B:menu", 0x607078ff);
     }
 
     SDL_Flip(screen);
+}
+
+/* ─────────────────────────────────────────────────────
+ *  resolution picker – first launch
+ * ──────────────────────────────────────────────────── */
+
+#define SOURCE_PRESET_COUNT (sizeof(source_presets) / sizeof(source_presets[0]))
+
+static int source_picker_sel = 0;
+static int source_picker_scroll = 0;
+
+static void draw_resolution_picker(void) {
+    int i;
+    int y = 6;
+    const int max_rows = 12;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
+
+    /* game name */
+    if (launching_game_idx >= 0 && launching_game_idx < game_count) {
+        char title[256];
+        snprintf(title, sizeof(title), "Resolution for %s",
+                 game_display_name(launching_game_idx));
+        draw_header(title, y);
+    }
+    y += PM_FONT_LINE_H + 1;
+
+    /* list source presets */
+    if (source_picker_scroll < 0) source_picker_scroll = 0;
+    if (source_picker_sel < source_picker_scroll)
+        source_picker_scroll = source_picker_sel;
+    if (source_picker_sel >= source_picker_scroll + max_rows)
+        source_picker_scroll = source_picker_sel - max_rows + 1;
+
+    for (i = source_picker_scroll;
+         i < (int)SOURCE_PRESET_COUNT && i < source_picker_scroll + max_rows;
+         i++) {
+        int selected = (i == source_picker_sel);
+        char label[64];
+        snprintf(label, sizeof(label), "%s", source_presets[i].label);
+        y = draw_item(4, y, label, selected);
+    }
+    y += 4;
+
+    /* help bar */
+    y = SCR_H - 30;
+    stringColor(screen, 4, y, "UP/DOWN:choose  A:confirm",
+               0x607078ff);
+    y += PM_FONT_LINE_H;
+    stringColor(screen, 4, y, "B:cancel", 0x607078ff);
+
+    SDL_Flip(screen);
+}
+
+static void handle_key_resolution(SDL_KeyboardEvent *key) {
+    if (!key || key->type != SDL_KEYDOWN) return;
+
+    switch (key->keysym.sym) {
+    case SDLK_UP: case SDLK_u:
+        if (source_picker_sel > 0) source_picker_sel--;
+        break;
+    case SDLK_DOWN: case SDLK_d:
+        if (source_picker_sel < (int)SOURCE_PRESET_COUNT - 1) source_picker_sel++;
+        break;
+    case SDLK_LEFT: case SDLK_l:
+        source_picker_sel -= 6;
+        if (source_picker_sel < 0) source_picker_sel = 0;
+        break;
+    case SDLK_RIGHT: case SDLK_r:
+        source_picker_sel += 6;
+        if (source_picker_sel >= (int)SOURCE_PRESET_COUNT)
+            source_picker_sel = SOURCE_PRESET_COUNT - 1;
+        break;
+    case SDLK_b:
+        /* cancel – go back to browser */
+        launching_game_idx = -1;
+        state = STATE_BROWSER;
+        break;
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a:
+        /* confirm – save chosen resolution and launch */
+        if (launching_game_idx >= 0 && launching_game_idx < game_count) {
+            load_binds(games[launching_game_idx].config,
+                       games[launching_game_idx].path);
+            source_sel = source_picker_sel;
+            save_binds(games[launching_game_idx].config);
+            launch_game(launching_game_idx);
+            launching_game_idx = -1;
+            state = STATE_BROWSER;
+        }
+        break;
+    }
+}
+
+static int config_file_exists(const char *game_name) {
+    char path[PATH_MAX];
+    FILE *f;
+    if (!game_name) return 0;
+    snprintf(path, sizeof(path), BIND_DIR "/%s.cfg", game_name);
+    f = fopen(path, "r");
+    if (f) { fclose(f); return 1; }
+    return 0;
 }
 
 /* ─────────────────────────────────────────────────────
@@ -1451,12 +1995,16 @@ static void copy_dir(const char *src_base, const char *dst_base) {
 /* ─────────────────────────────────────────────────────
  *  launch
  * ──────────────────────────────────────────────────── */
-static void launch_game(int idx) {
+/* returns 1 when the game asked to be restarted from its in-game menu */
+static int launch_game_once(int idx) {
     const char *jar_path = games[idx].path;
+    int restart = 0;
 
     draw_launching();
 
     char self_dir[PATH_MAX];
+    char rms_home[PATH_MAX];
+    char rms_suite_home[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", self_dir, sizeof(self_dir) - 1);
     if (len >= 0) {
         self_dir[len] = '\0';
@@ -1469,7 +2017,7 @@ static void launch_game(int idx) {
     mkdir(PM_DIR, 0777);
     mkdir(BIN_DIR, 0777);
     mkdir(PM_DIR "/lib", 0777);
-    mkdir(PM_DIR "/appdb", 0777);
+    mkdir(RMS_DIR, 0777);
 
     /* copy phoneME runtime to persistent dir only when OPK runtime changed */
     {
@@ -1489,23 +2037,31 @@ static void launch_game(int idx) {
             copy_dir(src, PM_DIR "/lib");
             copy_file(version_src, version_dst);
         }
-        /* appdb: seed on first launch only, preserve RMS state */
-        {
-            DIR *check = opendir(PM_DIR "/appdb");
-            if (check != NULL) {
-                closedir(check);
-            } else {
-                snprintf(src, sizeof(src), "%s/appdb", self_dir);
-                copy_dir(src, PM_DIR "/appdb");
-            }
-        }
 
         char cmd[PATH_MAX * 2 + 64];
         snprintf(cmd, sizeof(cmd), "chmod +x %s/* 2>/dev/null || true", BIN_DIR);
         if (!runtime_current) system(cmd);
     }
 
-    /* extract launch class */
+    {
+        char src[PATH_MAX], dst[PATH_MAX];
+        DIR *check;
+        snprintf(dst, sizeof(dst), PM_DIR "/appdb");
+        check = opendir(dst);
+        if (check != NULL) {
+            closedir(check);
+        } else {
+            snprintf(src, sizeof(src), "%s/appdb", self_dir);
+            copy_dir(src, dst);
+        }
+    }
+
+    snprintf(rms_home, sizeof(rms_home), RMS_DIR "/%s", games[idx].config);
+    mkdir(rms_home, 0777);
+    snprintf(rms_suite_home, sizeof(rms_suite_home), "%s/00000000", rms_home);
+    mkdir(rms_suite_home, 0777);
+
+    /* extract MIDlet main class from JAR manifest */
     char main_class[256] = {0};
     char jad_path[PATH_MAX];
     if (games[idx].is_doja) {
@@ -1555,9 +2111,9 @@ static void launch_game(int idx) {
 
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
     setenv("MIDP_HOME", PM_DIR, 1);
+    setenv("PHONEME_RMS_HOME", rms_home, 1);
     setenv("PHONEME_HEAP_MB", games[idx].is_doja ? "32" : "16", 1);
     setenv("PHONEME_ENABLE_AUDIO", "1", 1);
-    setenv("PHONEME_TIMIDITY_SYNTHETIC", "1", 1);
     setenv("PHONEME_ENABLE_GP2X_KEYS", "1", 1);
     setenv("PHONEME_KEY_PROFILE", key_profiles[key_profile_sel].id, 1);
     setenv("PHONEME_SCALE_PRESET", current_scale_preset()->id, 1);
@@ -1575,6 +2131,7 @@ static void launch_game(int idx) {
         unsetenv("DOJA_JAM_PATH");
         unsetenv("DOJA_SCRATCHPAD_PATH");
     }
+    setenv("PHONEME_FPS_LIMIT", fps_limits[fps_limit_sel].id, 1);
     {
         char cfg_path[PATH_MAX];
         snprintf(cfg_path, sizeof(cfg_path), BIND_DIR "/%s.cfg", games[idx].config);
@@ -1584,6 +2141,13 @@ static void launch_game(int idx) {
         char volume[16];
         snprintf(volume, sizeof(volume), "%d", sound_volume);
         setenv("PHONEME_SOUND_VOLUME", volume, 1);
+    }
+    setenv("PHONEME_SYNTH", synth_id, 1);
+    setenv("PHONEME_SCALE_FILTER", filter_id, 1);
+    {
+        char pan[32];
+        snprintf(pan, sizeof(pan), "%d,%d", pan_x, pan_y);
+        setenv("PHONEME_PAN", pan, 1);
     }
     {
         char ratio[16];
@@ -1600,10 +2164,27 @@ static void launch_game(int idx) {
                  source_presets[source_sel].height);
         setenv("PHONEME_SOURCE_SIZE", size, 1);
         setenv("PHONEME_LCD_SIZE", size, 1);
+    } else if (games[idx].is_doja) {
+        /* Auto for an i-appli: the screen is the .jam DrawArea */
+        char area[32];
+        int dw = 0, dh = 0;
+        if (!read_jam_value(games[idx].jam_path, "DrawArea", area, sizeof(area))
+                || sscanf(area, "%dx%d", &dw, &dh) != 2 || dw <= 0 || dh <= 0
+                || dw > 480 || dh > 480) {
+            dw = 240;
+            dh = 240;
+        }
+        snprintf(area, sizeof(area), "%dx%d", dw, dh);
+        setenv("PHONEME_SOURCE_SIZE", area, 1);
+        setenv("PHONEME_LCD_SIZE", area, 1);
     } else {
         unsetenv("PHONEME_SOURCE_SIZE");
         unsetenv("PHONEME_LCD_SIZE");
     }
+
+    load_debug();
+    apply_debug_env();
+    unlink(RESTART_FLAG);
 
     int i;
     for (i = 0; i < BIND_COUNT; i++) {
@@ -1622,9 +2203,14 @@ static void launch_game(int idx) {
 
     pid_t pid = fork();
     if (pid == 0) {
-        /* child — redirect stdout+stderr to runmidlet log */
-        int log_fd = open(RUNTIME_LOG,
-                          O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        /* child — stdout+stderr go to the log, or nowhere when it is off */
+        int log_fd;
+        if (debug_values[DEBUG_OPT_LOG]) {
+            rename(LOG_FILE, LOG_PREV_FILE);
+            log_fd = open(LOG_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        } else {
+            log_fd = open("/dev/null", O_WRONLY);
+        }
         if (log_fd >= 0) {
             dup2(log_fd, STDOUT_FILENO);
             dup2(log_fd, STDERR_FILENO);
@@ -1640,6 +2226,10 @@ static void launch_game(int idx) {
                    games[idx].jam_path);
             printf("pm-launch doja scratchpad=%s\n",
                    getenv("DOJA_SCRATCHPAD_PATH") ? getenv("DOJA_SCRATCHPAD_PATH") : "");
+            printf("pm-launch MIDP_HOME=%s\n",
+                   getenv("MIDP_HOME") ? getenv("MIDP_HOME") : "");
+            printf("pm-launch PHONEME_RMS_HOME=%s\n",
+                   getenv("PHONEME_RMS_HOME") ? getenv("PHONEME_RMS_HOME") : "");
             printf("pm-launch PHONEME_ENABLE_AUDIO=%s\n",
                    getenv("PHONEME_ENABLE_AUDIO") ? getenv("PHONEME_ENABLE_AUDIO") : "");
             printf("pm-launch PHONEME_HEAP_MB=%s\n",
@@ -1652,10 +2242,16 @@ static void launch_game(int idx) {
             printf("pm-launch view preset=%s source=%s\n",
                    source_presets[source_sel].id,
                    getenv("PHONEME_SOURCE_SIZE") ? getenv("PHONEME_SOURCE_SIZE") : "");
+            printf("pm-launch fps limit=%s\n",
+                   getenv("PHONEME_FPS_LIMIT") ? getenv("PHONEME_FPS_LIMIT") : "");
             printf("pm-launch sound volume=%s config=%s\n",
                    getenv("PHONEME_SOUND_VOLUME") ? getenv("PHONEME_SOUND_VOLUME") : "",
                    getenv("PHONEME_CONFIG_PATH") ? getenv("PHONEME_CONFIG_PATH") : "");
             printf("pm-launch key profile=%s\n", key_profiles[key_profile_sel].id);
+            printf("pm-launch debug");
+            for (i = 0; i < DEBUG_OPTION_COUNT; i++)
+                printf(" %s=%d", debug_options[i].key, debug_values[i]);
+            printf("\n");
             for (i = 0; i < BIND_COUNT; i++) {
                 printf("pm-launch key %s %s=%s\n",
                        bind_names[i], bind_gp2x_env[i],
@@ -1676,6 +2272,22 @@ static void launch_game(int idx) {
             char prop_ver[192];
             char prop_encoding[64];
             char prop_scratchpad[PATH_MAX + 32];
+            static char prop_jam[2 * 8192 + 32];
+            prop_jam[0] = '\0';
+            if (games[idx].is_doja) {
+                FILE *jf = fopen(games[idx].jam_path, "rb");
+                if (jf != NULL) {
+                    static const char hexd[] = "0123456789abcdef";
+                    size_t pos = (size_t)snprintf(prop_jam, sizeof(prop_jam), "-Ddoja.jam.hex=");
+                    int ch;
+                    while ((ch = fgetc(jf)) != EOF && pos + 3 < sizeof(prop_jam)) {
+                        prop_jam[pos++] = hexd[(ch >> 4) & 15];
+                        prop_jam[pos++] = hexd[ch & 15];
+                    }
+                    prop_jam[pos] = '\0';
+                    fclose(jf);
+                }
+            }
             if (games[idx].is_doja) {
                 snprintf(classpath, sizeof(classpath), "%s:%s/lib/doja-support.jar",
                          jar_path, PM_DIR);
@@ -1705,6 +2317,7 @@ static void launch_game(int idx) {
             prop_ver,
             prop_encoding,
             prop_scratchpad,
+            prop_jam[0] ? prop_jam : "-Ddoja.jam.hex=",
             "-classpathext",
             classpath,
             "internal",
@@ -1734,7 +2347,161 @@ static void launch_game(int idx) {
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
         screen = SDL_SetVideoMode(SCR_W, SCR_H, 16, SDL_SWSURFACE);
         SDL_ShowCursor(SDL_DISABLE);
+        restart = (unlink(RESTART_FLAG) == 0);
     }
+    return restart;
+}
+
+static void launch_game(int idx) {
+    /* "Restart game" in the in-game menu: run it again with the settings
+     * (and debug switches) it saved */
+    while (launch_game_once(idx)) {
+        load_binds(games[idx].config, games[idx].path);
+    }
+}
+
+/* ─────────────────────────────────────────────────────
+ *  debug screen and log viewer
+ * ──────────────────────────────────────────────────── */
+static void draw_debug(void) {
+    char buf[64];
+    int i, y = 6;
+    const char *h1 = "", *h2 = "";
+    Uint32 hint_color = 0x9aaab0ff;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x10, 0x18, 0x20));
+    draw_header("Debug (all games)", y);
+    y += PM_FONT_LINE_H + 1;
+
+    for (i = 0; i < DEBUG_ROW_COUNT; i++) {
+        if (i < DEBUG_OPTION_COUNT) {
+            const char *value = debug_values[i] ? "On" : "Off";
+            if (i != DEBUG_OPT_LOG && i != DEBUG_OPT_FPS &&
+                debug_values[i] && !debug_values[DEBUG_OPT_LOG]) {
+                value = "On (no log)";
+            }
+            snprintf(buf, sizeof(buf), "%-12s %s", debug_options[i].label, value);
+        } else if (i == DEBUG_ROW_VIEW) {
+            snprintf(buf, sizeof(buf), "VIEW LOG     >");
+        } else {
+            snprintf(buf, sizeof(buf), "CLEAR LOGS");
+        }
+        y = draw_item(4, y, buf, i == debug_sel);
+    }
+
+    if (debug_sel < DEBUG_OPTION_COUNT) {
+        h1 = debug_options[debug_sel].hint1;
+        h2 = debug_options[debug_sel].hint2;
+        if (debug_sel != DEBUG_OPT_LOG && debug_sel != DEBUG_OPT_FPS &&
+            !debug_values[DEBUG_OPT_LOG]) {
+            h2 = "needs LOG FILE on";
+        }
+    } else if (debug_sel == DEBUG_ROW_VIEW) {
+        h1 = "Read the log of the";
+        h2 = "last game run here";
+    } else if (debug_notice) {
+        h1 = "Logs deleted";
+        hint_color = 0x00ff88ff;
+    } else {
+        h1 = "Delete runmidlet.log";
+        h2 = "and runmidlet.prev.log";
+    }
+    y += 6;
+    stringColor(screen, 4, y, h1, hint_color);
+    stringColor(screen, 4, y + PM_FONT_LINE_H, h2, hint_color);
+
+    stringColor(screen, 4, SCR_H - 26, "Changes apply on launch", 0x607078ff);
+    stringColor(screen, 4, SCR_H - 15, "A/<>:change  B:back", 0x607078ff);
+    SDL_Flip(screen);
+}
+
+static void handle_key_debug(SDL_KeyboardEvent *kev) {
+    if (kev->type != SDL_KEYDOWN) return;
+    switch (kev->keysym.sym) {
+    case SDLK_UP: case SDLK_u:
+        debug_notice = 0;
+        if (--debug_sel < 0) debug_sel = DEBUG_ROW_COUNT - 1;
+        break;
+    case SDLK_DOWN: case SDLK_d:
+        debug_notice = 0;
+        if (++debug_sel >= DEBUG_ROW_COUNT) debug_sel = 0;
+        break;
+    case SDLK_LEFT: case SDLK_l:
+    case SDLK_RIGHT: case SDLK_r:
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a:
+        if (debug_sel < DEBUG_OPTION_COUNT) {
+            debug_values[debug_sel] = !debug_values[debug_sel];
+            save_debug();
+        } else if (debug_sel == DEBUG_ROW_VIEW) {
+            if (kev->keysym.sym == SDLK_LEFT || kev->keysym.sym == SDLK_l ||
+                kev->keysym.sym == SDLK_RIGHT || kev->keysym.sym == SDLK_r) break;
+            logview_prev = 0;
+            logview_load();
+            state = STATE_LOGVIEW;
+        } else if (kev->keysym.sym == SDLK_a || kev->keysym.sym == SDLK_RETURN ||
+                   kev->keysym.sym == SDLK_SPACE) {
+            unlink(LOG_FILE);
+            unlink(LOG_PREV_FILE);
+            sync();
+            debug_notice = 1;
+        }
+        break;
+    case SDLK_b: case SDLK_y: case SDLK_ESCAPE: case SDLK_q:
+        save_debug();
+        state = STATE_BROWSER;
+        break;
+    default:
+        break;
+    }
+}
+
+static void draw_logview(void) {
+    char buf[64];
+    int i, y = 6;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x08, 0x0c, 0x10));
+    snprintf(buf, sizeof(buf), "%s  %d/%d",
+             logview_prev ? "Previous run" : "Last run",
+             logview_count == 0 ? 0 : logview_top + 1, logview_count);
+    draw_header(buf, y);
+    y += PM_FONT_LINE_H + 1;
+
+    if (logview_count == 0) {
+        stringColor(screen, 4, y, "No log yet.", 0xffffffff);
+        stringColor(screen, 4, y + PM_FONT_LINE_H, "Turn LOG FILE on and", 0x9aaab0ff);
+        stringColor(screen, 4, y + PM_FONT_LINE_H * 2, "run a game.", 0x9aaab0ff);
+    }
+    for (i = logview_top; i < logview_count && i < logview_top + LOGVIEW_ROWS; i++) {
+        stringColor(screen, 4, y, logview_lines[i], 0xd0d8dcff);
+        y += PM_FONT_LINE_H;
+    }
+    stringColor(screen, 4, SCR_H - 15, "<>:page X:prev/last B:back", 0x607078ff);
+    SDL_Flip(screen);
+}
+
+static void handle_key_logview(SDL_KeyboardEvent *kev) {
+    int max_top = logview_count - LOGVIEW_ROWS;
+    if (kev->type != SDL_KEYDOWN) return;
+    if (max_top < 0) max_top = 0;
+    switch (kev->keysym.sym) {
+    case SDLK_UP: case SDLK_u:       logview_top -= 1; break;
+    case SDLK_DOWN: case SDLK_d:     logview_top += 1; break;
+    case SDLK_LEFT: case SDLK_l:     logview_top -= LOGVIEW_ROWS; break;
+    case SDLK_RIGHT: case SDLK_r:    logview_top += LOGVIEW_ROWS; break;
+    case SDLK_n:                     logview_top = 0; break;         /* L1: start */
+    case SDLK_m:                     logview_top = max_top; break;   /* R1: end */
+    case SDLK_x:
+        logview_prev = !logview_prev;
+        logview_load();
+        return;
+    case SDLK_b: case SDLK_a: case SDLK_ESCAPE: case SDLK_q:
+        state = STATE_DEBUG;
+        return;
+    default:
+        break;
+    }
+    if (logview_top > max_top) logview_top = max_top;
+    if (logview_top < 0) logview_top = 0;
 }
 
 /* ─────────────────────────────────────────────────────
@@ -1742,6 +2509,14 @@ static void launch_game(int idx) {
  * ──────────────────────────────────────────────────── */
 static void handle_key_browser(SDL_KeyboardEvent *kev) {
     if (kev->type != SDL_KEYDOWN) return;
+
+    if (kev->keysym.sym == SDLK_y) {   /* Y = debug options (global) */
+        load_debug();
+        debug_sel = 0;
+        debug_notice = 0;
+        state = STATE_DEBUG;
+        return;
+    }
 
     if (game_count <= 0) {
         switch (kev->keysym.sym) {
@@ -1781,9 +2556,18 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
                 enter_selected_folder();
                 break;
             }
-            load_binds(games[game_sel].config, games[game_sel].path);
-            launch_game(game_sel);
-            state = STATE_BROWSER;
+            if (!games[game_sel].is_favorites_folder &&
+                !config_file_exists(games[game_sel].config)) {
+                /* first launch – show resolution picker */
+                source_picker_sel = 0;
+                source_picker_scroll = 0;
+                launching_game_idx = game_sel;
+                state = STATE_RESOLUTION;
+            } else {
+                load_binds(games[game_sel].config, games[game_sel].path);
+                launch_game(game_sel);
+                state = STATE_BROWSER;
+            }
         }
         break;
     case SDLK_s: /* START = open/keys */
@@ -1795,6 +2579,9 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
             load_binds(games[game_sel].config, games[game_sel].path);
             bind_sel = 0;
             bind_scroll = 0;
+            key_edit_mode = 0;
+            delete_confirm = 0;
+            capture_mode = 0;
             state = STATE_KEYBINDS;
         }
         break;
@@ -1824,6 +2611,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
 }
 
 static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
+    int row_count;
     if (kev->type != SDL_KEYDOWN) return;
 
     if (capture_mode) {
@@ -1837,7 +2625,7 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
         }
 
         bind_index = funkey_bind_index_from_sdl(code);
-        phone_index = bind_sel - BIND_ROW_OFFSET;
+        phone_index = bind_sel - KEY_EDIT_ROW_OFFSET;
         if (bind_index >= 0 && phone_index >= 0 && phone_index < PHONE_KEY_COUNT) {
             binds[bind_index] = phone_key_options[phone_index].code;
         }
@@ -1845,86 +2633,134 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
         return;
     }
 
+    row_count = key_edit_mode ? PHONE_KEY_COUNT + KEY_EDIT_ROW_OFFSET
+                              : SETTINGS_ROW_COUNT;
+
     switch (kev->keysym.sym) {
     case SDLK_UP:    case SDLK_u:
+        delete_confirm = 0;
         bind_sel--;
-        if (bind_sel < 0) bind_sel = PHONE_KEY_COUNT + BIND_ROW_OFFSET - 1;
+        if (bind_sel < 0) bind_sel = row_count - 1;
         break;
     case SDLK_DOWN:  case SDLK_d:
+        delete_confirm = 0;
         bind_sel++;
-        if (bind_sel >= PHONE_KEY_COUNT + BIND_ROW_OFFSET) bind_sel = 0;
+        if (bind_sel >= row_count) bind_sel = 0;
         break;
 
     case SDLK_LEFT:  case SDLK_l:
-        if (bind_sel == 0) {
+        delete_confirm = 0;
+        if (key_edit_mode) {
+            if (bind_sel == KEY_EDIT_PROFILE_ROW) {
+                key_profile_sel--;
+                if (key_profile_sel < 0) key_profile_sel = KEY_PROFILE_COUNT - 1;
+                apply_key_profile(key_profile_sel);
+            }
+        } else if (bind_sel == SETTINGS_ROW_ZOOM) {
             int scale_count;
             scale_list_for_source(source_sel, &scale_count);
             scale_sel--;
             if (scale_sel < 0) scale_sel = scale_count - 1;
-        } else if (bind_sel == 1) {
+        } else if (bind_sel == SETTINGS_ROW_SIZE) {
             int ratio = current_scale_preset()->ratio;
             source_sel--;
             if (source_sel < 0) source_sel = SOURCE_COUNT - 1;
             ratio = preferred_scale_ratio_for_source(source_sel, ratio);
             scale_sel = find_scale_for_source(source_sel, ratio);
-        } else if (bind_sel == 2) {
+        } else if (bind_sel == SETTINGS_ROW_SCREEN) {
             display_mode_sel--;
             if (display_mode_sel < 0) display_mode_sel = DISPLAY_MODE_COUNT - 1;
-        } else if (bind_sel == 3) {
+        } else if (bind_sel == SETTINGS_ROW_FPS) {
+            fps_limit_sel--;
+            if (fps_limit_sel < 0) fps_limit_sel = FPS_LIMIT_COUNT - 1;
+        } else if (bind_sel == SETTINGS_ROW_PROFILE) {
             key_profile_sel--;
             if (key_profile_sel < 0) key_profile_sel = KEY_PROFILE_COUNT - 1;
             apply_key_profile(key_profile_sel);
         }
         break;
     case SDLK_RIGHT: case SDLK_r:
-        if (bind_sel == 0) {
+        delete_confirm = 0;
+        if (key_edit_mode) {
+            if (bind_sel == KEY_EDIT_PROFILE_ROW) {
+                key_profile_sel++;
+                if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
+                apply_key_profile(key_profile_sel);
+            }
+        } else if (bind_sel == SETTINGS_ROW_ZOOM) {
             int scale_count;
             scale_list_for_source(source_sel, &scale_count);
             scale_sel++;
             if (scale_sel >= scale_count) scale_sel = 0;
-        } else if (bind_sel == 1) {
+        } else if (bind_sel == SETTINGS_ROW_SIZE) {
             int ratio = current_scale_preset()->ratio;
             source_sel++;
             if (source_sel >= SOURCE_COUNT) source_sel = 0;
             ratio = preferred_scale_ratio_for_source(source_sel, ratio);
             scale_sel = find_scale_for_source(source_sel, ratio);
-        } else if (bind_sel == 2) {
+        } else if (bind_sel == SETTINGS_ROW_SCREEN) {
             display_mode_sel++;
             if (display_mode_sel >= DISPLAY_MODE_COUNT) display_mode_sel = 0;
-        } else if (bind_sel == 3) {
+        } else if (bind_sel == SETTINGS_ROW_FPS) {
+            fps_limit_sel++;
+            if (fps_limit_sel >= FPS_LIMIT_COUNT) fps_limit_sel = 0;
+        } else if (bind_sel == SETTINGS_ROW_PROFILE) {
             key_profile_sel++;
             if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
             apply_key_profile(key_profile_sel);
         }
         break;
 
-    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a: /* A = next value */
-        if (bind_sel == 0) {
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a:
+        if (key_edit_mode) {
+            delete_confirm = 0;
+            if (bind_sel != KEY_EDIT_PROFILE_ROW) {
+                capture_mode = 1;
+            }
+        } else if (bind_sel == SETTINGS_ROW_ZOOM) {
             int scale_count;
             scale_list_for_source(source_sel, &scale_count);
             scale_sel++;
             if (scale_sel >= scale_count) scale_sel = 0;
-        } else if (bind_sel == 1) {
+        } else if (bind_sel == SETTINGS_ROW_SIZE) {
             int ratio = current_scale_preset()->ratio;
             source_sel++;
             if (source_sel >= SOURCE_COUNT) source_sel = 0;
             ratio = preferred_scale_ratio_for_source(source_sel, ratio);
             scale_sel = find_scale_for_source(source_sel, ratio);
-        } else if (bind_sel == 2) {
+        } else if (bind_sel == SETTINGS_ROW_SCREEN) {
             display_mode_sel++;
             if (display_mode_sel >= DISPLAY_MODE_COUNT) display_mode_sel = 0;
-        } else if (bind_sel == 3) {
-            key_profile_sel++;
-            if (key_profile_sel >= KEY_PROFILE_COUNT) key_profile_sel = 0;
-            apply_key_profile(key_profile_sel);
-        } else {
-            capture_mode = 1;
+        } else if (bind_sel == SETTINGS_ROW_FPS) {
+            fps_limit_sel++;
+            if (fps_limit_sel >= FPS_LIMIT_COUNT) fps_limit_sel = 0;
+        } else if (bind_sel == SETTINGS_ROW_PROFILE ||
+                   bind_sel == SETTINGS_ROW_KEYS) {
+            delete_confirm = 0;
+            key_edit_mode = 1;
+            bind_sel = (bind_sel == SETTINGS_ROW_KEYS) ? KEY_EDIT_ROW_OFFSET
+                                                       : KEY_EDIT_PROFILE_ROW;
+            bind_scroll = 0;
+        } else if (bind_sel == SETTINGS_ROW_DELETE) {
+            if (!delete_confirm) {
+                delete_confirm = 1;
+            } else {
+                delete_confirm = 0;
+                delete_selected_game_files();
+                state = STATE_BROWSER;
+            }
         }
         break;
 
     case SDLK_b: /* back / cancel capture */
         if (capture_mode) {
             capture_mode = 0;
+        } else if (delete_confirm) {
+            delete_confirm = 0;
+        } else if (key_edit_mode) {
+            key_edit_mode = 0;
+            bind_sel = SETTINGS_ROW_PROFILE;
+            bind_scroll = 0;
         } else {
             save_binds(games[game_sel].config);
             state = STATE_BROWSER;
@@ -1932,6 +2768,7 @@ static void handle_key_keybinds(SDL_KeyboardEvent *kev) {
         break;
 
     case SDLK_ESCAPE: case SDLK_q:
+        delete_confirm = 0;
         save_binds(games[game_sel].config);
         state = STATE_BROWSER;
         break;
@@ -1980,9 +2817,12 @@ int main(int argc, char **argv) {
 
     while (running) {
         switch (state) {
-        case STATE_BROWSER:   draw_browser();   break;
-        case STATE_KEYBINDS:  draw_keybinds();  break;
-        case STATE_LAUNCHING: draw_launching(); break;
+        case STATE_BROWSER:     draw_browser();          break;
+        case STATE_KEYBINDS:    draw_keybinds();         break;
+        case STATE_LAUNCHING:   draw_launching();        break;
+        case STATE_RESOLUTION:  draw_resolution_picker(); break;
+        case STATE_DEBUG:       draw_debug();            break;
+        case STATE_LOGVIEW:     draw_logview();          break;
         }
 
         while (SDL_WaitEvent(&ev)) {
@@ -1996,6 +2836,15 @@ int main(int argc, char **argv) {
                     handle_key_keybinds(&ev.key);
                     break;
                 case STATE_LAUNCHING:
+                    break;
+                case STATE_RESOLUTION:
+                    handle_key_resolution(&ev.key);
+                    break;
+                case STATE_DEBUG:
+                    handle_key_debug(&ev.key);
+                    break;
+                case STATE_LOGVIEW:
+                    handle_key_logview(&ev.key);
                     break;
                 }
                 if (ev.type == SDL_KEYDOWN) break; /* one event per frame */

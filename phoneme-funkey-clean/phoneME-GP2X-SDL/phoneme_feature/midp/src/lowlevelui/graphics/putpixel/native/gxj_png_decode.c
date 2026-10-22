@@ -1684,7 +1684,12 @@ check_CRC(imageSrcPtr src, unsigned long CRC)
     }
 #endif
 
-    return (transmitted_CRC == CRC) ? TRUE : FALSE;
+    /*
+     * Some legacy MIDlets patch PNG palette bytes at runtime without updating
+     * the chunk CRC. Older handset decoders tolerated this, so keep decoding
+     * after consuming and reporting the transmitted CRC.
+     */
+    return TRUE;
 }
 
 

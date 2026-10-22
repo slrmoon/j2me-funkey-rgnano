@@ -1,9 +1,17 @@
 package com.nttdocomo.ui;
 
 public interface MediaImage extends MediaResource {
-    void use();
+    String MP4_VIDEOTRACK = "mp4.videotrack";
+    String MP4_AUDIOTRACK = "mp4.audiotrack";
+    String MP4_TEXTTRACK = "mp4.texttrack";
 
-    void dispose();
+    int getWidth();
+
+    int getHeight();
 
     Image getImage();
+
+    ExifData getExifData();
+
+    void setExifData(ExifData exifData);
 }

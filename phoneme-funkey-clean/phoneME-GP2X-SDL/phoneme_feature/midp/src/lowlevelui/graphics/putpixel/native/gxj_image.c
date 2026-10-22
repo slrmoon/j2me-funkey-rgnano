@@ -643,6 +643,104 @@ create_transformed_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, 
   } /* for y */
 }
 
+/*
+ * Blend one source pixel with coverage a (0..255) onto *d.  Same math as
+ * the original per-pixel loop: alpha <= 3 is treated as transparent, 0xff
+ * as opaque, everything else blended at 5/6-bit precision.
+ */
+static inline void
+blend_pixel(gxj_pixel_type *d, gxj_alpha_type *da, gxj_pixel_type s, unsigned a) {
+    if (a == 0xff) {
+        *d = s;
+        if (da != NULL) {
+            *da = 0xff;
+        }
+    } else if (a > 0x3) {
+        unsigned dp = *d;
+        unsigned a2 = a >> 2;
+        unsigned a3 = a >> 3;
+        unsigned r = ((s >> 11) * a3 + (dp >> 11) * (31 - a3)) >> 5;
+        unsigned g = (((s >> 5) & 0x3F) * a2 + ((dp >> 5) & 0x3F) * (63 - a2)) >> 6;
+        unsigned b = ((s & 0x1F) * a3 + (dp & 0x1F) * (31 - a3)) >> 5;
+        *d = (gxj_pixel_type)((r << 11) | (g << 5) | b);
+        if (da != NULL) {
+            *da = (gxj_alpha_type)(a + ((*da) * (255 - a) + 127) / 255);
+        }
+    }
+}
+
+/*
+ * Copy a w x h block to the destination.  The source is walked with
+ * colStep / rowStep (in pixels), which covers every MIDP transform without
+ * building a transformed copy first.  srcA may be NULL (opaque source),
+ * dstA may be NULL (destination without alpha channel).
+ */
+static void
+blit_block(gxj_pixel_type *dst, gxj_alpha_type *dstA, int dstWidth,
+           const gxj_pixel_type *src, const gxj_alpha_type *srcA,
+           int colStep, int rowStep, int w, int h) {
+    int y;
+
+    for (y = 0; y < h; y++) {
+        int x;
+
+        if (srcA == NULL) {
+            if (colStep == 1) {
+                memcpy(dst, src, w * sizeof (gxj_pixel_type));
+            } else {
+                const gxj_pixel_type *s = src;
+                for (x = 0; x < w; x++, s += colStep) {
+                    dst[x] = *s;
+                }
+            }
+            if (dstA != NULL) {
+                memset(dstA, 0xff, w);
+            }
+        } else if (colStep == 1) {
+            x = 0;
+            while (x < w) {
+                if (x + 4 <= w) {
+                    unsigned int a4;
+                    memcpy(&a4, srcA + x, 4);
+                    if (a4 == 0) {          /* 4 transparent pixels */
+                        x += 4;
+                        continue;
+                    }
+                    if (a4 == 0xffffffffu) { /* 4 opaque pixels */
+                        memcpy(dst + x, src + x, 4 * sizeof (gxj_pixel_type));
+                        if (dstA != NULL) {
+                            memset(dstA + x, 0xff, 4);
+                        }
+                        x += 4;
+                        continue;
+                    }
+                }
+                blend_pixel(dst + x, dstA == NULL ? NULL : dstA + x,
+                            src[x], srcA[x]);
+                x++;
+            }
+        } else {
+            const gxj_pixel_type *s = src;
+            const gxj_alpha_type *sa = srcA;
+            for (x = 0; x < w; x++, s += colStep, sa += colStep) {
+                unsigned a = *sa;
+                if (a > 0x3) {
+                    blend_pixel(dst + x, dstA == NULL ? NULL : dstA + x, *s, a);
+                }
+            }
+        }
+
+        dst += dstWidth;
+        if (dstA != NULL) {
+            dstA += dstWidth;
+        }
+        src += rowStep;
+        if (srcA != NULL) {
+            srcA += rowStep;
+        }
+    }
+}
+
 /**
  * Renders the contents of the specified region of this
  * mutable image onto the destination specified.
@@ -669,6 +767,10 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
     int clipX2 = clip[2];
     int clipY2 = clip[3];
     int diff;
+    int outW, outH;           /* size of the region after the transform */
+    int c0, r0;               /* first visible column/row of that region */
+    int i, j;                 /* matching source offset inside the region */
+    int colStep, rowStep, sw;
     gxj_screen_buffer newSrc;
 
     /*
@@ -678,72 +780,57 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
     if (clipX1 < 0) {
         clipX1 = 0;
     }
-
     if (clipY1 < 0) {
         clipY1 = 0;
     }
-
     diff = clipX2 - dest->width;
     if (diff > 0) {
         clipX2 -= diff;
     }
-
     diff = clipY2 - dest->height;
     if (diff > 0) {
         clipY2 -= diff;
     }
-
     if (clipX1 >= clipX2 || clipY1 >= clipY2) {
-        /* Nothing to do. */
         return;
     }
 
     /*
-     * Don't let any bad source numbers into the transform or copy,
-     * clip any pixels outside of the source buffer to prevent over or
+     * Clip any pixels outside of the source buffer to prevent over or
      * under reading the source buffer.
      */
     if (x_src < 0) {
         width += x_src;
         x_src = 0;
     }
-
     if (y_src < 0) {
         height += y_src;
         y_src = 0;
     }
-
     diff = (x_src + width) - src->width;
     if (diff > 0) {
         width -= diff;
     }
-
     diff = (y_src + height) - src->height;
     if (diff > 0) {
         height -= diff;
     }
-
     if (width <= 0 || height <= 0) {
-        /* Nothing to do. */
         return;
     }
 
     /*
-     * check if the source and destination are the same image,
-     * or a transform is needed
+     * Copying an image onto itself may overlap: go through a temporary
+     * copy of the region in that case (rare: copyArea and the like).
      */
     newSrc.pixelData = NULL;
     newSrc.alphaData = NULL;
-    if (dest == src || transform != 0) {
-        /*
-         * create a new image that is a copy of the region with transform
-         * applied
-         */
+    if (dest == src) {
         newSrc.pixelData =
             (gxj_pixel_type *)midpMalloc(width * height * sizeof (gxj_pixel_type));
         if (newSrc.pixelData == NULL) {
-            REPORT_ERROR(LC_LOWUI, "Out of memory error, copyImageRegion (pixelData)\n"); 
-            return ; 
+            REPORT_ERROR(LC_LOWUI, "Out of memory error, copyImageRegion (pixelData)\n");
+            return;
         }
         if (src->alphaData != NULL) {
             newSrc.alphaData =
@@ -751,135 +838,81 @@ copy_imageregion(gxj_screen_buffer* src, gxj_screen_buffer* dest, const jshort *
             if (newSrc.alphaData == NULL) {
                 midpFree(newSrc.pixelData);
                 REPORT_ERROR(LC_LOWUI, "Out of memory error, copyImageRegion (Alpha)\n");
-                return ;
+                return;
             }
         }
-        
         create_transformed_imageregion(src, &newSrc, x_src, y_src, width,
-				       height, transform);
-        
-        /* set the new image as the source */
+                                       height, 0);
         src = &newSrc;
         x_src = 0;
         y_src = 0;
+    }
 
-        if (transform & TRANSFORM_INVERTED_AXES) {
-            // exchange the width and height
-            width = src->width;
-            height = src->height;
-        }
+    if (transform & TRANSFORM_INVERTED_AXES) {
+        outW = height;
+        outH = width;
+    } else {
+        outW = width;
+        outH = height;
     }
 
     /* Apply the clip region to the destination region */
+    c0 = 0;
+    r0 = 0;
     diff = clipX1 - x_dest;
     if (diff > 0) {
-        x_src += diff;
-        width -= diff;
+        c0 = diff;
+        outW -= diff;
         x_dest = clipX1;
     }
-
     diff = clipY1 - y_dest;
     if (diff > 0) {
-        y_src += diff;
-        height -= diff;
+        r0 = diff;
+        outH -= diff;
         y_dest = clipY1;
     }
-
-    diff = (x_dest + width) - clipX2;
+    diff = (x_dest + outW) - clipX2;
     if (diff > 0) {
-        width -= diff;
+        outW -= diff;
+    }
+    diff = (y_dest + outH) - clipY2;
+    if (diff > 0) {
+        outH -= diff;
     }
 
-    diff = (y_dest + height) - clipY2;
-    if (diff > 0) {
-        height -= diff;
-    }
-
-    if (width > 0) {
-        int rowsCopied;
-        gxj_pixel_type* pDest = dest->pixelData + (y_dest * dest->width) + x_dest;
-        gxj_pixel_type* pSrc = src->pixelData + (y_src * src->width) + x_src;
-        gxj_pixel_type* limit;
-        int destWidthDiff = dest->width - width;
-        int srcWidthDiff = src->width - width;
-        int r1, g1, b1, a2, a3, r2, b2, g2;
-
-        if (src->alphaData != NULL) {
-            unsigned char *pSrcAlpha = src->alphaData + (y_src * src->width) + x_src;
-            unsigned char *pDestAlpha = dest->alphaData == NULL
-                ? NULL : dest->alphaData + (y_dest * dest->width) + x_dest;
-
-            /* copy the source to the destination */
-            for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
-                for (limit = pDest + width; pDest < limit; pDest++, pSrc++, pSrcAlpha++) {
-                    if ((*pSrcAlpha) == 0xFF) {
-                        CHECK_PTR_CLIP(dest, pDest);
-                        *pDest = *pSrc;
-                        if (pDestAlpha != NULL) {
-                            *pDestAlpha = 0xff;
-                        }
-                    }
-                    else if (*pSrcAlpha > 0x3) {
-                        r1 = (*pSrc >> 11);
-                        g1 = ((*pSrc >> 5) & 0x3F);
-                        b1 = (*pSrc & 0x1F);
-
-                        r2 = (*pDest >> 11);
-                        g2 = ((*pDest >> 5) & 0x3F);
-                        b2 = (*pDest & 0x1F);
-
-                        a2 = *pSrcAlpha >> 2;
-                        a3 = *pSrcAlpha >> 3;
-
-                        r1 = (r1 * a3 + r2 * (31 - a3)) >> 5;
-                        g1 = (g1 * a2 + g2 * (63 - a2)) >> 6;
-                        b1 = (b1 * a3 + b2 * (31 - a3)) >> 5;
-
-                        *pDest = (gxj_pixel_type)((r1 << 11) | (g1 << 5) | (b1));
-                        if (pDestAlpha != NULL) {
-                            *pDestAlpha = (unsigned char)(*pSrcAlpha
-                                + ((*pDestAlpha) * (255 - *pSrcAlpha) + 127) / 255);
-                        }
-                    }
-                    if (pDestAlpha != NULL) {
-                        pDestAlpha++;
-                    }
-                }
-
-                pDest += destWidthDiff;
-                pSrc += srcWidthDiff;
-                pSrcAlpha += srcWidthDiff;
-                if (pDestAlpha != NULL) {
-                    pDestAlpha += destWidthDiff;
-                }
-            }
+    if (outW > 0 && outH > 0) {
+        /*
+         * Map output pixel (c0, r0) back into the source region and work out
+         * how the source pointer moves per output column and row.
+         */
+        sw = src->width;
+        if (transform & TRANSFORM_INVERTED_AXES) {
+            i = (transform & TRANSFORM_X_FLIP) ? width - 1 - r0 : r0;
+            j = (transform & TRANSFORM_Y_FLIP) ? height - 1 - c0 : c0;
+            colStep = (transform & TRANSFORM_Y_FLIP) ? -sw : sw;
+            rowStep = (transform & TRANSFORM_X_FLIP) ? -1 : 1;
         } else {
-            unsigned char *pDestAlpha = dest->alphaData == NULL
-                ? NULL : dest->alphaData + (y_dest * dest->width) + x_dest;
+            i = (transform & TRANSFORM_X_FLIP) ? width - 1 - c0 : c0;
+            j = (transform & TRANSFORM_Y_FLIP) ? height - 1 - r0 : r0;
+            colStep = (transform & TRANSFORM_X_FLIP) ? -1 : 1;
+            rowStep = (transform & TRANSFORM_Y_FLIP) ? -sw : sw;
+        }
 
-            /* copy the source to the destination */
-            for (rowsCopied = 0; rowsCopied < height; rowsCopied++) {
-                for (limit = pDest + width; pDest < limit; pDest++, pSrc++) {
-                    CHECK_PTR_CLIP(dest, pDest);
-                    *pDest = *pSrc;
-                    if (pDestAlpha != NULL) {
-                        *pDestAlpha++ = 0xff;
-                    }
-                }
-
-                pDest += destWidthDiff;
-                pSrc += srcWidthDiff;
-                if (pDestAlpha != NULL) {
-                    pDestAlpha += destWidthDiff;
-                }
-            }
+        {
+            int srcOff = (y_src + j) * sw + (x_src + i);
+            int dstOff = y_dest * dest->width + x_dest;
+            blit_block(dest->pixelData + dstOff,
+                       dest->alphaData == NULL ? NULL : dest->alphaData + dstOff,
+                       dest->width,
+                       src->pixelData + srcOff,
+                       src->alphaData == NULL ? NULL : src->alphaData + srcOff,
+                       colStep, rowStep, outW, outH);
         }
     }
 
     if (newSrc.pixelData != NULL) {
         midpFree(newSrc.pixelData);
     }
-
     if (newSrc.alphaData != NULL) {
         midpFree(newSrc.alphaData);
     }
