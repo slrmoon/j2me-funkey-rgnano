@@ -650,6 +650,7 @@ struct Sampler {
     int n2, n4, cap2, cap4;
     float smpPosition;
     int vibPhase;
+    int steps;              /* chip ticks per computed sample: 1 exact, 2 fast */
     float volFade, volLevel, volOut;
     int32_t *wavRam;
     int wavRamLen;
@@ -741,7 +742,7 @@ static void note_on_volume(Note *n, const Chan *c)
 static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
 {
     const Alg *alg = note->alg;
-    int x, y;
+    int x, y, step;
     if (op->envStage == ENV_DONE) return 0;
     if (!alg->isWave) {
         int32_t xv;
@@ -764,7 +765,7 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
         if (samples != NULL && op->wavSample < alg->ep) {
             x = (int) fd_floor(op->wavSample);
             op->fb0 = x < slen ? samples[x] * WAVE_ENV[op->envOut] / 32767 : 0;
-            op->wavSample += alg->wavAdvance;
+            op->wavSample += alg->wavAdvance * s->steps;
             if (op->wavSample >= alg->ep) {
                 if (alg->lp < alg->ep) {
                     op->wavSample = fd_fmodf_pos(op->wavSample - alg->lp, (float) (alg->ep - alg->lp)) + alg->lp;
@@ -776,6 +777,8 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
         } else
             op->fb0 = 0;
     }
+    for (step = 0; step < s->steps; step++) {
+    if (op->envStage == ENV_DONE) break;
     x = op->envRate == 0 ? 0 : jmin(63, (op->envRate << 2) + op->envRof);
     op->envPhase += op->envRate == 0 ? 0 : (4 | (x & 3)) << (x >> 2);
     y = op->envPhase >> 15;
@@ -815,15 +818,17 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
         op->amPhase = (op->amPhase + AM_LFO_B[alg->lfo]) % 0x34000;
     }
     op->envOut = jmin(jmax(op->envOut, 0), 511);
-    if (alg->isWave) return op->fb0;
+    if (alg->isWave) continue;
     op->oscPhase = (int32_t) ((uint32_t) op->oscPhase
                               + (uint32_t) (((note->fNumber << note->block >> 1) * MULTIS[op->d.multi]) >> 1));
     if (op->d.evb) {
         /* vibrato (disabled in the Keitai Wiki original; the MA-3 presets
          * use EVB operators heavily and the phones do vibrate them) */
-        int32_t sign = (int32_t) ((uint32_t) s->vibPhase << 19) >> 31;
-        int sh = 9 - op->d.dvb + ((s->vibPhase >> 10 & 3) == 3 ? 1 : 0);
+        int vp = s->vibPhase + step;
+        int32_t sign = (int32_t) ((uint32_t) vp << 19) >> 31;
+        int sh = 9 - op->d.dvb + ((vp >> 10 & 3) == 3 ? 1 : 0);
         op->oscPhase = (int32_t) ((uint32_t) op->oscPhase + (uint32_t) (sign ^ (note->fNumber >> sh)));
+    }
     }
     return op->fb0;
 }
@@ -915,6 +920,10 @@ static int note_render(Note *n, Sampler *s)
     s->smpNext[1] += sample * n->ampRight;
     n->ampLeft = ease(s, n->ampLeft, tgtLeft);
     n->ampRight = ease(s, n->ampRight, tgtRight);
+    if (s->steps == 2) {
+        n->ampLeft = ease(s, n->ampLeft, tgtLeft);
+        n->ampRight = ease(s, n->ampRight, tgtRight);
+    }
     return !n->playing && n->ampLeft == 0 && n->ampRight == 0;
 }
 
@@ -962,7 +971,15 @@ static void sampler_init(Sampler *s, float rate)
 {
     memset(s, 0, sizeof(*s));
     s->sampleRate = rate;
-    s->smpWidth = MA3_RATE / rate;
+    /* The chip runs at 49.5 kHz. Fast mode (default) computes every other
+     * chip sample and advances the state two ticks: half the CPU, output
+     * still well above our 22 kHz. PHONEME_MLD_EXACT=1: bit-exact with the
+     * reference (used by the tests in tools/doja/mldref). */
+    {
+        const char *e = getenv("PHONEME_MLD_EXACT");
+        s->steps = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 2;
+    }
+    s->smpWidth = MA3_RATE / s->steps / rate;
     s->volRate = 1 / (rate * 0.01f);
     sampler_reset(s);
 }
@@ -1285,8 +1302,8 @@ static void sampler_sample(Sampler *s)
             }
         }
     }
-    s->amPhase = (s->amPhase + 1) % 0x34000;
-    s->vibPhase++;
+    s->amPhase = (s->amPhase + s->steps) % 0x34000;
+    s->vibPhase += s->steps;
 }
 
 static void sampler_render(Sampler *s, float *out, int frames)

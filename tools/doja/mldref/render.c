@@ -7,6 +7,7 @@
 static void w32(FILE *f, unsigned v) { fputc(v & 255, f); fputc(v >> 8 & 255, f); fputc(v >> 16 & 255, f); fputc(v >> 24 & 255, f); }
 static void w16(FILE *f, unsigned v) { fputc(v & 255, f); fputc(v >> 8 & 255, f); }
 int main(int argc, char **argv) {
+  setenv("PHONEME_MLD_EXACT", getenv("FAST") ? "0" : "1", 1);   /* FAST=1: device mode */
   FILE *f = fopen(argv[1], "rb"); long n; unsigned char *d; FkaMld *p; float buf[4096]; int rate = argc > 3 ? atoi(argv[3]) : 22050;
   double maxs = argc > 4 ? atof(argv[4]) : 30; long total = 0, max; short *pcm; long pc = 0;
   fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET); d = malloc(n); fread(d, 1, n, f); fclose(f);
