@@ -15,7 +15,7 @@
 ## Tested
 - Synthetic Hello app: paint, keypad, Japanese text OK (240x240 and 120x130).
 - DoJa-1942 (github hectormoralespiloni/DoJa-1942, homebrew) boots to the intro screen; gameplay screenshots not yet checked.
-- No real commercial games tested yet (user's games were not attached).
+- Rockman Puzzle Battle (CAPCOM 2011, adf56, 240x240, with .sp): loading screen, title, stage select, gameplay with key input all work in the emulator; scratchpad reads OK, 6 MLD tunes converted, no unimplemented API hit, no exceptions.
 
 ## Next
 1. Run user's game corpus, compatibility table, fix most-hit APIs (grep log for `DoJa: unimplemented`, exceptions).
