@@ -742,7 +742,8 @@ static void note_on_volume(Note *n, const Chan *c)
 static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
 {
     const Alg *alg = note->alg;
-    int x, y, step;
+    int x, y;
+    const int k = s->steps;
     if (op->envStage == ENV_DONE) return 0;
     if (!alg->isWave) {
         int32_t xv;
@@ -777,10 +778,9 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
         } else
             op->fb0 = 0;
     }
-    for (step = 0; step < s->steps; step++) {
-    if (op->envStage == ENV_DONE) break;
+    /* fast mode: one pass advances k chip ticks (rates scaled by k) */
     x = op->envRate == 0 ? 0 : jmin(63, (op->envRate << 2) + op->envRof);
-    op->envPhase += op->envRate == 0 ? 0 : (4 | (x & 3)) << (x >> 2);
+    op->envPhase += op->envRate == 0 ? 0 : ((4 | (x & 3)) << (x >> 2)) * k;
     y = op->envPhase >> 15;
     op->envPhase &= 0x7FFF;
     switch (op->envStage) {
@@ -815,20 +815,19 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
     op->envOut = op->envLevel + op->kslOut + (op->d.tl << 2);
     if (op->d.eam) {
         op->envOut += AM_LFO_A[op->amPhase >> 12] << op->d.dam >> 2;
-        op->amPhase = (op->amPhase + AM_LFO_B[alg->lfo]) % 0x34000;
+        op->amPhase = (op->amPhase + AM_LFO_B[alg->lfo] * k) % 0x34000;
     }
     op->envOut = jmin(jmax(op->envOut, 0), 511);
-    if (alg->isWave) continue;
+    if (alg->isWave) return op->fb0;
     op->oscPhase = (int32_t) ((uint32_t) op->oscPhase
-                              + (uint32_t) (((note->fNumber << note->block >> 1) * MULTIS[op->d.multi]) >> 1));
+                              + (uint32_t) ((((note->fNumber << note->block >> 1) * MULTIS[op->d.multi]) >> 1) * k));
     if (op->d.evb) {
         /* vibrato (disabled in the Keitai Wiki original; the MA-3 presets
          * use EVB operators heavily and the phones do vibrate them) */
-        int vp = s->vibPhase + step;
+        int vp = s->vibPhase;
         int32_t sign = (int32_t) ((uint32_t) vp << 19) >> 31;
         int sh = 9 - op->d.dvb + ((vp >> 10 & 3) == 3 ? 1 : 0);
-        op->oscPhase = (int32_t) ((uint32_t) op->oscPhase + (uint32_t) (sign ^ (note->fNumber >> sh)));
-    }
+        op->oscPhase = (int32_t) ((uint32_t) op->oscPhase + (uint32_t) ((sign ^ (note->fNumber >> sh)) * k));
     }
     return op->fb0;
 }
@@ -897,11 +896,11 @@ static float note_sample_fm(Note *n, Sampler *s)
 static float ease(const Sampler *s, float level, float target)
 {
     if (level < target) {
-        float v = level + s->volRate;
+        float v = level + s->volRate * s->steps;
         return v < target ? v : target;
     }
     if (level > target) {
-        float v = level - s->volRate;
+        float v = level - s->volRate * s->steps;
         return v > target ? v : target;
     }
     return level;
@@ -920,10 +919,6 @@ static int note_render(Note *n, Sampler *s)
     s->smpNext[1] += sample * n->ampRight;
     n->ampLeft = ease(s, n->ampLeft, tgtLeft);
     n->ampRight = ease(s, n->ampRight, tgtRight);
-    if (s->steps == 2) {
-        n->ampLeft = ease(s, n->ampLeft, tgtLeft);
-        n->ampRight = ease(s, n->ampRight, tgtRight);
-    }
     return !n->playing && n->ampLeft == 0 && n->ampRight == 0;
 }
 
