@@ -52,3 +52,8 @@
 - Scratchpad streams buffered (DataInputStream read byte per native call, a commit per written byte); media reads stop at the format end.
 - Diagnostics: `-Ddoja.stats=1` (frames/s), `-Ddoja.trace=1` (also jar entries, image decode times), `PHONEME_PROFILE=1`.
 - Open: the game's main loop now runs interpreted (its OSR compile still fails, reason not found yet); MA-3 synth CPU on the device unmeasured (x86: 2-10% of a core per song).
+
+## Synth CPU (2026-10-22, round 3)
+- Device log: once music starts the VM thread gets ~1.2 s of CPU per 10 s while the process uses 70-97%: the MA-3 synth (audio thread) eats the CPU; Rockman keeps ~40 FM voices sounding, 4 operators each, at the chip rate 49.5 kHz.
+- Test switch: `PHONEME_MLD_MIDI=1` or the file `/mnt/FunKey/.pm/mld-midi` turns native MLD off (DoJa falls back to MLD -> MIDI -> EAS). User confirmed: no lag with it.
+- Fast mode (default): one synth pass per two chip ticks (envelope/LFO/phase rates scaled), 1.8-1.9x faster (x86 and qemu-arm). `PHONEME_MLD_EXACT=1` keeps the bit-exact path (tools set it; all 44 MLDs still identical). Fast vs exact spectra below 8 kHz correlate 0.99+ (one file 0.88).
