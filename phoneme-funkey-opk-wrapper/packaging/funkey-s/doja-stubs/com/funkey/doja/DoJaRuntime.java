@@ -248,10 +248,82 @@ public final class DoJaRuntime implements Runnable {
         if (TRACE) {
             System.out.println("DoJa trace: present " + Thread.currentThread());
         }
-        DoJaHost h = host;
-        if (h != null) {
-            h.repaint();
-            h.serviceRepaints();
+        if (host == null) {
+            return;
+        }
+        /* asynchronous, like a handset: unlock() does not wait for the
+         * display. The finished frame is copied now and shown by the
+         * presenter thread at most once per FRAME_MS, so the native frame
+         * limiter (which stops every Java thread while it sleeps) has
+         * nothing to wait for; a loading loop with an unlock per image
+         * used to spend most of its time there. */
+        com.nttdocomo.ui.Frame f = com.nttdocomo.ui.Display.getCurrent();
+        if (f != null) {
+            com.nttdocomo.ui.FkBridge.snapshot(f);
+        }
+        if (STATS) {
+            statFrames++;
+            long now = System.currentTimeMillis();
+            if (statStart == 0) {
+                statStart = now;
+            } else if (now - statStart >= 5000) {
+                System.out.println("DoJa stats: " + (statFrames * 1000 / (now - statStart))
+                        + " frames/s, free " + (Runtime.getRuntime().freeMemory() >> 10) + " KB");
+                statFrames = 0;
+                statStart = now;
+            }
+        }
+        synchronized (presentLock) {
+            presentPending = true;
+            if (presenter == null) {
+                presenter = new Thread() {
+                    public void run() {
+                        presenterLoop();
+                    }
+                };
+                presenter.start();
+            }
+            presentLock.notify();
+        }
+    }
+
+    private static final int FRAME_MS = 33;
+    private static final boolean STATS = "1".equals(System.getProperty("doja.stats"));
+    private static int statFrames;
+    private static long statStart;
+    private static final Object presentLock = new Object();
+    private static boolean presentPending;
+    private static Thread presenter;
+
+    private static void presenterLoop() {
+        long lastShown = 0;
+        while (!terminated) {
+            synchronized (presentLock) {
+                while (!presentPending && !terminated) {
+                    try {
+                        presentLock.wait();
+                    } catch (InterruptedException ie) {
+                        return;
+                    }
+                }
+            }
+            long wait = lastShown + FRAME_MS - System.currentTimeMillis();
+            if (wait > 0) {
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException ie) {
+                    return;
+                }
+            }
+            synchronized (presentLock) {
+                presentPending = false;
+            }
+            DoJaHost h = host;
+            if (h != null) {
+                h.repaint();
+                h.serviceRepaints();
+            }
+            lastShown = System.currentTimeMillis();
         }
     }
 

@@ -148,37 +148,171 @@ public final class MediaManager {
      * scratchpad; stop at the end of the media when the format tells it.
      */
     private static byte[] readScratchMedia(InputStream in) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] head = new byte[8];
-        int got = 0;
-        while (got < 8) {
-            int n = in.read(head, got, 8 - got);
-            if (n < 0) {
-                break;
+        byte[] buf = new byte[8192];
+        int len = 0, end = -1;
+        while (true) {
+            if (len == buf.length) {
+                byte[] nb = new byte[buf.length * 2];
+                System.arraycopy(buf, 0, nb, 0, len);
+                buf = nb;
             }
-            got += n;
-        }
-        out.write(head, 0, got);
-        long limit = Long.MAX_VALUE;
-        if (got == 8 && head[0] == 'm' && head[1] == 'e' && head[2] == 'l' && head[3] == 'o') {
-            limit = (((head[4] & 255L) << 24) | ((head[5] & 255) << 16)
-                    | ((head[6] & 255) << 8) | (head[7] & 255));
-        }
-        byte[] buf = new byte[1024];
-        long total = 0;
-        while (total < limit) {
-            int want = buf.length;
-            if (limit - total < want) {
-                want = (int) (limit - total);
-            }
-            int n = in.read(buf, 0, want);
+            int n = in.read(buf, len, buf.length - len);
             if (n <= 0) {
                 break;
             }
-            out.write(buf, 0, n);
-            total += n;
+            len += n;
+            end = mediaEnd(buf, len);
+            if (end >= 0) {
+                break;
+            }
+            if (end == -2) {
+                end = -1;   /* unknown format: to the end of the scratchpad */
+            }
         }
-        return out.toByteArray();
+        if (end < 0 || end > len) {
+            end = len;
+        }
+        byte[] out = new byte[end];
+        System.arraycopy(buf, 0, out, 0, end);
+        return out;
+    }
+
+    private static int u16be(byte[] b, int p) {
+        return (b[p] & 255) << 8 | (b[p + 1] & 255);
+    }
+
+    private static int u32be(byte[] b, int p) {
+        return (b[p] & 255) << 24 | (b[p + 1] & 255) << 16 | (b[p + 2] & 255) << 8 | (b[p + 3] & 255);
+    }
+
+    /**
+     * Length of the media at the start of b when its end is already in the
+     * first len bytes, -1 when more bytes are needed, -2 when the format
+     * has no known end.
+     */
+    static int mediaEnd(byte[] b, int len) {
+        if (len < 8) {
+            return -1;
+        }
+        int b0 = b[0] & 255, b1 = b[1] & 255;
+        if (b0 == 'm' && b1 == 'e' && b[2] == 'l' && b[3] == 'o') {
+            return 8 + u32be(b, 4);
+        }
+        if (b0 == 'M' && b1 == 'M' && b[2] == 'M' && b[3] == 'D') {
+            return 8 + u32be(b, 4);
+        }
+        if (b0 == 'R' && b1 == 'I' && b[2] == 'F' && b[3] == 'F') {
+            return 8 + ((b[4] & 255) | (b[5] & 255) << 8 | (b[6] & 255) << 16 | (b[7] & 255) << 24);
+        }
+        if (b0 == 'G' && b1 == 'I' && b[2] == 'F') {
+            return gifEnd(b, len);
+        }
+        if (b0 == 0x89 && b1 == 'P' && b[2] == 'N' && b[3] == 'G') {
+            int p = 8;
+            while (p + 12 <= len) {
+                int n = u32be(b, p);
+                if (n < 0) {
+                    return -2;
+                }
+                if (b[p + 4] == 'I' && b[p + 5] == 'E' && b[p + 6] == 'N' && b[p + 7] == 'D') {
+                    return p + 12;
+                }
+                p += 12 + n;
+            }
+            return -1;
+        }
+        if (b0 == 0xFF && b1 == 0xD8) {
+            return jpegEnd(b, len);
+        }
+        return -2;
+    }
+
+    private static int gifEnd(byte[] b, int len) {
+        if (len < 13) {
+            return -1;
+        }
+        int p = 13;
+        int flags = b[10] & 255;
+        if ((flags & 0x80) != 0) {
+            p += 3 << ((flags & 7) + 1);
+        }
+        while (p < len) {
+            int t = b[p] & 255;
+            if (t == 0x3B) {
+                return p + 1;
+            } else if (t == 0x21) {
+                p += 2;   /* introducer, label, then sub-blocks */
+            } else if (t == 0x2C) {
+                if (p + 10 > len) {
+                    return -1;
+                }
+                int lf = b[p + 9] & 255;
+                p += 10;
+                if ((lf & 0x80) != 0) {
+                    p += 3 << ((lf & 7) + 1);
+                }
+                p += 1;   /* LZW minimum code size */
+            } else {
+                return -2;   /* broken: read everything */
+            }
+            while (true) {
+                if (p >= len) {
+                    return -1;
+                }
+                int n = b[p] & 255;
+                p += 1 + n;
+                if (n == 0) {
+                    break;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static int jpegEnd(byte[] b, int len) {
+        int p = 2;
+        while (true) {
+            while (p < len && (b[p] & 255) != 0xFF) {
+                p++;
+            }
+            while (p < len && (b[p] & 255) == 0xFF) {
+                p++;   /* fill bytes */
+            }
+            if (p >= len) {
+                return -1;
+            }
+            int m = b[p] & 255;
+            p++;
+            if (m == 0xD9) {
+                return p;
+            }
+            if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) {
+                continue;   /* no length */
+            }
+            if (p + 2 > len) {
+                return -1;
+            }
+            int n = u16be(b, p);
+            p += n;
+            if (m == 0xDA) {
+                /* entropy-coded data: the next marker that is not a stuffed
+                 * zero or a restart marker ends it */
+                while (true) {
+                    while (p < len && (b[p] & 255) != 0xFF) {
+                        p++;
+                    }
+                    if (p + 1 >= len) {
+                        return -1;
+                    }
+                    int q = b[p + 1] & 255;
+                    if (q == 0 || (q >= 0xD0 && q <= 0xD7) || q == 0xFF) {
+                        p += q == 0xFF ? 1 : 2;
+                        continue;
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -265,8 +399,14 @@ public final class MediaManager {
                 return;
             }
             byte[] b = bytes();
+            long t0 = com.funkey.doja.DoJaRuntime.TRACE ? System.currentTimeMillis() : 0;
             try {
                 image = Image.decode(b);
+                if (com.funkey.doja.DoJaRuntime.TRACE) {
+                    System.out.println("DoJa trace: image " + name + " " + b.length + " bytes "
+                            + image.getWidth() + "x" + image.getHeight() + " "
+                            + (System.currentTimeMillis() - t0) + " ms");
+                }
             } catch (IOException e) {
                 throw new UIException(UIException.UNSUPPORTED_FORMAT, (name == null ? "image" : name) + ": " + e);
             } catch (IllegalArgumentException e) {

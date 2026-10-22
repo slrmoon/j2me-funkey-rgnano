@@ -1881,6 +1881,7 @@ static void evt_ext_b(FkaMld *p, PTrack *t, int index, const MEvent *e)
                 for (i = 0; i < p->mld.ntracks; i++)
                     set_track_offset(p, &p->tr[i], p->tr[i].cuepoint, i);
                 p->shift += p->position - p->loopStart;
+                p->position = p->loopStart;   /* the timeline restarts there */
                 p->jumped = 1;
             } else
                 set_track_offset(p, t, t->offset + 1, index);
@@ -2215,15 +2216,17 @@ long long fka_mld_count_frames(const uint8_t *data, int len, float sample_rate)
 {
     FkaMld *p = fka_mld_open(data, len, sample_rate);
     long long total = 0;
-    int guard = 0;
+    /* track-control repeats can run forever (looping BGM): give up after
+     * ten minutes and report an unknown length */
+    const long long cap = (long long) (600 * sample_rate);
     if (p == NULL) return -1;
     p->seeking = 1;
-    while (guard++ < 1000000) {
+    while (total < cap) {
         int n = fka_mld_render(p, NULL, 4096);
         if (n < 0) break;
         total += n;
         if (n < 4096) break;
     }
     fka_mld_close(p);
-    return total;
+    return total >= cap ? 0 : total;
 }

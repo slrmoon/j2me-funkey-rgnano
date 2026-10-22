@@ -857,8 +857,20 @@ void Java_java_lang_Runtime_exitInternal(JVM_SINGLE_ARG_TRAPS) {
   }
 }
 
+// Handset games call System.gc() after every image they load (a full GC
+// took no time on a 1 MB heap); on our heap each one costs tens of ms and a
+// loading loop took seconds. At most one full collection per interval, the
+// calls in between collect the young generation only.
 void Java_java_lang_Runtime_gc(JVM_SINGLE_ARG_TRAPS) {
-  ObjectHeap::full_collect(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
+  static jlong last_full = 0;
+  const jlong now = Os::java_time_millis();
+  if (now - last_full >= 1000 || now < last_full) {
+    ObjectHeap::full_collect(JVM_SINGLE_ARG_NO_CHECK_AT_BOTTOM);
+    last_full = Os::java_time_millis();
+  } else {
+    ObjectHeap::safe_collect(1 JVM_NO_CHECK);
+    Thread::clear_current_pending_exception();
+  }
 }
 
 jlong Java_java_lang_Runtime_freeMemory() {

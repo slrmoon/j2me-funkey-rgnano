@@ -15,6 +15,9 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
     private boolean outputOpen;
     private int remaining;
     private int mode;
+    private ScratchOutputStream out;
+
+    private static final boolean TRACE = "1".equals(System.getProperty("doja.trace"));
 
     public Connection openPrim(String name, int mode, boolean timeouts)
             throws IOException {
@@ -36,7 +39,9 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
         this.mode = mode;
         remaining = length;
         open = true;
-        System.out.println("DoJa scratchpad open pos=" + pos + " length=" + length);
+        if (TRACE) {
+            System.out.println("DoJa scratchpad open pos=" + pos + " length=" + length);
+        }
         return this;
     }
 
@@ -59,7 +64,8 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
             throw new IOException();
         }
         outputOpen = true;
-        return new ScratchOutputStream();
+        out = new ScratchOutputStream();
+        return out;
     }
 
     public DataOutputStream openDataOutputStream() throws IOException {
@@ -68,6 +74,9 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
 
     public void close() throws IOException {
         open = false;
+        if (out != null && outputOpen) {
+            out.flush();   /* the stream may never be closed */
+        }
         closeIfDone();
     }
 
@@ -116,13 +125,36 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
         }
     }
 
+    /*
+     * Buffered: games read their data a few bytes at a time (DataInputStream)
+     * and every native read is a file seek + read. Read-only connections
+     * only, a read-write one shares the file position with its output.
+     */
     private final class ScratchInputStream extends InputStream {
         private boolean closed;
+        private final byte[] buf = mode == Connector.READ ? new byte[4096] : null;
+        private int bufPos, bufLen;
+
+        private boolean fill() throws IOException {
+            int got = readBytes(buf, 0, buf.length);
+            bufPos = 0;
+            bufLen = got < 0 ? 0 : got;
+            return got > 0;
+        }
 
         public int read() throws IOException {
+            if (closed) {
+                throw new IOException();
+            }
+            if (buf != null) {
+                if (bufPos >= bufLen && !fill()) {
+                    return -1;
+                }
+                return buf[bufPos++] & 0xff;
+            }
             byte[] one = new byte[1];
-            int got = read(one, 0, 1);
-            return got < 0 ? -1 : (one[0] & 0xff);
+            int got = readBytes(one, 0, 1);
+            return got <= 0 ? -1 : (one[0] & 0xff);
         }
 
         public int read(byte[] b, int off, int len) throws IOException {
@@ -132,7 +164,33 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
             if (len == 0) {
                 return 0;
             }
-            return readBytes(b, off, len);
+            if (buf == null) {
+                return readBytes(b, off, len);
+            }
+            int done = 0;
+            if (bufPos < bufLen) {
+                done = Math.min(len, bufLen - bufPos);
+                System.arraycopy(buf, bufPos, b, off, done);
+                bufPos += done;
+                if (done == len) {
+                    return done;
+                }
+            }
+            if (len - done >= buf.length) {
+                int got = readBytes(b, off + done, len - done);
+                return got <= 0 ? (done > 0 ? done : -1) : done + got;
+            }
+            if (!fill()) {
+                return done > 0 ? done : -1;
+            }
+            int n = Math.min(len - done, bufLen);
+            System.arraycopy(buf, 0, b, off + done, n);
+            bufPos = n;
+            return done + n;
+        }
+
+        public int available() throws IOException {
+            return buf == null ? 0 : bufLen - bufPos;
         }
 
         public void close() throws IOException {
@@ -144,26 +202,55 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
         }
     }
 
+    /* Buffered, committed on flush/close (a commit per byte made saving
+     * through DataOutputStream crawl). */
     private final class ScratchOutputStream extends OutputStream {
         private boolean closed;
+        private final byte[] buf = new byte[4096];
+        private int len;
 
         public void write(int b) throws IOException {
-            byte[] one = new byte[] { (byte)b };
-            write(one, 0, 1);
-        }
-
-        public void write(byte[] b, int off, int len) throws IOException {
             if (closed) {
                 throw new IOException();
             }
-            writeBytes(b, off, len);
+            if (len == buf.length) {
+                flush();
+            }
+            buf[len++] = (byte) b;
+        }
+
+        public void write(byte[] b, int off, int n) throws IOException {
+            if (closed) {
+                throw new IOException();
+            }
+            if (n > buf.length - len) {
+                flush();
+                if (n >= buf.length) {
+                    writeBytes(b, off, n);
+                    return;
+                }
+            }
+            System.arraycopy(b, off, buf, len, n);
+            len += n;
+        }
+
+        public void flush() throws IOException {
+            if (len > 0) {
+                int n = len;
+                len = 0;
+                writeBytes(buf, 0, n);
+            }
         }
 
         public void close() throws IOException {
             if (!closed) {
-                closed = true;
-                outputOpen = false;
-                closeIfDone();
+                try {
+                    flush();
+                } finally {
+                    closed = true;
+                    outputOpen = false;
+                    closeIfDone();
+                }
             }
         }
     }
