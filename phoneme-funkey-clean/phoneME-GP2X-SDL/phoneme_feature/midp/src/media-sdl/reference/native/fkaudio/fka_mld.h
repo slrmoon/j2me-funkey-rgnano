@@ -18,7 +18,8 @@ int fka_mld_is_silent(FkaMld *p);
  * gives the frames jumped back (0 when none), to rebase sample positions. */
 void fka_mld_set_loop(FkaMld *p, int enabled);
 long long fka_mld_take_shift(FkaMld *p);
-/* Frames until the last event (no synthesis, no release tail, no loops). */
+/* Frames until the last event (no synthesis, no release tail, no loops);
+ * 0 when it plays for ever (endless track-control repeats), -1 on error. */
 long long fka_mld_count_frames(const uint8_t *data, int len, float sample_rate);
 
 #endif

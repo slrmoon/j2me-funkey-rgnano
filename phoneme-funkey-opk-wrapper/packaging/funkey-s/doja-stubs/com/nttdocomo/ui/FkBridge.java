@@ -18,6 +18,10 @@ public final class FkBridge {
         }
     }
 
+    public static void snapshot(Frame f) {
+        f.fkSnapshot();
+    }
+
     public static void dispatchKey(Frame f, int type, int key) {
         Dialog d = Dialog.showing;
         if (d != null) {

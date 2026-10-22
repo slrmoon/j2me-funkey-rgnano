@@ -40,8 +40,16 @@ public class JarInflater {
         tempJarPath = null;
     }
 
+    private static final boolean TRACE = "1".equals(System.getProperty("doja.trace"));
+
     private byte[] readJarEntry(String name) throws IOException {
+        long t0 = TRACE ? System.currentTimeMillis() : 0;
         byte[] data = JarReader.readJarEntry(tempJarPath, name);
+        if (TRACE) {
+            System.out.println("DoJa trace: JarInflater " + name + " "
+                    + (data == null ? -1 : data.length) + " bytes "
+                    + (System.currentTimeMillis() - t0) + " ms");
+        }
         if (data == null) {
             throw new IOException(name);
         }

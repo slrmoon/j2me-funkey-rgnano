@@ -559,7 +559,7 @@ static int decode_mld(const uint8_t *d, int n, FkaPcm *out)
     long long frames;
     memset(out, 0, sizeof(*out));
     frames = fka_mld_count_frames(d, n, (float) FKA_RATE);
-    if (frames <= 0) return -1;
+    if (frames < 0) return -1;
     out->mld = fka_mld_open(d, n, (float) FKA_RATE);
     out->win_cap = 4 * MLD_CHUNK;
     out->win = (int16_t *) malloc((size_t) out->win_cap * sizeof(int16_t));
@@ -572,7 +572,7 @@ static int decode_mld(const uint8_t *d, int n, FkaPcm *out)
         return -1;
     }
     out->rate = FKA_RATE;
-    out->length = frames;
+    out->length = frames > 0 ? frames : -1;   /* -1: endless */
     return 0;
 }
 

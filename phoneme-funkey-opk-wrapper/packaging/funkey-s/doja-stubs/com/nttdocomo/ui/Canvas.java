@@ -17,6 +17,11 @@ public abstract class Canvas extends Frame {
     private boolean flushInPaint;
     private volatile boolean repaintQueued;
     private boolean everPainted;
+    /* the last presented frame: the host paints it while the game already
+     * draws the next one into the surface */
+    private javax.microedition.lcdui.Image front;
+    private javax.microedition.lcdui.Graphics frontG;
+    private final Object frontLock = new Object();
 
     public Canvas() {
     }
@@ -97,7 +102,20 @@ public abstract class Canvas extends Frame {
     /* ------------------------------------------------------------------ */
 
     void fkPaint(javax.microedition.lcdui.Graphics g) {
-        g.drawImage(surface(), 0, 0, Graphics.TL);
+        synchronized (frontLock) {
+            g.drawImage(front != null ? front : surface(), 0, 0, Graphics.TL);
+        }
+    }
+
+    void fkSnapshot() {
+        javax.microedition.lcdui.Image s = surface();
+        synchronized (frontLock) {
+            if (front == null) {
+                front = javax.microedition.lcdui.Image.createImage(s.getWidth(), s.getHeight());
+                frontG = front.getGraphics();
+            }
+            frontG.drawImage(s, 0, 0, Graphics.TL);
+        }
     }
 
     void fkKey(int type, int key) {

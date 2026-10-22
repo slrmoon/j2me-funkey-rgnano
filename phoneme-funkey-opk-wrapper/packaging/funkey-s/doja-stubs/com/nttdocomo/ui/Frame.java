@@ -62,6 +62,10 @@ public abstract class Frame {
     abstract void fkKey(int type, int key);
 
     /** Called on the DoJa event thread when the frame becomes current. */
+    /** A finished frame: copy what the host should show (Canvas). */
+    void fkSnapshot() {
+    }
+
     void fkShown() {
     }
 
