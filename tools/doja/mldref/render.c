@@ -1,4 +1,4 @@
-/* host test: same protocol as tools/doja/mldref/Render.java */
+/* host/ARM test (no libm floor: the FunKey SDK musl floor is broken): same protocol as tools/doja/mldref/Render.java */
 #include "fka_mld.h"
 #include <math.h>
 #include <stdio.h>
@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
   while (total < max) {
     int k, i; memset(buf, 0, sizeof buf);
     k = fka_mld_render(p, buf, 2048); if (k < 0) break;
-    for (i = 0; i < k * 2; i++) { float v = buf[i]; if (v < -1) v = -1; if (v > 1) v = 1; pcm[pc++] = (short) floor((double) (v * 32767.0f) + 0.5); }
+    for (i = 0; i < k * 2; i++) { float v = buf[i]; if (v < -1) v = -1; if (v > 1) v = 1; { double q = (double) (v * 32767.0f) + 0.5; long long t = (long long) q; if ((double) t > q) t--; pcm[pc++] = (short) t; } }
     total += k; if (k < 2048) break;
   }
   f = fopen(argv[2], "wb"); fwrite("RIFF", 1, 4, f); w32(f, 36 + pc * 2); fwrite("WAVEfmt ", 1, 8, f); w32(f, 16); w16(f, 1); w16(f, 2); w32(f, rate); w32(f, rate * 4); w16(f, 4); w16(f, 16); fwrite("data", 1, 4, f); w32(f, pc * 2); fwrite(pcm, 2, pc, f); fclose(f);

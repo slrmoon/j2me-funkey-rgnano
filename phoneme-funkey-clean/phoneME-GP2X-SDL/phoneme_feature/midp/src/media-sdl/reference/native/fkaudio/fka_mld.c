@@ -15,6 +15,9 @@
  */
 #include "fka_mld.h"
 #include "fka_ma3_rom.h"
+#ifndef FKA_MLD_GENTABLES
+#include "fka_ma3_tables.h"
+#endif
 
 #include <math.h>
 #include <stdlib.h>
@@ -24,10 +27,221 @@
 /* Java helpers                                                        */
 /* ------------------------------------------------------------------ */
 
+/*
+ * The libm of the FunKey SDK musl cannot be trusted (its floor() returns
+ * the argument unchanged for |x| >= 1), and results must match Java's
+ * StrictMath (fdlibm) bit for bit anyway: floor, log and pow are done here.
+ * log/pow follow fdlibm 5.3 (Copyright (C) 1993-2004 Sun Microsystems,
+ * Inc.: "Permission to use, copy, modify, and distribute this software is
+ * freely granted, provided that this notice is preserved.").
+ */
+typedef union {
+    double d;
+    uint64_t u;
+} DBits;
+
+static int32_t hiw(double x) { DBits b; b.d = x; return (int32_t) (b.u >> 32); }
+static int32_t low(double x) { DBits b; b.d = x; return (int32_t) b.u; }
+static double set_hi(double x, int32_t hi) { DBits b; b.d = x; b.u = (b.u & 0xffffffffULL) | ((uint64_t) (uint32_t) hi << 32); return b.d; }
+static double set_lo(double x, int32_t lo) { DBits b; b.d = x; b.u = (b.u & 0xffffffff00000000ULL) | (uint32_t) lo; return b.d; }
+
+static double fd_floor(double x)
+{
+    double t;
+    if (!(x > -4503599627370496.0 && x < 4503599627370496.0)) return x;
+    t = (double) (long long) x;
+    return t > x ? t - 1.0 : t;
+}
+
+static float fd_fmodf_pos(float x, float y)
+{
+    /* x >= 0, y > 0; exact like fmodf for the ranges used here */
+    if (x < y) return x;
+    {
+        double q = fd_floor((double) x / (double) y);
+        float r = (float) ((double) x - q * (double) y);
+        while (r >= y) r -= y;
+        while (r < 0) r += y;
+        return r;
+    }
+}
+
+static double fd_log(double x)
+{
+    static const double ln2_hi = 6.93147180369123816490e-01, ln2_lo = 1.90821492927058770002e-10,
+        two54 = 1.80143985094819840000e+16,
+        Lg1 = 6.666666666666735130e-01, Lg2 = 3.999999999940941908e-01,
+        Lg3 = 2.857142874366239149e-01, Lg4 = 2.222219843214978396e-01,
+        Lg5 = 1.818357216161805012e-01, Lg6 = 1.531383769920937332e-01,
+        Lg7 = 1.479819860511658591e-01;
+    double hfsq, f, s, z, R, w, t1, t2, dk;
+    int32_t k, hx, i, j;
+    uint32_t lx;
+    hx = hiw(x);
+    lx = (uint32_t) low(x);
+    k = 0;
+    if (hx < 0x00100000) {
+        if (((hx & 0x7fffffff) | lx) == 0) return -two54 / 0.0;
+        if (hx < 0) return (x - x) / 0.0;
+        k -= 54;
+        x *= two54;
+        hx = hiw(x);
+    }
+    if (hx >= 0x7ff00000) return x + x;
+    k += (hx >> 20) - 1023;
+    hx &= 0x000fffff;
+    i = (hx + 0x95f64) & 0x100000;
+    x = set_hi(x, hx | (i ^ 0x3ff00000));
+    k += (i >> 20);
+    f = x - 1.0;
+    if ((0x000fffff & (2 + hx)) < 3) {
+        if (f == 0.0) {
+            if (k == 0) return 0.0;
+            dk = (double) k;
+            return dk * ln2_hi + dk * ln2_lo;
+        }
+        R = f * f * (0.5 - 0.33333333333333333 * f);
+        if (k == 0) return f - R;
+        dk = (double) k;
+        return dk * ln2_hi - ((R - dk * ln2_lo) - f);
+    }
+    s = f / (2.0 + f);
+    dk = (double) k;
+    z = s * s;
+    i = hx - 0x6147a;
+    w = z * z;
+    j = 0x6b851 - hx;
+    t1 = w * (Lg2 + w * (Lg4 + w * Lg6));
+    t2 = z * (Lg1 + w * (Lg3 + w * (Lg5 + w * Lg7)));
+    i |= j;
+    R = t2 + t1;
+    if (i > 0) {
+        hfsq = 0.5 * f * f;
+        if (k == 0) return f - (hfsq - s * (hfsq + R));
+        return dk * ln2_hi - ((hfsq - (s * (hfsq + R) + dk * ln2_lo)) - f);
+    }
+    if (k == 0) return f - s * (f - R);
+    return dk * ln2_hi - ((s * (f - R) - dk * ln2_lo) - f);
+}
+
+/* fdlibm pow for x > 0 (all callers pass 2 or 10) */
+static double fd_pow(double x, double y)
+{
+    static const double BP[2] = { 1.0, 1.5 }, DP_H[2] = { 0.0, 5.84962487220764160156e-01 },
+        DP_L[2] = { 0.0, 1.35003920212974897128e-08 },
+        L1 = 5.99999999999994648725e-01, L2 = 4.28571428578550184252e-01,
+        L3 = 3.33333329818377432918e-01, L4 = 2.72728123808534006489e-01,
+        L5 = 2.30660745775561754067e-01, L6 = 2.06975017800338417784e-01,
+        P1 = 1.66666666666666019037e-01, P2 = -2.77777777770155933842e-03,
+        P3 = 6.61375632143793436117e-05, P4 = -1.65339022054652515390e-06,
+        P5 = 4.13813679705723846039e-08, LG2 = 6.93147180559945286227e-01,
+        LG2_H = 6.93147182464599609375e-01, LG2_L = -1.90465429995776804525e-09,
+        CP = 9.61796693925975554329e-01, CP_H = 9.61796700954437255859e-01,
+        CP_L = -7.02846165095275826516e-09, OVT = 8.0085662595372944372e-17;
+    double z, r, s, t, u, v, w, p_h, p_l, t1, t2, x_abs, y1;
+    double z_h, z_l, ss, s2, s_h, s_l, t_h, t_l;
+    int32_t i, j, k, n, hx, ix;
+    if (y == 0.0) return 1.0;
+    if (x != x || y != y) return x + y;
+    x_abs = x < 0 ? -x : x;
+    if (y == 2.0) return x * x;
+    if (y == 0.5) return sqrt(x + 0.0);
+    if (y == 1.0) return x;
+    if (y == -1.0) return 1.0 / x;
+    hx = hiw(x);
+    ix = hx & 0x7fffffff;
+    if (x_abs == 0.0 || x_abs == 1.0) {
+        z = x_abs;
+        if (y < 0.0) z = 1.0 / z;
+        return z;
+    }
+    s = 1.0;
+    if ((y < 0 ? -y : y) > 2147483647.0) {
+        return 1.0; /* not reached by the synth */
+    }
+    n = 0;
+    if (ix < 0x00100000) {
+        x_abs *= 9007199254740992.0;
+        n -= 53;
+        ix = hiw(x_abs);
+    }
+    n += ((ix) >> 20) - 0x3ff;
+    j = ix & 0x000fffff;
+    ix = j | 0x3ff00000;
+    if (j <= 0x3988E) k = 0;
+    else if (j < 0xBB67A) k = 1;
+    else {
+        k = 0;
+        n += 1;
+        ix -= 0x00100000;
+    }
+    x_abs = set_hi(x_abs, ix);
+    u = x_abs - BP[k];
+    v = 1.0 / (x_abs + BP[k]);
+    ss = u * v;
+    s_h = set_lo(ss, 0);
+    t_h = set_hi(0.0, ((ix >> 1) | 0x20000000) + 0x00080000 + (k << 18));
+    t_l = x_abs - (t_h - BP[k]);
+    s_l = v * ((u - s_h * t_h) - s_h * t_l);
+    s2 = ss * ss;
+    r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 + s2 * L6)))));
+    r += s_l * (s_h + ss);
+    s2 = s_h * s_h;
+    t_h = set_lo(3.0 + s2 + r, 0);
+    t_l = r - ((t_h - 3.0) - s2);
+    u = s_h * t_h;
+    v = s_l * t_h + t_l * ss;
+    p_h = set_lo(u + v, 0);
+    p_l = v - (p_h - u);
+    z_h = CP_H * p_h;
+    z_l = CP_L * p_h + p_l * CP + DP_L[k];
+    t = (double) n;
+    t1 = set_lo((((z_h + z_l) + DP_H[k]) + t), 0);
+    t2 = z_l - (((t1 - t) - DP_H[k]) - z_h);
+    y1 = set_lo(y, 0);
+    p_l = (y - y1) * t1 + y * t2;
+    p_h = y1 * t1;
+    z = p_l + p_h;
+    j = hiw(z);
+    i = low(z);
+    if (j >= 0x40900000) {
+        if (((j - 0x40900000) | i) != 0) return s * HUGE_VAL;
+        if (p_l + OVT > z - p_h) return s * HUGE_VAL;
+    } else if ((j & 0x7fffffff) >= 0x4090cc00) {
+        if (((j - (int32_t) 0xc090cc00) | i) != 0) return s * 0.0;
+        if (p_l <= z - p_h) return s * 0.0;
+    }
+    i = j & 0x7fffffff;
+    k = (i >> 20) - 0x3ff;
+    n = 0;
+    if (i > 0x3fe00000) {
+        n = j + (0x00100000 >> (k + 1));
+        k = ((n & 0x7fffffff) >> 20) - 0x3ff;
+        t = set_hi(0.0, n & ~(0x000fffff >> k));
+        n = ((n & 0x000fffff) | 0x00100000) >> (20 - k);
+        if (j < 0) n = -n;
+        p_h -= t;
+    }
+    t = set_lo(p_l + p_h, 0);
+    u = t * LG2_H;
+    v = (p_l - (t - p_h)) * LG2 + t * LG2_L;
+    z = u + v;
+    w = v - (z - u);
+    t = z * z;
+    t1 = z - t * (P1 + t * (P2 + t * (P3 + t * (P4 + t * P5))));
+    r = (z * t1) / (t1 - 2.0) - (w + z * w);
+    z = 1.0 - (r - z);
+    j = hiw(z);
+    j += (n << 20);
+    if ((j >> 20) <= 0) z = ldexp(z, n);
+    else z = set_hi(z, hiw(z) + (n << 20));
+    return s * z;
+}
+
 /* Math.round(double) */
 static double jround(double x)
 {
-    double f = floor(x);
+    double f = fd_floor(x);
     return (x - f) >= 0.5 ? f + 1.0 : f;
 }
 
@@ -212,7 +426,7 @@ static void alg_from_rom(Alg *a, const uint8_t *ub, int isDrum)
     a->nops = a->alg < 2 ? 2 : 4;
     for (x = 0; x < a->nops; x++)
         op_from_rom(&a->ops[x], ub, 3 + x * 7);
-    a->freqBase = (float) (440 * pow(2, (a->drumKey - 69) / 12.0));
+    a->freqBase = (float) (440 * fd_pow(2, (a->drumKey - 69) / 12.0));
     a->isDrum = isDrum;
     a->isWave = 0;
     alg_init_post(a);
@@ -273,8 +487,17 @@ static void tables_init(void)
     int x;
     int32_t *saw = WAVES[24], *sin_ = WAVES[0], *tri = WAVES[16], *trp = WAVES[8];
     if (g_tables_ready) return;
-    MAGIC_B = 12 / log(2);
+    MAGIC_B = 12 / fd_log(2);
     MAGIC_F = 684 / 33868800.0;
+#ifndef FKA_MLD_GENTABLES
+    for (x = 0; x < 256; x++) {
+        EXPT[x] = T_EXP[x];
+        sin_[x] = sin_[511 - x] = T_SIN[x];
+        sin_[512 + x] = sin_[1023 - x] = T_SIN[x] | WAVE_MINUS;
+        tri[x] = tri[511 - x] = T_TRI[x];
+        tri[512 + x] = tri[1023 - x] = T_TRI[x] | WAVE_MINUS;
+    }
+#else
     for (x = 0; x < 256; x++) {
         int y;
         EXPT[x] = 1024 | (int) jround((pow(2, (255 - x) / 256.0) - 1) * 1024);
@@ -285,12 +508,17 @@ static void tables_init(void)
         tri[x] = tri[511 - x] = y;
         tri[512 + x] = tri[1023 - x] = y | WAVE_MINUS;
     }
+#endif
     for (x = 0; x < 1024; x++) {
         trp[x] = x < 128 ? tri[x << 1] : x < 256 ? WFULL :
             x < 512 ? trp[511 - x] : (trp[1023 - x] | WAVE_MINUS);
     }
     for (x = 0; x < 512; x++) {
+#ifndef FKA_MLD_GENTABLES
+        int y = T_SAW[x];
+#else
         int y = (int) jround(-log((x + 0.5) / 512) / log(2) * 256);
+#endif
         saw[x] = y;
         saw[1023 - x] = y | WAVE_MINUS;
     }
@@ -327,12 +555,19 @@ static void tables_init(void)
     }
     for (x = 0; x < 26; x++)
         AM_LFO_A[x] = AM_LFO_A[51 - x] = x;
+#ifndef FKA_MLD_GENTABLES
+    for (x = 0; x < 16; x++)
+        SUSTAINS[x] = T_SUSTAINS[x];
+    for (x = 0; x < 512; x++)
+        WAVE_ENV[x] = T_WAVE_ENV[x];
+#else
     SUSTAINS[0] = 0;
     SUSTAINS[15] = 511;
     for (x = 1; x < 15; x++)
         SUSTAINS[x] = (int) jround(16 * pow(2, log(x) / log(2)));
     for (x = 0; x < 512; x++)
         WAVE_ENV[x] = (int) jround(32767 * pow(10, x * -96.0 / 511 / 20));
+#endif
 
     for (x = 0; x < MA3_INST4_COUNT; x++)
         alg_from_rom(&g_inst4[x], ma3_inst4_data + ma3_inst4_off[x], 0);
@@ -482,7 +717,7 @@ static void note_on_frequency(Note *n, double bend)
     int x;
     if (n->alg->isWave) return;
     freq = n->alg->isDrum ? n->freqBase : n->freqBase * bend;
-    n->block = jmin(7, jmax(0, (int) ((int64_t) jround(log(freq / 440) * MAGIC_B) + 57) / 12));
+    n->block = jmin(7, jmax(0, (int) ((int64_t) jround(fd_log(freq / 440) * MAGIC_B) + 57) / 12));
     n->fNumber = jmin(1023, jmax(0, (int) jround(freq * (1 << (20 - n->block)) * MAGIC_F)));
     for (x = 0; x < n->alg->nops; x++)
         op_on_frequency(&n->op[x], n);
@@ -518,12 +753,12 @@ static int op_sample(Op *op, Note *note, Sampler *s, int mod, int feedback)
             slen = g_waverom_len[alg->waveId];
         }
         if (samples != NULL && op->wavSample < alg->ep) {
-            x = (int) floor(op->wavSample);
+            x = (int) fd_floor(op->wavSample);
             op->fb0 = x < slen ? samples[x] * WAVE_ENV[op->envOut] / 32767 : 0;
             op->wavSample += alg->wavAdvance;
             if (op->wavSample >= alg->ep) {
                 if (alg->lp < alg->ep) {
-                    op->wavSample = fmodf(op->wavSample - alg->lp, (float) (alg->ep - alg->lp)) + alg->lp;
+                    op->wavSample = fd_fmodf_pos(op->wavSample - alg->lp, (float) (alg->ep - alg->lp)) + alg->lp;
                 } else {
                     op->wavSample = (float) alg->ep;
                     note_stop(note);
@@ -818,7 +1053,7 @@ static void sampler_key_on(Sampler *s, int channel, int key, float velocity)
     n = c->notesOn[A4_MA3 + key];
     if (!c->isDrum) {
         alg = get_fm_instrument(s, c->prgBank, c->prgProgram);
-        freqBase = (float) (440 * pow(2, key / 12.0));
+        freqBase = (float) (440 * fd_pow(2, key / 12.0));
     } else {
         alg = get_drum_wave(s, key);
         isWave = alg != NULL;
@@ -863,7 +1098,7 @@ static void sampler_key_on(Sampler *s, int channel, int key, float velocity)
 static void sampler_master_tune(Sampler *s, float semitones)
 {
     int i;
-    s->bendOut = (float) pow(2, semitones);
+    s->bendOut = (float) fd_pow(2, semitones);
     for (i = 0; i < NUM_CHANNELS; i++)
         chan_on_frequency(&s->ch[i]);
 }
@@ -891,7 +1126,7 @@ static void sampler_pitch_bend(Sampler *s, int channel, float semitones)
     if (channel < 0 || channel >= NUM_CHANNELS) return;
     c = &s->ch[channel];
     c->bendBase = semitones;
-    c->bendOut = (float) pow(2, c->bendBase * c->bendRange);
+    c->bendOut = (float) fd_pow(2, c->bendBase * c->bendRange);
     chan_on_frequency(c);
 }
 
@@ -901,7 +1136,7 @@ static void sampler_pitch_bend_range(Sampler *s, int channel, float range)
     if (channel < 0 || channel >= NUM_CHANNELS) return;
     c = &s->ch[channel];
     c->bendRange = range;
-    c->bendOut = (float) pow(2, c->bendBase * c->bendRange);
+    c->bendOut = (float) fd_pow(2, c->bendBase * c->bendRange);
     chan_on_frequency(c);
 }
 
@@ -1043,7 +1278,7 @@ static void sampler_render(Sampler *s, float *out, int frames)
             b = 1.0f - l;
             frame[0] = (smpPrev[0] + (smpNext[0] - smpPrev[0]) * a) * b;
             frame[1] = (smpPrev[1] + (smpNext[1] - smpPrev[1]) * a) * b;
-            for (y = (int) floor(r) - 1; y > 0; y--) {
+            for (y = (int) fd_floor(r) - 1; y > 0; y--) {
                 smpPrev[0] = smpNext[0];
                 smpPrev[1] = smpNext[1];
                 sampler_sample(s);
@@ -1052,7 +1287,7 @@ static void sampler_render(Sampler *s, float *out, int frames)
             }
             smpPrev[0] = smpNext[0];
             smpPrev[1] = smpNext[1];
-            r = fmodf(r, 1.0f);
+            r = fd_fmodf_pos(r, 1.0f);
             if (r != 0.0f) {
                 sampler_sample(s);
                 a = r / 2;
@@ -1172,7 +1407,7 @@ static Rd rd_sub(Rd *r, int len)
 
 static float volume_to_amplitude(float param)
 {
-    return param == 0.0f ? 0.0f : (float) pow(2, (1 - param) * -96 / 20);
+    return param == 0.0f ? 0.0f : (float) fd_pow(2, (1 - param) * -96 / 20);
 }
 
 static int track_add(MTrack *t, const MEvent *e)
@@ -1653,7 +1888,7 @@ int fka_mld_render(FkaMld *p, float *out, int frames)
     if (p->finished) p->pendingFrames = (float) frames;
     while (frames > 0) {
         while (p->pendingFrames > 0) {
-            int f = (int) floor(p->pendingFrames);
+            int f = (int) fd_floor(p->pendingFrames);
             if (f > frames) f = frames;
             if (!p->seeking) sampler_render(&p->s, out, f);
             frames -= f;
@@ -1693,7 +1928,7 @@ int fka_mld_render(FkaMld *p, float *out, int frames)
             }
             un = until_note(p);
             p->pendingTicks = un == -1 ? ut : (un < ut ? un : ut);
-            p->pendingFrames += (float) floor(p->pendingTicks * p->framesPerTick);
+            p->pendingFrames += (float) fd_floor(p->pendingTicks * p->framesPerTick);
         }
     }
     return ret;
