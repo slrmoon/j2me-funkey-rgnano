@@ -613,6 +613,7 @@ typedef struct {
 } Op;
 
 struct Note {
+    unsigned int age;
     const Alg *alg;
     int chan;
     int key;
@@ -651,6 +652,7 @@ struct Sampler {
     float smpPosition;
     int vibPhase;
     int steps;              /* chip ticks per computed sample: 1 exact, 2 fast */
+    unsigned int noteSerial;
     float volFade, volLevel, volOut;
     int32_t *wavRam;
     int wavRamLen;
@@ -1073,6 +1075,53 @@ static void sampler_key_off(Sampler *s, int channel, int key)
     c->notesOn[A4_MA3 + key] = NULL;
 }
 
+/* Fast mode: at most MAX_VOICES notes, like the chip; a new note takes
+ * the place of the quietest released note, or of the oldest held one.
+ * The reference has no limit (Rockman keeps ~40 notes sounding, most of
+ * the synth CPU). */
+#ifndef MAX_VOICES
+#define MAX_VOICES 16
+#endif
+
+static void voice_limit(Sampler *s)
+{
+    int i, x, total = 0, vc, vx = -1, vreleased = 0;
+    float vamp = 0.0f;
+    unsigned int vage = 0;
+    for (i = 0; i < NUM_CHANNELS; i++)
+        total += s->ch[i].nOut;
+    while (total >= MAX_VOICES) {
+        vc = -1;
+        for (i = 0; i < NUM_CHANNELS; i++) {
+            Chan *c = &s->ch[i];
+            for (x = 0; x < c->nOut; x++) {
+                Note *n = c->notesOut[x];
+                int released = !n->playing;
+                float amp = n->ampLeft + n->ampRight;
+                if (vc < 0 || (released && !vreleased) ||
+                    (released == vreleased &&
+                     (released ? amp < vamp : n->age < vage))) {
+                    vc = i;
+                    vx = x;
+                    vreleased = released;
+                    vamp = amp;
+                    vage = n->age;
+                }
+            }
+        }
+        if (vc < 0) return;
+        {
+            Chan *c = &s->ch[vc];
+            Note *n = c->notesOut[vx];
+            int k;
+            for (k = 0; k < 128; k++)
+                if (c->notesOn[k] == n) c->notesOn[k] = NULL;
+            chan_remove_at(c, vx);
+        }
+        total--;
+    }
+}
+
 static void sampler_key_on(Sampler *s, int channel, int key, float velocity)
 {
     const Alg *alg = NULL;
@@ -1101,8 +1150,10 @@ static void sampler_key_on(Sampler *s, int channel, int key, float velocity)
         n = NULL;
     }
     if (n == NULL) {
+        if (s->steps > 1) voice_limit(s);
         n = (Note *) calloc(1, sizeof(Note));
         if (n == NULL) return;
+        n->age = ++s->noteSerial;
         n->alg = alg;
         n->chan = channel;
         n->key = key;
