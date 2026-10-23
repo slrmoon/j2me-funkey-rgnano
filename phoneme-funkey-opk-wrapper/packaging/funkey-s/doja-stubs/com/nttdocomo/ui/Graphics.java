@@ -64,8 +64,9 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
     boolean disposed;
     /* opt render mode (Graphics2.setRenderMode) */
     int renderOp;
-    int renderSrc = 100;
-    int renderDst = 100;
+    /* opt.ui.Graphics2 render mode; ratios are 0..255 (255 = 100 %) */
+    int renderSrc = 255;
+    int renderDst = 255;
     /* MascotCapsule renderer state, created on first 3D call */
     Object r3d;
 
@@ -231,7 +232,7 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
         int a = color >>> 24;
         if (a != 0 && a != 255) {
             blendRect(x, y, w, h, color);
-        } else if (renderOp != 0) {
+        } else if (renderOp != 0 || renderSrc != 255) {
             blendRect(x, y, w, h, 0xff000000 | color);
         } else {
             g.fillRect(x, y, w, h);
@@ -425,7 +426,7 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
         if (sw <= 0 || sh <= 0) {
             return;
         }
-        if (renderOp != 0 || renderSrc != 100) {
+        if (renderOp != 0 || renderSrc != 255) {
             blendImage(src, sx, sy, sw, sh, dx, dy);
             changed();
             return;
@@ -807,60 +808,32 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
         g.drawRGB(d, 0, ow, x0, y0, ow, oh, false);
     }
 
-    /** Combines source (with alpha a) and destination per the opt render mode. */
+    /**
+     * Combines source (alpha a) and destination per the opt render mode,
+     * as openDoJa does (ratios 0..255):
+     *   REPL: d*(255-a)/255 + s*a*src/255^2
+     *   ADD:  d*((255-a)*255 + a*dst)/255^2 + s*a*src/255^2   (SUB: minus)
+     */
     private int mix(int s, int a, int d) {
-        int sr = (s >> 16) & 255;
-        int sg = (s >> 8) & 255;
-        int sb = s & 255;
-        int dr = (d >> 16) & 255;
-        int dg = (d >> 8) & 255;
-        int db = d & 255;
-        int r;
-        int gg;
-        int b;
-        int srcR = renderSrc;
-        int dstR = renderDst;
-        if (renderOp == 1) { /* OP_ADD */
-            r = dr * dstR / 100 + sr * srcR / 100 * a / 255;
-            gg = dg * dstR / 100 + sg * srcR / 100 * a / 255;
-            b = db * dstR / 100 + sb * srcR / 100 * a / 255;
-        } else if (renderOp == 2) { /* OP_SUB */
-            r = dr * dstR / 100 - sr * srcR / 100 * a / 255;
-            gg = dg * dstR / 100 - sg * srcR / 100 * a / 255;
-            b = db * dstR / 100 - sb * srcR / 100 * a / 255;
-        } else {
-            int sa = a * srcR / 100;
-            if (renderOp == 0 && (srcR != 100 || dstR != 100)) {
-                r = (sr * srcR + dr * dstR) / 100;
-                gg = (sg * srcR + dg * dstR) / 100;
-                b = (sb * srcR + db * dstR) / 100;
-                if (a < 255) {
-                    r = (r * a + dr * (255 - a)) / 255;
-                    gg = (gg * a + dg * (255 - a)) / 255;
-                    b = (b * a + db * (255 - a)) / 255;
-                }
-            } else {
-                r = (sr * sa + dr * (255 - sa)) / 255;
-                gg = (sg * sa + dg * (255 - sa)) / 255;
-                b = (sb * sa + db * (255 - sa)) / 255;
-            }
-        }
-        if (r < 0) {
-            r = 0;
-        } else if (r > 255) {
-            r = 255;
-        }
-        if (gg < 0) {
-            gg = 0;
-        } else if (gg > 255) {
-            gg = 255;
-        }
-        if (b < 0) {
-            b = 0;
-        } else if (b > 255) {
-            b = 255;
-        }
+        int unc = (255 - a) * 255;
+        int srcN = a * renderSrc;
+        int dstN = renderOp == 0 ? unc : unc + a * renderDst;
+        int sign = renderOp == 2 ? -1 : 1;
+        int r = ch((d >> 16) & 255, (s >> 16) & 255, dstN, srcN, sign);
+        int gg = ch((d >> 8) & 255, (s >> 8) & 255, dstN, srcN, sign);
+        int b = ch(d & 255, s & 255, dstN, srcN, sign);
         return 0xff000000 | (r << 16) | (gg << 8) | b;
+    }
+
+    private static int ch(int d, int s, int dstN, int srcN, int sign) {
+        int n = d * dstN + sign * s * srcN;   /* fits: 255 * 2 * 65025 < 2^31 */
+        if (n <= 0) {
+            return 0;
+        }
+        if (n >= 255 * 65025) {
+            return 255;
+        }
+        return (n + 32512) / 65025;
     }
 
     /* ------------------------------------------------------------------ */
