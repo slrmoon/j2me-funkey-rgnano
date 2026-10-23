@@ -14,6 +14,8 @@ public abstract class Component {
     int foreground = 0x000000;
     Font font;
     Panel panel;
+    int htmlBreaks;   /* HTMLLayout: line breaks before this component */
+    int htmlAlign;    /* HTMLLayout: 0 left, 1 center, 2 right */
 
     public Component() {
     }
