@@ -26,6 +26,30 @@ Based on the upstream phoneME-GP2X-SDL source at:
   <img src="screenshots/IMG_0023.PNG" width="240" />
 </p>
 
+### i-mode games
+
+Rockman The Puzzle Battle, THE Battle Cats (にゃんこ大戦争), Bomberman '08,
+Bio Miracle Bokutte Upa, Battle City, Flame Firefighter, Cafe Far Niente,
+CR Evangelion 4 (pachinko), Tetra. See [i-mode games (i-appli)](#i-mode-games-i-appli).
+
+<p float="left">
+  <img src="screenshots/iappli_rockman.png" width="240" />
+  <img src="screenshots/iappli_battlecats.png" width="240" />
+  <img src="screenshots/iappli_bomberman.png" width="240" />
+</p>
+
+<p float="left">
+  <img src="screenshots/iappli_upa.png" width="240" />
+  <img src="screenshots/iappli_battlecity.png" width="240" />
+  <img src="screenshots/iappli_firefighter.png" width="240" />
+</p>
+
+<p float="left">
+  <img src="screenshots/iappli_cafe.png" width="240" />
+  <img src="screenshots/iappli_eva.png" width="240" />
+  <img src="screenshots/iappli_tetra.png" width="240" />
+</p>
+
 ## Installation
 
 1. Download `pm.opk` from the [latest release](https://github.com/slrmoon/j2me-funkey-rgnano/releases/latest)
@@ -263,10 +287,24 @@ written for the DoJa profile (`com.nttdocomo.*`) instead of MIDP. A game is a
   fast mode (half the chip rate, 16 voices) to keep the music in real time on
   the FunKey; `PHONEME_MLD_EXACT=1` gives the bit-exact output. SMAF, MIDI and
   WAV sounds go through the normal audio engine.
-- **Tested:** Rockman The Puzzle Battle, MT!, 10 Seconds, Avatar Bakyun,
-  Bomberman '08, Bio Miracle Upa, Battle City, Tetra, BreakDown, Chobi Hige,
-  Comic Elliot, Flame Firefighter, 30 Second Rocket, Buta-san, Cafe Far
-  Niente (offline) and others; the full list is in `DOJA_STATUS.md`.
+- **Tested** (in the emulator, with keys; a fuller log is in `DOJA_STATUS.md`):
+
+  | Game | State |
+  |---|---|
+  | Rockman The Puzzle Battle | playable, music |
+  | THE Battle Cats (にゃんこ大戦争) | menus and stage map; battles are drawn with 3D (not yet) |
+  | Bomberman '08 | menus, save slots |
+  | Bio Miracle Bokutte Upa | playable |
+  | Battle City (patched) | playable |
+  | Flame Firefighter | playable |
+  | Cafe Far Niente (offline) | menus, puzzle |
+  | CR Evangelion 4 (pachinko, research mode) | playable |
+  | Tetra | playable |
+  | VIRUS | story scenes |
+  | ( `Д`)MT!, 10 Seconds, Chobi Hige, Avatar Bakyun, BakeGyamon Quiz 2, Comic Elliot x Alice, BreakDown, 30 Second Rocket, Buta-san | start, menus or gameplay |
+  | FIFA World Cup 2006, BATTLE GEAR D, FF7 Dirge of Cerberus Lost Episode | stop at 3D (not yet) |
+  | games that need their server (online versions) | network is not available |
+
 - **Not yet:** MascotCapsule 3D (`opt.ui.j3d`) and OpenGL (`opt.ui.ogl`) — 3D games such as FIFA World Cup 2006 or Battle Gear D stop at their 3D part, ADPCM voice samples inside MLD,
   network (`HttpConnection`), text input (IME returns the initial text).
   Unimplemented calls are logged as `DoJa: unimplemented ...`.
