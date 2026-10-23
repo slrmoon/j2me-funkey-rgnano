@@ -2501,6 +2501,10 @@ static int launch_game_once(int idx) {
         if (games[idx].is_doja) {
         char *argv[] = {
             "runMidlet",
+            /* JIT: a 3.2 KB i-appli method (Cafe Far Niente) compiles to
+             * broken code (bad literal load, SIGSEGV); bigger i-appli
+             * methods run in the interpreter */
+            "=MaxMethodToCompile3000",
             prop_app,
             prop_param,
             prop_ver,

@@ -45,7 +45,7 @@ export SHOT_DIR=${SHOT_DIR:-} SHOT_MS=${SHOT_MS:-2000} INJECT_KEYS="$3"
 export J2ME_GP2X_JOYU=-1 J2ME_GP2X_JOYD=-2 J2ME_GP2X_JOYL=-3 J2ME_GP2X_JOYR=-4 J2ME_GP2X_BUTA=-5 J2ME_GP2X_BUTB=53 J2ME_GP2X_BUTX=-15 J2ME_GP2X_BUTY=-16 J2ME_GP2X_LEFT=42 J2ME_GP2X_RIGHT=35 J2ME_GP2X_START=-7 J2ME_GP2X_SELECT=-6
 echo "doja class=$APP_CLASS lcd=$LCD param=$APP_PARAM"
 timeout -s KILL "$2" qemu-arm -cpu cortex-a7 -L "$T/qroot" -E LD_PRELOAD="$T/tools/inject.so" \
-    ./runMidlet $VMARGS "-Ddoja.app.class=$APP_CLASS" "-Ddoja.app.param=$APP_PARAM" \
+    ./runMidlet =MaxMethodToCompile3000 $VMARGS "-Ddoja.app.class=$APP_CLASS" "-Ddoja.app.param=$APP_PARAM" \
     "-Ddoja.app.ver=$APP_VER" -Dmicroedition.encoding=SJIS "-Ddoja.scratchpad.path=$SP" \
     "-Ddoja.spsize=$(jamval SPsize | tr -d ' ')" "-Ddoja.jam.hex=$(od -An -v -tx1 "$jam" | tr -d ' \n')" \
     -classpathext "$jar:$HOME_DIR/lib/doja-support.jar" internal com.funkey.doja.DoJaMIDlet
