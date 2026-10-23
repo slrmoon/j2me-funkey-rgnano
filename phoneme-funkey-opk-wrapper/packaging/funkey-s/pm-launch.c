@@ -569,6 +569,7 @@ static void enter_selected_folder(void);
 static int leave_folder(void);
 static const char *game_display_name(int idx);
 static int is_favorite_path(const char *path);
+static int fav_loaded;
 static int toggle_favorite(const char *path);
 
 /* ─────────────────────────────────────────────────────
@@ -613,28 +614,97 @@ static void add_favorites_folder(void) {
     game_count++;
 }
 
+/*
+ * Names of the folder being scanned, sorted case-insensitively: .jam/.jad
+ * lookups become a binary search instead of stat()/opendir() per jar (the
+ * "only .jam in the folder" rule used to reread the whole folder per jar).
+ */
+typedef struct {
+    char dir[PATH_MAX];
+    char **names;
+    int count;
+    int jam_count;
+    char only_jam[PATH_MAX];
+    char only_cls[256];
+    int only_cls_state;          /* 0 = not read, 1 = read, -1 = none */
+} DirIndex;
+static DirIndex *scan_index = NULL;
+
+static int name_cmp(const void *a, const void *b) {
+    return strcasecmp(*(char * const *)a, *(char * const *)b);
+}
+
+/* actual name of <want> in the indexed folder (any case), NULL when missing */
+static const char *dir_index_find(const DirIndex *ix, const char *want) {
+    char **hit;
+    if (ix == NULL || ix->names == NULL) return NULL;
+    hit = (char **)bsearch(&want, ix->names, ix->count, sizeof(char *), name_cmp);
+    return hit ? *hit : NULL;
+}
+
+/* the indexed folder when <path> is directly inside it */
+static DirIndex *dir_index_for(const char *path) {
+    size_t n;
+    if (scan_index == NULL) return NULL;
+    n = strlen(scan_index->dir);
+    if (strncmp(path, scan_index->dir, n) != 0 || path[n] != '/') return NULL;
+    if (strchr(path + n + 1, '/') != NULL) return NULL;
+    return scan_index;
+}
+
+/* entry names of a zip read straight from its central directory */
+static int jar_has_entry(const char *jar_path, const char *entry) {
+    FILE *f = fopen(jar_path, "rb");
+    unsigned char tail[22 + 65535];
+    long size, start;
+    int n, i, found = 0;
+    unsigned long cd_off, cd_size, pos;
+    size_t elen = strlen(entry);
+
+    if (f == NULL) return 0;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    size = ftell(f);
+    start = size > (long)sizeof(tail) ? size - (long)sizeof(tail) : 0;
+    fseek(f, start, SEEK_SET);
+    n = (int)fread(tail, 1, (size_t)(size - start), f);
+    for (i = n - 22; i >= 0; i--) {
+        if (tail[i] == 'P' && tail[i + 1] == 'K' && tail[i + 2] == 5 && tail[i + 3] == 6) break;
+    }
+    if (i < 0) { fclose(f); return 0; }
+    cd_size = tail[i + 12] | (tail[i + 13] << 8) | (tail[i + 14] << 16) | ((unsigned long)tail[i + 15] << 24);
+    cd_off = tail[i + 16] | (tail[i + 17] << 8) | (tail[i + 18] << 16) | ((unsigned long)tail[i + 19] << 24);
+    if (cd_size == 0 || cd_size > 16UL * 1024 * 1024) { fclose(f); return 0; }
+    {
+        unsigned char *cd = (unsigned char *)malloc(cd_size);
+        if (cd == NULL) { fclose(f); return 0; }
+        fseek(f, (long)cd_off, SEEK_SET);
+        if (fread(cd, 1, cd_size, f) != cd_size) { free(cd); fclose(f); return 0; }
+        for (pos = 0; pos + 46 <= cd_size && !found; ) {
+            unsigned nl, xl, cl;
+            if (cd[pos] != 'P' || cd[pos + 1] != 'K' || cd[pos + 2] != 1 || cd[pos + 3] != 2) break;
+            nl = cd[pos + 28] | (cd[pos + 29] << 8);
+            xl = cd[pos + 30] | (cd[pos + 31] << 8);
+            cl = cd[pos + 32] | (cd[pos + 33] << 8);
+            if (pos + 46 + nl > cd_size) break;
+            if (nl == elen && memcmp(cd + pos + 46, entry, elen) == 0) found = 1;
+            pos += 46 + nl + xl + cl;
+        }
+        free(cd);
+    }
+    fclose(f);
+    return found;
+}
+
 static int jar_has_class(const char *jar_path, const char *class_name) {
     char entry[300];
-    char quoted[PATH_MAX * 4];
-    char cmd[PATH_MAX * 4 + 400];
-    char line[512];
-    FILE *p;
-    int i, found = 0;
+    int i;
 
     if (class_name == NULL || class_name[0] == '\0') return 0;
     for (i = 0; class_name[i] != '\0' && i < 250; i++)
         entry[i] = class_name[i] == '.' ? '/' : class_name[i];
     entry[i] = '\0';
     strcat(entry, ".class");
-    shell_quote(jar_path, quoted, sizeof(quoted));
-    snprintf(cmd, sizeof(cmd), "unzip -l %s 2>/dev/null", quoted);
-    p = popen(cmd, "r");
-    if (p == NULL) return 0;
-    while (fgets(line, sizeof(line), p) != NULL) {
-        if (strstr(line, entry) != NULL) found = 1;
-    }
-    pclose(p);
-    return found;
+    return jar_has_entry(jar_path, entry);
 }
 
 /*
@@ -654,6 +724,28 @@ static int find_jam_for_jar(const char *jar_path, char *out, size_t out_size) {
 
     out[0] = '\0';
     if (jar_len < 5) return 0;
+    {
+        DirIndex *ix = dir_index_for(jar_path);
+        if (ix != NULL) {
+            const char *base = strrchr(jar_path, '/') + 1;
+            char want[PATH_MAX];
+            const char *hit;
+            snprintf(want, sizeof(want), "%.*s.jam", (int)strlen(base) - 4, base);
+            hit = dir_index_find(ix, want);
+            if (hit != NULL) {
+                snprintf(out, out_size, "%s/%s", ix->dir, hit);
+                return 1;
+            }
+            if (ix->jam_count != 1) return 0;
+            if (ix->only_cls_state == 0) {
+                ix->only_cls_state = read_jam_value(ix->only_jam, "AppClass", ix->only_cls,
+                                                    sizeof(ix->only_cls)) ? 1 : -1;
+            }
+            if (ix->only_cls_state < 0 || !jar_has_class(jar_path, ix->only_cls)) return 0;
+            snprintf(out, out_size, "%s", ix->only_jam);
+            return 1;
+        }
+    }
     snprintf(candidate, sizeof(candidate), "%.*s.jam", jar_len - 4, jar_path);
     if (stat(candidate, &st) == 0 && S_ISREG(st.st_mode)) {
         snprintf(out, out_size, "%s", candidate);
@@ -721,9 +813,19 @@ static void add_game(const char *full_path, const char *name) {
     if (jar_len >= 5) {
         char jad_path[PATH_MAX];
         char jam_path[PATH_MAX];
+        DirIndex *ix = dir_index_for(full_path);
         snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, full_path);
-        read_midlet_name_from_jad(jad_path, games[game_count].title,
-                                  sizeof(games[game_count].title));
+        if (ix != NULL) {
+            const char *hit = dir_index_find(ix, strrchr(jad_path, '/') + 1);
+            if (hit != NULL) {
+                snprintf(jad_path, sizeof(jad_path), "%s/%s", ix->dir, hit);
+                read_midlet_name_from_jad(jad_path, games[game_count].title,
+                                          sizeof(games[game_count].title));
+            }
+        } else {
+            read_midlet_name_from_jad(jad_path, games[game_count].title,
+                                      sizeof(games[game_count].title));
+        }
         if (find_jam_for_jar(full_path, jam_path, sizeof(jam_path))
                 && read_jam_value(jam_path, "AppClass", games[game_count].app_class,
                                   sizeof(games[game_count].app_class))) {
@@ -769,32 +871,85 @@ static void current_dir_path(char *out, size_t out_size) {
 static void scan_current_dir(void) {
     DIR *d;
     struct dirent *ent;
-    char dir_path[PATH_MAX];
+    DirIndex ix;
+    char **dirs = NULL;
+    char **dirs_list = NULL;
+    int cap = 0, i;
 
-    current_dir_path(dir_path, sizeof(dir_path));
-    d = opendir(dir_path);
+    memset(&ix, 0, sizeof(ix));
+    current_dir_path(ix.dir, sizeof(ix.dir));
+    d = opendir(ix.dir);
     if (!d) return;
 
+    /* one pass over the folder: names (folders flagged with a trailing '/') */
     while ((ent = readdir(d)) != NULL) {
         const char *n = ent->d_name;
         int len = strlen(n);
-        char full[PATH_MAX];
-        struct stat st;
+        int is_dir = 0;
+        char *copy;
 
         if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0) continue;
-        snprintf(full, sizeof(full), "%s/%s", dir_path, n);
-        if (stat(full, &st) != 0) continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            add_folder(full, n);
+        if (ent->d_type == DT_DIR) {
+            is_dir = 1;
+        } else if (ent->d_type == DT_UNKNOWN || ent->d_type == DT_LNK) {
+            char full[PATH_MAX];
+            struct stat st;
+            snprintf(full, sizeof(full), "%s/%s", ix.dir, n);
+            if (stat(full, &st) != 0) continue;
+            is_dir = S_ISDIR(st.st_mode);
+            if (!is_dir && !S_ISREG(st.st_mode)) continue;
+        } else if (ent->d_type != DT_REG) {
             continue;
         }
-
-        if (!S_ISREG(st.st_mode) || len < 5) continue;
-        if (strcasecmp(n + len - 4, ".jar") != 0) continue;
-        add_game(full, n);
+        if (ix.count == cap) {
+            char **nn;
+            cap = cap ? cap * 2 : 256;
+            nn = (char **)realloc(ix.names, cap * sizeof(char *));
+            if (nn == NULL) break;
+            ix.names = nn;
+            nn = (char **)realloc(dirs, cap * sizeof(char *));
+            if (nn == NULL) break;
+            dirs = nn;
+        }
+        copy = strdup(n);
+        if (copy == NULL) break;
+        dirs[ix.count] = is_dir ? copy : NULL;
+        ix.names[ix.count++] = copy;
+        if (!is_dir && len > 4 && strcasecmp(n + len - 4, ".jam") == 0) {
+            ix.jam_count++;
+            snprintf(ix.only_jam, sizeof(ix.only_jam), "%s/%s", ix.dir, n);
+        }
     }
     closedir(d);
+
+    /* ix.names: a sorted view for lookups; list keeps the folder order */
+    {
+        char **list = ix.names;
+        ix.names = (char **)malloc((ix.count ? ix.count : 1) * sizeof(char *));
+        if (ix.names != NULL) {
+            memcpy(ix.names, list, ix.count * sizeof(char *));
+            qsort(ix.names, ix.count, sizeof(char *), name_cmp);
+        }
+        dirs_list = list;
+    }
+
+    for (i = 0; i < ix.count; i++) {
+        const char *n = dirs_list[i];
+        int len = strlen(n);
+        char full[PATH_MAX];
+        snprintf(full, sizeof(full), "%s/%s", ix.dir, n);
+        if (dirs[i] != NULL) {
+            add_folder(full, n);
+        } else if (len >= 5 && strcasecmp(n + len - 4, ".jar") == 0) {
+            scan_index = &ix;
+            add_game(full, n);
+            scan_index = NULL;
+        }
+    }
+    free(dirs);
+    for (i = 0; i < ix.count; i++) free(dirs_list[i]);
+    free(dirs_list);
+    free(ix.names);
 }
 
 static void scan_favorites(void) {
@@ -833,7 +988,9 @@ static int game_cmp(const void *pa, const void *pb) {
 
 static void scan_games(void) {
     int i;
+    Uint32 t0 = SDL_GetTicks();
 
+    fav_loaded = 0;
     for (i = 0; i < game_count; i++) free(games[i].path);
     game_count = 0;
     game_sel = 0;
@@ -847,6 +1004,9 @@ static void scan_games(void) {
     }
 
     qsort(games, game_count, sizeof(GameEntry), game_cmp);
+    fprintf(stderr, "pm: scanned %s%s: %d entries in %u ms\n",
+            browsing_favorites ? "favorites " : "/", current_rel_dir, game_count,
+            (unsigned)(SDL_GetTicks() - t0));
 }
 
 static const char *game_display_name(int idx) {
@@ -904,11 +1064,99 @@ static int pop_browser_return(BrowserReturn *ret) {
     return 1;
 }
 
+/*
+ * Listings of the folders above the current one are kept while browsing
+ * deeper, so going back (also after playing a game) shows them at once. A
+ * kept listing is dropped when the folder changed (its mtime moved).
+ */
+#define LIST_CACHE_MAX 4
+typedef struct {
+    GameEntry *games;
+    int count, cap;
+    char rel_dir[PATH_MAX];
+    int favorites;
+    time_t mtime;
+} ListCache;
+static ListCache list_cache[LIST_CACHE_MAX];
+static int list_cache_depth = 0;
+
+static time_t folder_mtime(const char *rel_dir, int favorites) {
+    char path[PATH_MAX];
+    struct stat st;
+    if (favorites) {
+        if (stat(FAVORITES_FILE, &st) != 0) return 0;
+        return st.st_mtime;
+    }
+    if (rel_dir[0] == '\0') snprintf(path, sizeof(path), "%s", java_dir);
+    else snprintf(path, sizeof(path), "%s/%s", java_dir, rel_dir);
+    if (stat(path, &st) != 0) return 0;
+    return st.st_mtime;
+}
+
+static void list_free(GameEntry *g, int count) {
+    int i;
+    for (i = 0; i < count; i++) free(g[i].path);
+    free(g);
+}
+
+/* moves the current listing onto the cache stack */
+static void list_cache_push(void) {
+    ListCache *c;
+    if (list_cache_depth == LIST_CACHE_MAX) {
+        list_free(list_cache[0].games, list_cache[0].count);
+        memmove(&list_cache[0], &list_cache[1], sizeof(ListCache) * (LIST_CACHE_MAX - 1));
+        list_cache_depth--;
+    }
+    c = &list_cache[list_cache_depth++];
+    c->games = games;
+    c->count = game_count;
+    c->cap = games_cap;
+    snprintf(c->rel_dir, sizeof(c->rel_dir), "%s", current_rel_dir);
+    c->favorites = browsing_favorites;
+    c->mtime = folder_mtime(current_rel_dir, browsing_favorites);
+    games = NULL;
+    games_cap = 0;
+    game_count = 0;
+}
+
+/* brings back the listing of the folder now current; 0 = scan it */
+static int list_cache_pop(void) {
+    ListCache c;
+    int i;
+    if (list_cache_depth == 0) return 0;
+    c = list_cache[--list_cache_depth];
+    if (strcmp(c.rel_dir, current_rel_dir) != 0 || c.favorites != browsing_favorites ||
+        c.mtime == 0 || c.mtime != folder_mtime(c.rel_dir, c.favorites)) {
+        list_free(c.games, c.count);
+        return 0;
+    }
+    list_free(games, game_count);
+    games = c.games;
+    game_count = c.count;
+    games_cap = c.cap;
+    game_sel = 0;
+    game_scroll = 0;
+    /* stars may have changed inside a subfolder */
+    fav_loaded = 0;
+    for (i = 0; i < game_count; i++) {
+        if (!games[i].is_dir) games[i].is_favorite = is_favorite_path(games[i].path);
+    }
+    return 1;
+}
+
+static void list_cache_clear(void) {
+    while (list_cache_depth > 0) {
+        list_cache_depth--;
+        list_free(list_cache[list_cache_depth].games, list_cache[list_cache_depth].count);
+    }
+}
+
 static void enter_selected_folder(void) {
     char next[PATH_MAX];
     if (game_count <= 0 || !games[game_sel].is_dir) return;
     push_browser_return();
     if (games[game_sel].is_favorites_folder) {
+        list_cache_push();
         browsing_favorites = 1;
         scan_games();
         return;
@@ -916,6 +1164,7 @@ static void enter_selected_folder(void) {
     snprintf(next, sizeof(next), "%s%s%s",
              current_rel_dir, current_rel_dir[0] ? "/" : "",
              games[game_sel].label);
+    list_cache_push();
     if (next[0] != '\0') {
         size_t len = strlen(next);
         if (len > 0 && next[len - 1] == '/') next[len - 1] = '\0';
@@ -931,7 +1180,7 @@ static int leave_folder(void) {
     if (browsing_favorites) {
         browsing_favorites = 0;
         have_return = pop_browser_return(&ret);
-        scan_games();
+        if (!list_cache_pop()) scan_games();
         if (have_return) restore_browser_return(&ret);
         return 1;
     }
@@ -943,7 +1192,7 @@ static int leave_folder(void) {
     } else {
         current_rel_dir[0] = '\0';
     }
-    scan_games();
+    if (!list_cache_pop()) scan_games();
     if (have_return) restore_browser_return(&ret);
     return 1;
 }
@@ -962,18 +1211,49 @@ static char *trim_line(char *text) {
     return text;
 }
 
-static int is_favorite_path(const char *path) {
-    FILE *favorites = fopen(FAVORITES_FILE, "r");
-    char line[PATH_MAX + 2];
+/* favorites.txt read once per scan instead of once per game */
+static char **fav_paths = NULL;
+static int fav_count = 0;
 
-    if (favorites == NULL) return 0;
+static void fav_forget(void) {
+    int i;
+    for (i = 0; i < fav_count; i++) free(fav_paths[i]);
+    free(fav_paths);
+    fav_paths = NULL;
+    fav_count = 0;
+    fav_loaded = 0;
+}
+
+static void fav_load(void) {
+    FILE *favorites;
+    char line[PATH_MAX + 2];
+    int cap = 0;
+
+    fav_forget();
+    fav_loaded = 1;
+    favorites = fopen(FAVORITES_FILE, "r");
+    if (favorites == NULL) return;
     while (fgets(line, sizeof(line), favorites) != NULL) {
-        if (strcmp(trim_line(line), path) == 0) {
-            fclose(favorites);
-            return 1;
+        char *t = trim_line(line);
+        if (t[0] == '\0') continue;
+        if (fav_count == cap) {
+            char **n;
+            cap = cap ? cap * 2 : 32;
+            n = (char **)realloc(fav_paths, cap * sizeof(char *));
+            if (n == NULL) break;
+            fav_paths = n;
         }
+        fav_paths[fav_count++] = strdup(t);
     }
     fclose(favorites);
+}
+
+static int is_favorite_path(const char *path) {
+    int i;
+    if (!fav_loaded) fav_load();
+    for (i = 0; i < fav_count; i++) {
+        if (fav_paths[i] != NULL && strcmp(fav_paths[i], path) == 0) return 1;
+    }
     return 0;
 }
 
@@ -983,6 +1263,8 @@ static int toggle_favorite(const char *path) {
     char line[PATH_MAX + 2];
     char tmp_path[PATH_MAX];
     int found = 0;
+
+    fav_loaded = 0;
 
     mkdir(PM_DIR, 0777);
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", FAVORITES_FILE);
@@ -1012,6 +1294,7 @@ static int toggle_favorite(const char *path) {
 }
 
 static void remove_favorite_path(const char *path) {
+    fav_loaded = 0;
     FILE *favorites;
     FILE *updated;
     char line[PATH_MAX + 2];
@@ -2075,16 +2358,6 @@ static void remove_tree(const char *path) {
     system(cmd);
 }
 
-static int jar_has_entry(const char *jar_path, const char *entry) {
-    char cmd[PATH_MAX * 2 + 256];
-    int rc;
-    snprintf(cmd, sizeof(cmd),
-        "unzip -l \"%s\" \"%s\" >/dev/null 2>&1",
-        jar_path, entry);
-    rc = system(cmd);
-    return rc == 0;
-}
-
 /*
  * The scratchpad (.sp: the game's data and saves) is used in place, next to
  * the .jar; it is created there when the game has none. Older builds worked
@@ -2871,6 +3144,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
         break;
     case SDLK_b: /* B = back/refresh */
         if (!leave_folder()) {
+            list_cache_clear();
             scan_games();
         }
         break;
