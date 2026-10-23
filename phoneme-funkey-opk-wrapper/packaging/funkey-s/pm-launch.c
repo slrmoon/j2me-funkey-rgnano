@@ -2067,24 +2067,45 @@ static int jar_has_entry(const char *jar_path, const char *entry) {
     return rc == 0;
 }
 
+/*
+ * The scratchpad (.sp: the game's data and saves) is used in place, next to
+ * the .jar; it is created there when the game has none. Older builds worked
+ * on a copy in .pm/scratchpad: that copy holds the saves, so it is moved
+ * back next to the game once.
+ */
 static void prepare_doja_scratchpad(GameEntry *game, char *out, size_t out_size) {
     struct stat st;
-    char dir[PATH_MAX];
+    char old[PATH_MAX];
 
     if (out_size == 0) return;
     out[0] = '\0';
-    if (game == NULL || !game->is_doja) return;
+    if (game == NULL || !game->is_doja || game->sp_path[0] == '\0') return;
 
-    snprintf(dir, sizeof(dir), "%s/scratchpad", PM_DIR);
-    mkdir(dir, 0777);
-    snprintf(out, out_size, "%s/%s.sp", dir, game->config);
-
-    if (stat(out, &st) == 0) {
-        return;
+    snprintf(out, out_size, "%s", game->sp_path);
+    /* jar caches of older builds (now written to /tmp) */
+    {
+        char dir[PATH_MAX];
+        DIR *d;
+        snprintf(dir, sizeof(dir), "%s/scratchpad", PM_DIR);
+        d = opendir(dir);
+        if (d != NULL) {
+            struct dirent *ent;
+            while ((ent = readdir(d)) != NULL) {
+                if (strncmp(ent->d_name, "jarinflater-", 12) == 0) {
+                    snprintf(old, sizeof(old), "%s/%s", dir, ent->d_name);
+                    unlink(old);
+                }
+            }
+            closedir(d);
+        }
     }
-
-    if (game->sp_path[0] != '\0' && stat(game->sp_path, &st) == 0) {
-        copy_file(game->sp_path, out);
+    snprintf(old, sizeof(old), "%s/scratchpad/%s.sp", PM_DIR, game->config);
+    if (stat(old, &st) == 0) {
+        if (rename(old, out) != 0) {
+            /* other file system: copy, then drop the old copy */
+            copy_file(old, out);
+            unlink(old);
+        }
     }
 }
 

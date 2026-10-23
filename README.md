@@ -237,8 +237,9 @@ written for the DoJa profile (`com.nttdocomo.*`) instead of MIDP. A game is a
 
 - **Install:** put the `.jar`, `.jam` and (if you have it) `.sp` into `java/`.
   A `.jar` counts as i-appli when its `.jam` has the same name or is the only
-  `.jam` in the folder and its `AppClass` is in the jar. The scratchpad is
-  copied to `.pm/scratchpad/` on first start and the game saves there.
+  `.jam` in the folder and its `AppClass` is in the jar. The game reads and
+  saves its scratchpad in place (`<game>.sp` next to the `.jar`, created when
+  missing); nothing is copied elsewhere.
 - **Screen:** the game's `DrawArea` (240x240 when missing) becomes the screen
   size, the usual scaling options apply. Keys use the `doja` profile
   (D-pad, A = select, soft keys, 0-9, `*`, `#`).

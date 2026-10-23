@@ -16,12 +16,17 @@ public class JarInflater {
     }
 
     public JarInflater(InputStream in) throws IOException {
+        /* written to /tmp (RAM) on every use: nothing next to the games,
+         * never stale when the game updates its scratchpad */
         tempJarPath = makeCachePath(nextId++);
-        if (cacheExists(tempJarPath)) {
-            System.out.println("DoJa JarInflater cache=" + tempJarPath);
-        } else {
+        try {
             writeTempJar(in, tempJarPath);
-            System.out.println("DoJa JarInflater cache write=" + tempJarPath);
+        } catch (IOException e) {
+            tempJarPath = makeScratchPath(nextId - 1);
+            writeTempJar(in, tempJarPath);
+        }
+        if (TRACE) {
+            System.out.println("DoJa JarInflater " + tempJarPath);
         }
     }
 
@@ -94,6 +99,19 @@ public class JarInflater {
     }
 
     private static String makeCachePath(int id) {
+        String scratch = System.getProperty("doja.scratchpad.path");
+        String name = "doja";
+        if (scratch != null) {
+            int slash = scratch.lastIndexOf('/');
+            name = scratch.substring(slash + 1);
+            if (name.endsWith(".sp")) {
+                name = name.substring(0, name.length() - 3);
+            }
+        }
+        return "/tmp/jarinflater-" + sanitize(name) + "-" + id + ".jar";
+    }
+
+    private static String makeScratchPath(int id) {
         String scratch = System.getProperty("doja.scratchpad.path");
         int slash;
         String prefix = "doja";
