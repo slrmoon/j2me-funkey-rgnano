@@ -70,10 +70,13 @@
 | Comic Elliot x Alice G | runs (comic pages) — fixed: JPEG images (via SDL_image) |
 | Flame Firefighter | runs (title) |
 | Tetra | runs (gameplay) — fixed: MLD content type 0x0201 |
-| Cabaret Secret Love (Trial) | network error dialog (needs HTTP) |
+| Cabaret Secret Love (Trial) | Online: gets to a dialog with garbled text (not investigated); Original: exits at start |
 | Cafe Far Niente Online/Original | "communication error" dialog (needs HTTP); Offline: verification error (ClassFormatError 154) in class I, with -UseVerifier the JIT crashes in it |
 | Battle City | white screen, waits for downloaded data (auth/data.html) |
-| Avatar Bakyun (P702i) | exits right after start, no error (not investigated) |
+| Avatar Bakyun (P702i) | runs (title) — fixed: several scratchpads (SPsize a,b,c), file system API |
 | BATTLE GEAR D | needs MascotCapsule 3D (C3DCanvas) |
 | FF7 Dirge of Cerberus Lost Episode (4 builds) | needs 3D (DirectBufferFactory) |
 | c.o.n.t (480x640) | Error 0 in a static initializer (not investigated) |
+
+## API coverage check (2026-10-23)
+Every `com.nttdocomo.*` method/field referenced by the 24 sample jars was checked against the runtime (`tools`: scratchpad scripts, see commit). All exist; the ones that were stubs and are now implemented: URLEncoder, Phone.getProperty, io.BufferedReader, opt.ui.j3d.Math, j3d2.C3DMath, HTMLLayout, the file system API (StorageDevice / DoJaStorageService / Folder / File / FileEntity / FileDataInput / FileDataOutput, stored in RMS), several scratchpads. Still stubs: MascotCapsule 3D (`opt.ui.j3d2` C3DGraphics, `ui.ogl` GraphicsOGL/DirectBuffer), `system.ImageStore` (picture picker), `Phone.call`, AudioPresenter CHANGE_TEMPO / TRANSPOSE_KEY.
