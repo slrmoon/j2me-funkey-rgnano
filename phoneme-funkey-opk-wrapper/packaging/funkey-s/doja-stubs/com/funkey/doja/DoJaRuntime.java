@@ -73,6 +73,9 @@ public final class DoJaRuntime implements Runnable {
                 } catch (Throwable t) {
                     System.out.println("DoJa: application start failed: " + t);
                     t.printStackTrace();
+                    if (!terminated) {
+                        fatal("start() failed", t);
+                    }
                 }
             }
         }).start();
@@ -552,11 +555,50 @@ public final class DoJaRuntime implements Runnable {
         } catch (Throwable t) {
             System.out.println("DoJa: uncaught exception in event handler: " + t);
             t.printStackTrace();
+            /* Errors (missing class/method, out of memory...) leave the game dead */
+            if (t instanceof Error) {
+                fatal("event handler", t);
+            }
         }
     }
 
     /* ------------------------------------------------------------------ */
     /* shutdown                                                            */
+
+    private static volatile String[] fatalText;
+
+    /**
+     * Shows an error screen instead of a frozen or white game screen; any
+     * key closes the game. Details stay in runmidlet.log.
+     */
+    public static void fatal(String where, Throwable t) {
+        if (fatalText != null) {
+            return;
+        }
+        String name = t.getClass().getName();
+        int dot = name.lastIndexOf('.');
+        String msg = t.getMessage();
+        fatalText = new String[] {
+            "Game error",
+            "",
+            name.substring(dot + 1),
+            msg != null ? msg : "",
+            "in " + where,
+            "",
+            "Details: runmidlet.log",
+            "Press any key to exit"
+        };
+        System.out.println("DoJa: fatal error screen (" + where + "): " + t);
+        com.nttdocomo.ui.AudioPresenter.stopAll();
+        DoJaHost h = host;
+        if (h != null) {
+            h.repaint();
+        }
+    }
+
+    public static String[] fatalText() {
+        return fatalText;
+    }
 
     public static void terminate() {
         terminated = true;
