@@ -75,6 +75,12 @@ public class JarInflater {
             throw new IllegalStateException("closed");
         }
         byte[] data = JarReader.readJarEntry(tempJarPath, name);
+        if (TRACE) {
+            Runtime r = Runtime.getRuntime();
+            System.out.println("DoJa trace: JarInflater stream " + name + " "
+                    + (data == null ? -1 : data.length) + " bytes, free "
+                    + r.freeMemory() / 1024 + "/" + r.totalMemory() / 1024 + " KB");
+        }
         return data == null ? null : new ByteArrayInputStream(data);
     }
 
