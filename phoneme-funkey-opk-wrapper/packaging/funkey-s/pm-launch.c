@@ -2073,6 +2073,27 @@ static int jar_has_entry(const char *jar_path, const char *entry) {
  * on a copy in .pm/scratchpad: that copy holds the saves, so it is moved
  * back next to the game once.
  */
+/*
+ * The VM cannot open a jar (or scratchpad) whose path has non-ASCII
+ * characters (Japanese folder names), and ':' would split the class path:
+ * such files are reached through a symlink in /tmp.
+ */
+static const char *ascii_path(const char *real, const char *link_name, char *buf, size_t size) {
+    const unsigned char *p;
+    int plain = 1;
+    for (p = (const unsigned char *) real; *p; ++p) {
+        if (*p >= 0x80 || *p == ':') {
+            plain = 0;
+            break;
+        }
+    }
+    if (plain) return real;
+    snprintf(buf, size, "/tmp/%s", link_name);
+    unlink(buf);
+    if (symlink(real, buf) != 0) return real;
+    return buf;
+}
+
 static void prepare_doja_scratchpad(GameEntry *game, char *out, size_t out_size) {
     struct stat st;
     char old[PATH_MAX];
@@ -2251,6 +2272,12 @@ static int launch_game_once(int idx) {
     if (games[idx].is_doja) {
         prepare_doja_scratchpad(&games[idx], doja_scratchpad_path,
                                 sizeof(doja_scratchpad_path));
+        if (doja_scratchpad_path[0] != '\0') {
+            char tmp[PATH_MAX];
+            const char *p = ascii_path(doja_scratchpad_path, "pm-run.sp", tmp, sizeof(tmp));
+            if (p != doja_scratchpad_path)
+                snprintf(doja_scratchpad_path, sizeof(doja_scratchpad_path), "%s", p);
+        }
     }
 
     /* set env vars BEFORE fork so child inherits them + system PATH etc */
@@ -2433,11 +2460,15 @@ static int launch_game_once(int idx) {
                     fclose(jf);
                 }
             }
-            if (plat->support_jar != NULL) {
-                snprintf(classpath, sizeof(classpath), "%s:%s/%s",
-                         jar_path, PM_DIR, plat->support_jar);
-            } else {
-                snprintf(classpath, sizeof(classpath), "%s", jar_path);
+            {
+                char jar_link[PATH_MAX];
+                const char *jp = ascii_path(jar_path, "pm-run.jar", jar_link, sizeof(jar_link));
+                if (plat->support_jar != NULL) {
+                    snprintf(classpath, sizeof(classpath), "%s:%s/%s",
+                             jp, PM_DIR, plat->support_jar);
+                } else {
+                    snprintf(classpath, sizeof(classpath), "%s", jp);
+                }
             }
             if (plat->encoding != NULL) {
                 snprintf(prop_encoding, sizeof(prop_encoding),
