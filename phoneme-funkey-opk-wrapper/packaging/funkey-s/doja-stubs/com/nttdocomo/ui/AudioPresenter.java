@@ -65,8 +65,25 @@ public class AudioPresenter implements MediaPresenter {
         return new AudioPresenter();
     }
 
+    /*
+     * DoJa-4.0 guarantees at least four presenters on explicit ports and
+     * throws for a port past the last one; games probe the count by calling
+     * getAudioPresenter(n) until it throws (THE Battle Cats). Same default as
+     * openDoJa, -Ddoja.audio.ports=N to change.
+     */
+    private static int portCount() {
+        try {
+            String v = System.getProperty("doja.audio.ports");
+            if (v != null) {
+                return Math.max(1, Integer.parseInt(v.trim()));
+            }
+        } catch (RuntimeException e) {
+        }
+        return 4;
+    }
+
     public static AudioPresenter getAudioPresenter(int port) {
-        if (port < 0) {
+        if (port < 0 || port >= portCount()) {
             throw new IllegalArgumentException("port");
         }
         return new AudioPresenter(port);
