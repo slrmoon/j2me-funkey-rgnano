@@ -58,3 +58,22 @@
 - Test switch: `PHONEME_MLD_MIDI=1` or the file `/mnt/FunKey/.pm/mld-midi` turns native MLD off (DoJa falls back to MLD -> MIDI -> EAS). User confirmed: no lag with it.
 - Fast mode (default): one synth pass per two chip ticks (envelope/LFO/phase rates scaled), 1.8-1.9x faster (x86 and qemu-arm). `PHONEME_MLD_EXACT=1` keeps the bit-exact path (tools set it; all 44 MLDs still identical). Fast vs exact spectra below 8 kHz correlate 0.99+ (one file 0.88).
 - Voice limit 16 in fast mode (quietest released, else oldest held note stolen): 3.2x faster than exact in total; median spectral correlation 0.98; dense jingles (01, 30, 31, 43) lose 15-30% level even at 32 voices. Change `MAX_VOICES` in fka_mld.c (24 = 2.5x, median 0.99).
+
+## Compatibility run (2026-10-23, 23 builds of 15 games from the Keitai Archive sample, qemu, 36 s each with keys)
+| Game | Result |
+|---|---|
+| ( `Д`)MT! | runs (gameplay) |
+| 10 Seconds (Jubyo) | runs (title) |
+| BakeGyamon Quiz Part 2 | runs (menu) — fixed: JarInflater(byte[]), getSize (Error 137) |
+| Bomberman '08 | runs (save slot menu) — fixed: Shift-JIS strings (NoClassDefFoundError SJIS_Reader) |
+| Chobi Hige | runs (player count menu) |
+| Comic Elliot x Alice G | runs (comic pages) — fixed: JPEG images (via SDL_image) |
+| Flame Firefighter | runs (title) |
+| Tetra | runs (gameplay) — fixed: MLD content type 0x0201 |
+| Cabaret Secret Love (Trial) | network error dialog (needs HTTP) |
+| Cafe Far Niente Online/Original | "communication error" dialog (needs HTTP); Offline: verification error (ClassFormatError 154) in class I, with -UseVerifier the JIT crashes in it |
+| Battle City | white screen, waits for downloaded data (auth/data.html) |
+| Avatar Bakyun (P702i) | exits right after start, no error (not investigated) |
+| BATTLE GEAR D | needs MascotCapsule 3D (C3DCanvas) |
+| FF7 Dirge of Cerberus Lost Episode (4 builds) | needs 3D (DirectBufferFactory) |
+| c.o.n.t (480x640) | Error 0 in a static initializer (not investigated) |
