@@ -58,7 +58,12 @@ public final class DoJaRuntime implements Runnable {
     public static void startApplication(final String className) {
         loop = new DoJaRuntime();
         eventThread = new Thread(loop);
-        postRun(new Runnable() {
+        /*
+         * start() runs on its own thread, like on a handset: many games
+         * never return from it (their main loop is inside) and still get
+         * key events and paint() from the event thread.
+         */
+        new Thread(new Runnable() {
             public void run() {
                 try {
                     Object o = Class.forName(className).newInstance();
@@ -70,7 +75,7 @@ public final class DoJaRuntime implements Runnable {
                     t.printStackTrace();
                 }
             }
-        });
+        }).start();
         eventThread.start();
     }
 
