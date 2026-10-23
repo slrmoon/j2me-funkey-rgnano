@@ -1661,7 +1661,7 @@ static int mld_parse(Mld *m, const uint8_t *src, int srclen)
     /* header */
     h = rd_sub(&r, rd_u16(&r));
     contentType = rd_u16(&h);
-    if (contentType != 0x0101) goto fail;
+    if (contentType != 0x0101 && contentType != 0x0201) goto fail;   /* 0x0201: older files */
     numTracks = rd_u8(&h);
     if (numTracks > 4) goto fail;
     m->ntracks = numTracks;
