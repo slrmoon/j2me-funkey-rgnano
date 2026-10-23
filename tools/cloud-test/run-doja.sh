@@ -47,6 +47,6 @@ echo "doja class=$APP_CLASS lcd=$LCD param=$APP_PARAM"
 timeout -s KILL "$2" qemu-arm -cpu cortex-a7 -L "$T/qroot" -E LD_PRELOAD="$T/tools/inject.so" \
     ./runMidlet $VMARGS "-Ddoja.app.class=$APP_CLASS" "-Ddoja.app.param=$APP_PARAM" \
     "-Ddoja.app.ver=$APP_VER" -Dmicroedition.encoding=SJIS "-Ddoja.scratchpad.path=$SP" \
-    "-Ddoja.jam.hex=$(od -An -v -tx1 "$jam" | tr -d ' \n')" \
+    "-Ddoja.spsize=$(jamval SPsize | tr -d ' ')" "-Ddoja.jam.hex=$(od -An -v -tx1 "$jam" | tr -d ' \n')" \
     -classpathext "$jar:$HOME_DIR/lib/doja-support.jar" internal com.funkey.doja.DoJaMIDlet
 echo "exit=$?"

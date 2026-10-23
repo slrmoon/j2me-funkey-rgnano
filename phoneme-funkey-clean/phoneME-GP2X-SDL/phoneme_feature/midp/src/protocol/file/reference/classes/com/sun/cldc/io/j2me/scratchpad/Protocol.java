@@ -35,12 +35,80 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
 
         stream = new RandomAccessStream();
         stream.connect(path, mode == Connector.READ ? Connector.READ : Connector.READ_WRITE);
-        stream.setPosition(SP_HEADER_SIZE + pos);
+        /*
+         * DoJa 4+ can declare several scratchpads (SPsize = a,b,c), addressed
+         * as scratchpad:///N. The .sp header holds their sizes: 16
+         * little-endian ints, -1 after the last one. Segment N starts after
+         * the previous ones and a stream does not run past its segment.
+         */
+        int index = parseIndex(name);
+        int base = 0;
+        int segSize = -1;
+        byte[] hdr = new byte[SP_HEADER_SIZE];
+        int got = 0;
+        stream.setPosition(0);
+        while (got < hdr.length) {
+            int n = stream.readBytes(hdr, got, hdr.length - got);
+            if (n <= 0) {
+                break;
+            }
+            got += n;
+        }
+        if (got < SP_HEADER_SIZE || headerSize(hdr, 0) <= 0) {
+            /* new scratchpad: sizes from the .jam (launcher: -Ddoja.spsize) */
+            String sizes = System.getProperty("doja.spsize");
+            if (sizes != null && sizes.length() > 0) {
+                for (int i = 0; i < SP_HEADER_SIZE; i++) {
+                    hdr[i] = (byte) 0xff;
+                }
+                int k = 0, v = 0;
+                boolean any = false;
+                for (int i = 0; i <= sizes.length() && k < 16; i++) {
+                    char ch = i < sizes.length() ? sizes.charAt(i) : ',';
+                    if (ch >= '0' && ch <= '9') {
+                        v = v * 10 + (ch - '0');
+                        any = true;
+                    } else if (ch == ',') {
+                        if (any) {
+                            hdr[k * 4] = (byte) v;
+                            hdr[k * 4 + 1] = (byte) (v >> 8);
+                            hdr[k * 4 + 2] = (byte) (v >> 16);
+                            hdr[k * 4 + 3] = (byte) (v >> 24);
+                            k++;
+                        }
+                        v = 0;
+                        any = false;
+                    }
+                }
+                if (k > 0) {
+                    got = SP_HEADER_SIZE;
+                    if (mode != Connector.READ) {
+                        stream.setPosition(0);
+                        stream.writeBytes(hdr, 0, SP_HEADER_SIZE);
+                        stream.commitWrite();
+                    }
+                }
+            }
+        }
+        if (got == SP_HEADER_SIZE && headerSize(hdr, 0) > 0) {
+            for (int i = 0; i < index && i < 16; i++) {
+                int sz = headerSize(hdr, i);
+                if (sz <= 0) {
+                    break;
+                }
+                base += sz;
+            }
+            segSize = index < 16 ? headerSize(hdr, index) : -1;
+            if (segSize > 0 && pos <= segSize && (length < 0 || pos + length > segSize)) {
+                length = segSize - pos;
+            }
+        }
+        stream.setPosition(SP_HEADER_SIZE + base + pos);
         this.mode = mode;
         remaining = length;
         open = true;
         if (TRACE) {
-            System.out.println("DoJa scratchpad open pos=" + pos + " length=" + length);
+            System.out.println("DoJa scratchpad open " + name + " base=" + base + " pos=" + pos + " length=" + length);
         }
         return this;
     }
@@ -253,6 +321,30 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
                 }
             }
         }
+    }
+
+    private static int headerSize(byte[] h, int i) {
+        int o = i * 4;
+        return (h[o] & 255) | (h[o + 1] & 255) << 8 | (h[o + 2] & 255) << 16 | (h[o + 3] & 255) << 24;
+    }
+
+    /** "///N;pos=..." -> N (0 when missing). */
+    private static int parseIndex(String name) {
+        if (name == null) {
+            return 0;
+        }
+        int i = 0;
+        while (i < name.length() && name.charAt(i) == '/') {
+            i++;
+        }
+        int v = 0;
+        boolean any = false;
+        while (i < name.length() && name.charAt(i) >= '0' && name.charAt(i) <= '9') {
+            v = v * 10 + (name.charAt(i) - '0');
+            i++;
+            any = true;
+        }
+        return any ? v : 0;
     }
 
     private static int parseIntParam(String name, String key, int fallback) {

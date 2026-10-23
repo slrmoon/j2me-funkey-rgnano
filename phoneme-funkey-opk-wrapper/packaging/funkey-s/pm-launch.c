@@ -2416,6 +2416,7 @@ static int launch_game_once(int idx) {
             char prop_ver[192];
             char prop_encoding[64];
             char prop_scratchpad[PATH_MAX + 32];
+            char prop_spsize[160];
             static char prop_jam[2 * 8192 + 32];
             prop_jam[0] = '\0';
             if (games[idx].is_doja) {
@@ -2453,7 +2454,14 @@ static int launch_game_once(int idx) {
                          games[idx].app_ver);
                 snprintf(prop_scratchpad, sizeof(prop_scratchpad),
                          "-Ddoja.scratchpad.path=%s", doja_scratchpad_path);
+                {
+                    char sizes[128];
+                    if (!read_jam_value(games[idx].jam_path, "SPsize", sizes, sizeof(sizes)))
+                        sizes[0] = '\0';
+                    snprintf(prop_spsize, sizeof(prop_spsize), "-Ddoja.spsize=%s", sizes);
+                }
             } else {
+                prop_spsize[0] = '\0';
                 prop_app[0] = '\0';
                 prop_param[0] = '\0';
                 prop_ver[0] = '\0';
@@ -2467,6 +2475,7 @@ static int launch_game_once(int idx) {
             prop_ver,
             prop_encoding,
             prop_scratchpad,
+            prop_spsize,
             prop_jam[0] ? prop_jam : "-Ddoja.jam.hex=",
             "-classpathext",
             classpath,
