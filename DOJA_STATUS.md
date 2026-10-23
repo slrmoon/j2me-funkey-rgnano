@@ -80,3 +80,8 @@
 
 ## API coverage check (2026-10-23)
 Every `com.nttdocomo.*` method/field referenced by the 24 sample jars was checked against the runtime (`tools`: scratchpad scripts, see commit). All exist; the ones that were stubs and are now implemented: URLEncoder, Phone.getProperty, io.BufferedReader, opt.ui.j3d.Math, j3d2.C3DMath, HTMLLayout, the file system API (StorageDevice / DoJaStorageService / Folder / File / FileEntity / FileDataInput / FileDataOutput, stored in RMS), several scratchpads. Still stubs: MascotCapsule 3D (`opt.ui.j3d2` C3DGraphics, `ui.ogl` GraphicsOGL/DirectBuffer), `system.ImageStore` (picture picker), `Phone.call`, AudioPresenter CHANGE_TEMPO / TRANSPOSE_KEY.
+
+## Second sample (2026-10-23) and fixes
+Fixed: `IApplication.start()` now runs on its own thread (games with their main loop inside start() got no keys / paint); default encoding really SJIS at run time (it was fixed to ISO8859-1 when System.out was romized); games in folders with non-ASCII names (launcher symlinks them via /tmp).
+Now running in qemu (36 s with keys): MT!, 10 Seconds, Avatar Bakyun (menus), BakeGyamon Quiz 2 (gameplay), Battle City (Patched; gameplay), Bomberman '08, Cabaret Secret Love Online (story text), Chobi Hige, Comic Elliot x Alice, Flame Firefighter (gameplay), Tetra, BreakDown, 30 Second Rocket (gameplay), Bio Miracle Bokutte Upa (gameplay), Buta-san, FIFA World Cup 2006 (menus, text).
+Not running: Battle City Original and Cabaret Original (exit at start, expect the network), Cafe Far Niente (network dialog / verifier error), BATTLE GEAR D and FF7 DoC (3D), c.o.n.t (Error 0 in a static initializer).
