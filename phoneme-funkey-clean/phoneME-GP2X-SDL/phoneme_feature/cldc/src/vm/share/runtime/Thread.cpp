@@ -192,6 +192,43 @@ void Thread::start_lightweight_thread() {
 }
 #endif
 
+/* FunKey: tells the screen layer that a Java thread died, so a game that
+ * stops drawing afterwards gets an error screen instead of a frozen one.
+ * Weak: the plain cldc_vm has no such layer. */
+extern "C" void PhoneMEUncaughtException(const char *cls, const char *msg)
+    __attribute__((weak));
+
+static void note_uncaught_exception(Oop *exception) {
+  if (PhoneMEUncaughtException == NULL) {
+    return;
+  }
+  char cls[96];
+  char msg[128];
+  cls[0] = 0;
+  msg[0] = 0;
+  {
+    Throwable::Raw t = exception->obj();
+    JavaClass::Raw jc = t.blueprint();
+    Symbol::Raw name = jc().name();
+    int n = name().length();
+    int i;
+    for (i = 0; i < n && i < (int)sizeof(cls) - 1; i++) {
+      cls[i] = (char)name().byte_at(i);
+    }
+    cls[i] = 0;
+    String::Raw m = t().message();
+    if (m.not_null()) {
+      n = m().count();
+      for (i = 0; i < n && i < (int)sizeof(msg) - 1; i++) {
+        jchar c = m().char_at(i);
+        msg[i] = (c >= 32 && c < 127) ? (char)c : '?';
+      }
+      msg[i] = 0;
+    }
+  }
+  PhoneMEUncaughtException(cls, msg);
+}
+
 void Thread::lightweight_thread_uncaught_exception() {
   Oop::Raw exception = Thread::current_pending_exception();
   if (exception.equals(Universe::string_class())) {
@@ -199,6 +236,7 @@ void Thread::lightweight_thread_uncaught_exception() {
     // Task::get_termination_object()
     clear_current_pending_exception();
   } else {
+    note_uncaught_exception(&exception);
     tty->print(MSG_UNCAUGHT_EXCEPTIONS);
     print_current_pending_exception_stack_trace();
     clear_current_pending_exception();

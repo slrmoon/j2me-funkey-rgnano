@@ -105,6 +105,8 @@ void PhoneMEOverlayRefresh(void);
 int PhoneMEOverlayIsVisible(void);
 void PhoneMEOverlayRunModal(void);
 void PhoneMEProfileTick(void);
+int PhoneMEFatalPoll(void);
+void PhoneMEFatalNoteKey(void);
 
 int PhoneMEInputGetBindCount()
 {
@@ -597,6 +599,9 @@ int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMid
     }
     return 0;
   }
+  if (event->type == SDL_KEYDOWN || event->type == SDL_JOYBUTTONDOWN)
+     { PhoneMEFatalNoteKey();
+     }
   if ((event->type == SDL_KEYDOWN) || (event->type == SDL_KEYUP))
      { return KeyboardCheck(event, pNewSignal, pNewMidpEvent);
      }
@@ -638,7 +643,10 @@ void checkForSystemSignal(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent,
   jlong stopTime = JVM_JavaMilliSeconds() + (timeout > 0 ? timeout : 0);
   PhoneMEProfileTick();
   for (;;)
-     { if (SDL_PollEvent(&event))
+     { if (PhoneMEFatalPoll())
+          { if (RequestGracefulShutdown(pNewSignal, pNewMidpEvent)) return;
+          }
+       if (SDL_PollEvent(&event))
           { if (CheckEvent(&event, pNewSignal, pNewMidpEvent)) return;
             continue;   /* drain the queue before sleeping */
           }
