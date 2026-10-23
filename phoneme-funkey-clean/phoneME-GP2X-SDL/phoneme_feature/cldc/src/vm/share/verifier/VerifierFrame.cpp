@@ -290,8 +290,35 @@ void VerifierFrame::replace_stack_type_with_real_type(StackMapKind from,
   }
 }
 
+int VerifierFrame::_last_error = -1;
+int VerifierFrame::_last_bci = -1;
+
+/* PHONEME_TRACE_VERIFY=1: what did not match a stackmap */
+static void trace_mismatch(const char* what, int i, int vtag, Symbol* vcls,
+                           int stag, Symbol* scls) {
+  if (getenv("PHONEME_TRACE_VERIFY") == NULL) {
+    return;
+  }
+  fprintf(stderr, "[verify]   %s %d: have tag %d %.*s, stackmap wants tag %d %.*s\n",
+          what, i, vtag,
+          vtag == ITEM_Object && vcls->not_null() ? (int)vcls->length() : 0,
+          vtag == ITEM_Object && vcls->not_null() ? (char*)vcls->utf8_data() : "",
+          stag,
+          stag == ITEM_Object && scls->not_null() ? (int)scls->length() : 0,
+          stag == ITEM_Object && scls->not_null() ? (char*)scls->utf8_data() : "");
+}
+
+#ifdef PRODUCT
+void VerifierFrame::verifier_error(ErrorMsgTag err JVM_TRAPS) {
+  _last_error = (int) err;
+  Thread::clear_current_pending_exception();
+  Throw::class_format_error(verification_error JVM_THROW);
+}
+#endif
+
 #ifndef PRODUCT
 void VerifierFrame::verifier_error(ErrorMsgTag err JVM_TRAPS) {
+  _last_error = (int) err;
   if (Thread::current_has_pending_exception() && 
     (TraceExceptions || GenerateROMImage)) {
     tty->print("Exception during verification: ");
@@ -511,6 +538,7 @@ void VerifierFrame::check_stackmap_match(Method *method, int target_bci,
         result = is_assignable_to(vlocal_tag, slocal_tag,
                                   &vlocal_class, &slocal_class JVM_NO_CHECK);
         if (!result) {
+          trace_mismatch("local", i, vlocal_tag, &vlocal_class, slocal_tag, &slocal_class);
           goto error;
         }
       }
@@ -547,6 +575,9 @@ void VerifierFrame::check_stackmap_match(Method *method, int target_bci,
         result = is_assignable_to(vstack_tag, sstack_tag,
                                   &vstack_class, &sstack_class JVM_NO_CHECK);
         if (!result) {
+          trace_mismatch("stack", i, vstack_tag, &vstack_class, sstack_tag, &sstack_class);
+        }
+        if (!result) {
           goto error;
         }
       }
@@ -577,6 +608,7 @@ void VerifierFrame::check_stackmap_match(Method *method, int target_bci,
   return;
 
 error:
+  _last_bci = target_bci;
   VFY_ERROR(err);
 }
 
@@ -624,6 +656,14 @@ bool VerifierFrame::compute_is_subtype_of(Symbol *from_name, Symbol *to_name
     }
   }
   JavaClass::Fast to = SystemDictionary::resolve(to_name, ErrorOnFailure
-                                                 JVM_CHECK_0);
+                                                 JVM_NO_CHECK);
+  if (CURRENT_HAS_PENDING_EXCEPTION || to.is_null()) {
+    // A type the platform does not have: handset games were preverified
+    // against J2SE classes, which merge e.g. String and StringBuffer into
+    // java/io/Serializable (not in CLDC). Like an interface, it accepts
+    // any object.
+    Thread::clear_current_pending_exception();
+    return true;
+  }
   return to().is_interface() || from().compute_is_subtype_of(&to);
 }
