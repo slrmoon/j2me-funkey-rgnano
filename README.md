@@ -37,6 +37,11 @@ Based on the upstream phoneME-GP2X-SDL source at:
    `.jam` in its folder), optionally with the `.sp` scratchpad. They show up
    in the list with an `i` mark. See [i-mode games (i-appli)](#i-mode-games-i-appli).
 
+In the game list: **D-pad up/down** moves, **◀▶** flips a page (the page
+number is shown top right), **L1/R1** jump to the first/last game, **A** runs,
+**SELECT** adds to favorites, **START** opens the controls. There is no limit
+on the number of games in a folder.
+
 ## Features
 
 - **MIDP 2.0 / CLDC 1.1** runtime (phoneME) with a game browser launcher.
@@ -253,9 +258,11 @@ written for the DoJa profile (`com.nttdocomo.*`) instead of MIDP. A game is a
   fast mode (half the chip rate, 16 voices) to keep the music in real time on
   the FunKey; `PHONEME_MLD_EXACT=1` gives the bit-exact output. SMAF, MIDI and
   WAV sounds go through the normal audio engine.
-- **Tested:** Rockman The Puzzle Battle (CAPCOM, 2011) — loading, menus,
-  gameplay, music; DoJa-1942 (homebrew).
-- **Not yet:** MascotCapsule 3D (`opt.ui.j3d`), ADPCM voice samples inside MLD,
+- **Tested:** Rockman The Puzzle Battle, MT!, 10 Seconds, Avatar Bakyun,
+  Bomberman '08, Bio Miracle Upa, Battle City, Tetra, BreakDown, Chobi Hige,
+  Comic Elliot, Flame Firefighter, 30 Second Rocket, Buta-san, Cafe Far
+  Niente (offline) and others; the full list is in `DOJA_STATUS.md`.
+- **Not yet:** MascotCapsule 3D (`opt.ui.j3d`) and OpenGL (`opt.ui.ogl`) — 3D games such as FIFA World Cup 2006 or Battle Gear D stop at their 3D part, ADPCM voice samples inside MLD,
   network (`HttpConnection`), text input (IME returns the initial text).
   Unimplemented calls are logged as `DoJa: unimplemented ...`.
 
