@@ -464,6 +464,12 @@ public class Helper {
         if (internalName.equals("ISO_8859_1")) {
             return "ISO8859_1";
         }
+        // Shift-JIS (i-appli): SJIS_Reader / SJIS_Writer in the MIDP i18n
+        if (internalName.equals("SHIFT_JIS") || internalName.equals("SHIFT-JIS")
+                || internalName.equals("MS932") || internalName.equals("CP932")
+                || internalName.equals("WINDOWS_31J") || internalName.equals("X_SJIS")) {
+            return "SJIS";
+        }
 
         /*
          * Since IANA character encoding names can start with a digit

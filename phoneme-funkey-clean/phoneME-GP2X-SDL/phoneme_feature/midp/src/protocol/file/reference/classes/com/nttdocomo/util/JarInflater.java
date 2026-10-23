@@ -25,6 +25,35 @@ public class JarInflater {
         }
     }
 
+    /** Jar held in memory: always written out (no id-based cache). */
+    public JarInflater(byte[] data) {
+        if (data == null) {
+            throw new NullPointerException("data");
+        }
+        tempJarPath = makeCachePath(nextId++) + ".mem.jar";
+        try {
+            writeTempJar(new ByteArrayInputStream(data), tempJarPath);
+        } catch (IOException e) {
+            tempJarPath = null;
+        }
+    }
+
+    /** Size of an entry, -1 when it is missing. */
+    public long getSize(String name) {
+        if (name == null) {
+            throw new NullPointerException("name");
+        }
+        if (tempJarPath == null) {
+            throw new IllegalStateException("closed");
+        }
+        try {
+            byte[] data = JarReader.readJarEntry(tempJarPath, name);
+            return data == null ? -1 : data.length;
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
     public byte[] getResource(String name) throws IOException {
         if (tempJarPath == null) {
             throw new IOException(name);
@@ -32,8 +61,16 @@ public class JarInflater {
         return readJarEntry(name);
     }
 
+    /** null when the entry is missing, like a handset. */
     public InputStream getInputStream(String name) throws IOException {
-        return new ByteArrayInputStream(getResource(name));
+        if (name == null) {
+            throw new NullPointerException("name");
+        }
+        if (tempJarPath == null) {
+            throw new IllegalStateException("closed");
+        }
+        byte[] data = JarReader.readJarEntry(tempJarPath, name);
+        return data == null ? null : new ByteArrayInputStream(data);
     }
 
     public void close() throws IOException {
