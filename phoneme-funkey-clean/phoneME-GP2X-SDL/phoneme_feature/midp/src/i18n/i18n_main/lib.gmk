@@ -53,6 +53,9 @@ SUBSYSTEM_I18N_JAVA_FILES = \
     $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/Gen_Reader.java \
     $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/Gen_Writer.java \
     $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/UTF_8_Reader.java \
+    $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/SJIS_Reader.java \
+    $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/SJIS_Writer.java \
+    $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/SJIS_Table.java \
     $(I18N_MAIN_DIR)/reference/classes/com/sun/$(J2ME_CONFIGURATION)/i18n/j2me/UTF_8_Writer.java \
     $(I18N_MAIN_DIR)/reference/classes/com/sun/midp/i18n/Resource.java \
     $(I18N_MAIN_DIR)/classes/com/sun/midp/i18n/ResourceBundle.java \
