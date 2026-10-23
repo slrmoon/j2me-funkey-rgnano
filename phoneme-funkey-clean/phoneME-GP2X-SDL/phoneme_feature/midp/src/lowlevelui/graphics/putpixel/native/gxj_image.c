@@ -45,6 +45,10 @@
 
 #if ENABLE_JPEG
 #include <jpegdecoder.h>
+#elif defined(ARM)
+#include <string.h>
+#include <SDL.h>
+#include <SDL_image.h>
 #endif
 
 #define CT_PALETTE  0x01
@@ -290,6 +294,39 @@ decode_jpeg
         midpFree(src);
     }
 
+#elif defined(ARM)
+    /* no phoneME JPEG decoder in this build: SDL_image (libjpeg) does it;
+     * i-appli load JPEG pictures (photos, illustrations) */
+    {
+        SDL_RWops *rw = SDL_RWFromConstMem(srcBuffer, length);
+        SDL_Surface *s = rw != NULL ? IMG_LoadTyped_RW(rw, 1, "JPG") : NULL;
+        SDL_Surface *c = NULL;
+        *creationErrorPtr = GXUTL_NATIVE_IMAGE_DECODING_ERROR;
+        if (s != NULL) {
+            SDL_PixelFormat fmt;
+            memset(&fmt, 0, sizeof(fmt));
+            fmt.BitsPerPixel = 16;
+            fmt.BytesPerPixel = 2;
+            fmt.Rmask = 0xF800; fmt.Gmask = 0x07E0; fmt.Bmask = 0x001F;
+            fmt.Rshift = 11; fmt.Gshift = 5; fmt.Bshift = 0;
+            fmt.Rloss = 3; fmt.Gloss = 2; fmt.Bloss = 3;
+            fmt.alpha = 255;
+            c = SDL_ConvertSurface(s, &fmt, SDL_SWSURFACE);
+        }
+        if (c != NULL && image->pixelData != NULL) {
+            int y, w = c->w < image->width ? c->w : image->width;
+            int h = c->h < image->height ? c->h : image->height;
+            SDL_LockSurface(c);
+            for (y = 0; y < h; y++) {
+                memcpy((unsigned char *) image->pixelData + (size_t) y * image->width * 2,
+                       (unsigned char *) c->pixels + (size_t) y * c->pitch, (size_t) w * 2);
+            }
+            SDL_UnlockSurface(c);
+            *creationErrorPtr = GXUTL_NATIVE_IMAGE_NO_ERROR;
+        }
+        if (c != NULL) SDL_FreeSurface(c);
+        if (s != NULL) SDL_FreeSurface(s);
+    }
 #else
     (void)srcBuffer;
     (void)length;

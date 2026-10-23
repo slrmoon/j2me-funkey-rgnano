@@ -70,7 +70,12 @@ public abstract class Image {
         try {
             return new FkImage(javax.microedition.lcdui.Image.createImage(data, 0, data.length), false);
         } catch (IllegalArgumentException e) {
-            throw new UIException(UIException.UNSUPPORTED_FORMAT, "image data");
+            StringBuffer sb = new StringBuffer("image data (");
+            sb.append(data.length).append(" bytes:");
+            for (int i = 0; i < 8 && i < data.length; i++) {
+                sb.append(' ').append(Integer.toHexString(data[i] & 0xff));
+            }
+            throw new UIException(UIException.UNSUPPORTED_FORMAT, sb.append(')').toString());
         }
     }
 
