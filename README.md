@@ -32,17 +32,17 @@ Based on the upstream phoneME-GP2X-SDL source at:
 2. Place it in the `emulators` folder on your FunKey/RG Nano SD card
 3. Create a `java` folder in the root of the SD card
 4. Put your `.jar` files into that `java/` folder
-5. DoJa (i-mode i-appli) games go into the same `java/` folder: keep the
-   `.jam` next to the `.jar` (same name, or the only `.jam` in its folder),
-   optionally with the `.sp` scratchpad. They show up with an `i` mark.
+5. Japanese i-mode games (**i-appli**, NTT DoCoMo DoJa) go into the same
+   `java/` folder: keep the `.jam` next to the `.jar` (same name, or the only
+   `.jam` in its folder), optionally with the `.sp` scratchpad. They show up
+   in the list with an `i` mark. See [i-mode games (i-appli)](#i-mode-games-i-appli).
 
 ## Features
 
 - **MIDP 2.0 / CLDC 1.1** runtime (phoneME) with a game browser launcher.
-- **DoJa (NTT DoCoMo i-appli)** games in the same launcher: `com.nttdocomo.*`
-  runtime (Canvas/Graphics/Panel/Dialog, timers, scratchpad, Shift-JIS,
-  Japanese bitmap fonts), screen size from the `.jam` `DrawArea`, and MLD
-  melodies on a Yamaha MA-3 FM synthesizer. See `DOJA_STATUS.md`.
+- **i-mode games (i-appli)** for NTT DoCoMo phones (DoJa profile) run from
+  the same launcher next to the MIDP games, with i-mode MLD music on a
+  Yamaha MA-3 FM synthesizer. See [i-mode games (i-appli)](#i-mode-games-i-appli).
 - **3D: JSR 184 (M3G)** on a software OpenGL ES 1.x renderer written for the
   FunKey (single Cortex-A7, RGB565): integer rasterizer with a NEON span
   loop, texture cache, fog, lighting, sprites, render-to-texture.
@@ -227,6 +227,38 @@ Advanced (environment variables in `r.sh`):
 | `PHONEME_MIDI_GAIN` | MIDI loudness, 50–100 (default 90) |
 | `PHONEME_AUDIO_BUFFER` | output buffer in samples (default 1024 ≈ 46 ms); lower = less latency, more risk of crackles |
 | `PHONEME_AUDIO_TRACE` | print the audio device setup to the log |
+
+## i-mode games (i-appli)
+
+i-appli are the Java games of Japanese NTT DoCoMo i-mode phones (2001-2010s),
+written for the DoJa profile (`com.nttdocomo.*`) instead of MIDP. A game is a
+`.jar` plus a `.jam` descriptor (Shift-JIS text with `AppClass`, `DrawArea`,
+`SPsize`...) and often a `.sp` scratchpad with its data.
+
+- **Install:** put the `.jar`, `.jam` and (if you have it) `.sp` into `java/`.
+  A `.jar` counts as i-appli when its `.jam` has the same name or is the only
+  `.jam` in the folder and its `AppClass` is in the jar. The scratchpad is
+  copied to `.pm/scratchpad/` on first start and the game saves there.
+- **Screen:** the game's `DrawArea` (240x240 when missing) becomes the screen
+  size, the usual scaling options apply. Keys use the `doja` profile
+  (D-pad, A = select, soft keys, 0-9, `*`, `#`).
+- **Runtime:** DoJa 1.x-5.x UI (Canvas with lock/unlock, Graphics incl.
+  `opt.ui` render modes, Panel and components, Dialog, Sprite, ShortTimer),
+  MediaManager images (GIF/PNG/JPEG), scratchpad, `JarInflater`, Shift-JIS
+  text with Japanese bitmap fonts (Shinonome).
+- **Sound:** i-mode **MLD** melodies are played by a C port of the Keitai Wiki
+  MLD sequencer and Yamaha MA-3 FM synthesizer, with the fixes from openDoJa
+  (presets, timing, repeats, cue-point loops, vibrato). By default it runs in a
+  fast mode (half the chip rate, 16 voices) to keep the music in real time on
+  the FunKey; `PHONEME_MLD_EXACT=1` gives the bit-exact output. SMAF, MIDI and
+  WAV sounds go through the normal audio engine.
+- **Tested:** Rockman The Puzzle Battle (CAPCOM, 2011) — loading, menus,
+  gameplay, music; DoJa-1942 (homebrew).
+- **Not yet:** MascotCapsule 3D (`opt.ui.j3d`), ADPCM voice samples inside MLD,
+  network (`HttpConnection`), text input (IME returns the initial text).
+  Unimplemented calls are logged as `DoJa: unimplemented ...`.
+
+Details and progress: [`DOJA_STATUS.md`](DOJA_STATUS.md).
 
 ## 3D (M3G)
 
