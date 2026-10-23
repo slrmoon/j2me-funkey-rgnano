@@ -64,6 +64,8 @@ public:
                       JVM_TRAPS);
 
   static void verifier_error(ErrorMsgTag err JVM_TRAPS);
+  static int _last_error;   // ErrorMsgTag of the last failure
+  static int _last_bci;
   static void verifier_error(JVM_SINGLE_ARG_TRAPS);
   void save_stack_state();
   void restore_stack_state();

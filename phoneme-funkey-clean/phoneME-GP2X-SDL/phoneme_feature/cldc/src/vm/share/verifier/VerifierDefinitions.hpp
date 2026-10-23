@@ -26,10 +26,5 @@
 
 //   Contains definitions used by the Verifier classes.
 
-#ifndef PRODUCT
 #define VFY_ERROR(code)   VerifierFrame::verifier_error(code JVM_THROW)
 #define VFY_ERROR_0(code) VerifierFrame::verifier_error(code JVM_THROW_0)
-#else
-#define VFY_ERROR(code)   VerifierFrame::verifier_error(JVM_SINGLE_ARG_THROW)
-#define VFY_ERROR_0(code) VerifierFrame::verifier_error(JVM_SINGLE_ARG_THROW_0)
-#endif

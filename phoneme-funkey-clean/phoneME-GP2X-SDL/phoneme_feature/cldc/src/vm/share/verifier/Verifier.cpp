@@ -85,7 +85,23 @@ void Verifier::verify_class_internal(InstanceClass* ic JVM_TRAPS) {
 #endif
     VerifyMethodCodes verifier;
     stackmap = method().stackmaps();
-    verifier.verify(&method, &stackmap JVM_CHECK);
+    VerifierFrame::_last_error = -1;
+    verifier.verify(&method, &stackmap JVM_NO_CHECK);
+    if (CURRENT_HAS_PENDING_EXCEPTION) {
+      // PHONEME_TRACE_VERIFY=1: which method failed and why (product too)
+      if (getenv("PHONEME_TRACE_VERIFY") != NULL) {
+        Symbol::Raw mn = method().name();
+        Symbol::Raw sig = method().signature();
+        InstanceClass::Raw h = method().holder();
+        Symbol::Raw hn = h().name();
+        fprintf(stderr, "[verify] %.*s.%.*s (code %d bytes) failed, error %d at bci %d\n",
+                (int)hn().length(), (char*)hn().utf8_data(),
+                (int)mn().length(), (char*)mn().utf8_data(),
+                (int)method().code_size(), VerifierFrame::_last_error,
+                VerifierFrame::_last_bci);
+      }
+      return;
+    }
   }
 
   StackmapGenerator::compress_verifier_stackmaps(ic JVM_CHECK);
