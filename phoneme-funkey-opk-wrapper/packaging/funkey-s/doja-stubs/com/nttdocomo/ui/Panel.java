@@ -32,6 +32,9 @@ public class Panel extends Frame {
             throw new IllegalArgumentException("component already added");
         }
         c.panel = this;
+        if (layoutManager instanceof HTMLLayout) {
+            ((HTMLLayout) layoutManager).stamp(c);
+        }
         comps.addElement(c);
         if (focus < 0 && c.focusable()) {
             focus = comps.size() - 1;
@@ -125,28 +128,58 @@ public class Panel extends Frame {
         if (explicitLayout || (layoutSet && layoutManager == null)) {
             return;
         }
+        boolean html = layoutManager instanceof HTMLLayout;
         int width = getWidth();
-        int cx = 2;
         int cy = 2;
-        int lineH = 0;
-        for (int i = 0; i < comps.size(); i++) {
-            Component c = (Component) comps.elementAt(i);
-            if (!c.visible) {
+        int i = 0, n = comps.size();
+        while (i < n) {
+            /* one line: components until the width is full or a break */
+            int start = i, lineW = 0, lineH = 0, extra = 0;
+            for (; i < n; i++) {
+                Component c = (Component) comps.elementAt(i);
+                if (!c.visible) {
+                    continue;
+                }
+                if (html && c.htmlBreaks > 0 && i > start) {
+                    break;
+                }
+                if (html && i == start && c.htmlBreaks > 1 && start > 0) {
+                    extra = (c.htmlBreaks - 1) * (Font.getDefaultFont().getHeight() + 2);
+                }
+                int cw = c.getWidth();
+                if (lineW > 0 && 2 + lineW + cw > width - 2) {
+                    break;
+                }
+                lineW += (lineW > 0 ? 2 : 0) + cw;
+                if (c.getHeight() > lineH) {
+                    lineH = c.getHeight();
+                }
+            }
+            if (i == start) {
+                i++;   /* invisible component */
                 continue;
             }
-            int cw = c.getWidth();
-            int ch = c.getHeight();
-            if (cx > 2 && cx + cw > width - 2) {
+            cy += extra;
+            Component first = (Component) comps.elementAt(start);
+            int cx = 2;
+            if (html && first.htmlAlign == 1) {
+                cx = (width - lineW) / 2;
+            } else if (html && first.htmlAlign == 2) {
+                cx = width - 2 - lineW;
+            }
+            if (cx < 2) {
                 cx = 2;
-                cy += lineH + 2;
-                lineH = 0;
             }
-            c.x = cx;
-            c.y = cy;
-            cx += cw + 2;
-            if (ch > lineH) {
-                lineH = ch;
+            for (int k = start; k < i; k++) {
+                Component c = (Component) comps.elementAt(k);
+                if (!c.visible) {
+                    continue;
+                }
+                c.x = cx;
+                c.y = cy;
+                cx += c.getWidth() + 2;
             }
+            cy += lineH + 2;
         }
     }
 
