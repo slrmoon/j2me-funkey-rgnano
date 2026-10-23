@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <lfjport_export.h>
 #include <gxj_putpixel.h>
 #include <gxj_screen_buffer.h>
@@ -1786,6 +1787,202 @@ int PhoneMEOverlayConsumeShutdown(void) {
     return 1;
 }
 
+/* ─────────────────────────────────────────────────────
+ * Game error screen.
+ *
+ * A game thread that dies with an exception leaves the screen frozen
+ * (black, white or the last frame) and the keys dead. The VM reports every
+ * uncaught exception here. The game counts as dead when no new frame follows:
+ *  - an Error (OutOfMemoryError, NoClassDefFoundError...): within 3 s;
+ *  - an exception: a key pressed afterwards gets no new frame within 1.5 s
+ *    (a static menu whose helper thread died still answers keys).
+ * Then this screen says so: A restarts, B exits.
+ * A game that has not drawn a single frame after 60 s gets a softer notice
+ * (A: keep waiting, B: exit).
+ * ──────────────────────────────────────────────────── */
+static char FatalClass[96];
+static char FatalMsg[128];
+static volatile Uint32 FatalTicks;      /* when a thread died, 0 = none pending */
+static Uint32 FatalFrameTicks;          /* last game frame */
+static Uint32 FatalStartTicks;
+static int FatalVisible;                /* 1 = error, 2 = nothing drawn yet */
+static int FatalNoticeDone;
+static Uint32 FatalExitTicks;
+static int FatalIsError;                /* the class name ends with "Error" */
+static Uint32 FatalKeyTicks;            /* first key after the exception */
+
+void PhoneMEUncaughtException(const char *cls, const char *msg) {
+    if (FatalTicks != 0 || FatalVisible) return;   /* keep the first one */
+    snprintf(FatalClass, sizeof(FatalClass), "%s", cls ? cls : "");
+    snprintf(FatalMsg, sizeof(FatalMsg), "%s", msg ? msg : "");
+    {
+        size_t n = strlen(FatalClass);
+        FatalIsError = n > 5 && strcmp(FatalClass + n - 5, "Error") == 0;
+    }
+    FatalKeyTicks = 0;
+    FatalTicks = SDL_GetTicks();
+    if (FatalTicks == 0) FatalTicks = 1;
+}
+
+/* a key went to the game */
+void PhoneMEFatalNoteKey(void) {
+    if (FatalTicks != 0 && FatalKeyTicks == 0) {
+        FatalKeyTicks = SDL_GetTicks();
+        if (FatalKeyTicks == 0) FatalKeyTicks = 1;
+    }
+}
+
+static void fatal_frame_tick(void) {
+    FatalFrameTicks = SDL_GetTicks();
+}
+
+/* draws a long line in pieces that fit the panel */
+static int fatal_draw_wrapped(int y, const char *text, Uint32 color) {
+    char line[40];
+    int cols = (SDL_FULLWIDTH - 36) / 8;
+    int len = (int)strlen(text);
+    int pos = 0;
+    if (cols > (int)sizeof(line) - 1) cols = sizeof(line) - 1;
+    while (pos < len && y < SDL_FULLHEIGHT - 44) {
+        int n = len - pos;
+        if (n > cols) {
+            int k = cols;               /* break at the last space that fits */
+            while (k > 0 && text[pos + k] != ' ') k--;
+            n = k > 0 ? k : cols;
+        }
+        memcpy(line, text + pos, n);
+        line[n] = 0;
+        stringColor(Native_SDL_Screen, 18, y, line, color);
+        pos += n;
+        while (pos < len && text[pos] == ' ') pos++;
+        y += 11;
+    }
+    return y;
+}
+
+/* "  0" (a bytecode index) is no message */
+static int fatal_has_text(const char *s) {
+    for (; *s; s++) {
+        if ((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z')) return 1;
+    }
+    return 0;
+}
+
+static void fatal_draw(void) {
+    int y;
+    const char *name;
+    if (!FatalVisible) return;
+    boxColor(Native_SDL_Screen, 0, 0, SDL_FULLWIDTH - 1, SDL_FULLHEIGHT - 1, 0x000000a0);
+    boxColor(Native_SDL_Screen, 8, 24, SDL_FULLWIDTH - 8, SDL_FULLHEIGHT - 12, 0x301010e0);
+    rectangleColor(Native_SDL_Screen, 8, 24, SDL_FULLWIDTH - 8, SDL_FULLHEIGHT - 12, 0xff6060ff);
+    y = 34;
+    if (FatalVisible == 1) {
+        stringColor(Native_SDL_Screen, 18, y, "Game error", 0xff6060ff);
+        y += 18;
+        name = strrchr(FatalClass, '/');
+        name = name ? name + 1 : FatalClass;
+        y = fatal_draw_wrapped(y, name, 0xffffffff);
+        if (fatal_has_text(FatalMsg)) y = fatal_draw_wrapped(y, FatalMsg, 0xd0d0d0ff);
+        y += 6;
+        y = fatal_draw_wrapped(y, "The game stopped and will not continue.", 0x9aaab0ff);
+        y = fatal_draw_wrapped(y, "Details: Debug > View log", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, SDL_FULLHEIGHT - 32,
+                    overlay_can_restart() ? "A:Restart  B:Exit" : "A/B:Exit", 0xffd060ff);
+    } else {
+        stringColor(Native_SDL_Screen, 18, y, "No picture", 0xffd060ff);
+        y += 18;
+        y = fatal_draw_wrapped(y, "The game has not drawn anything for a minute.", 0xffffffff);
+        y = fatal_draw_wrapped(y, "It may be stuck or unsupported.", 0xffffffff);
+        y += 6;
+        y = fatal_draw_wrapped(y, "Details: Debug > View log", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, SDL_FULLHEIGHT - 32, "A:Wait  B:Exit", 0xffd060ff);
+    }
+}
+
+/*
+ * Called from the VM's signal check (also while every Java thread is
+ * blocked). Returns 1 when the game should be shut down.
+ */
+int PhoneMEFatalPoll(void) {
+    Uint32 now = SDL_GetTicks();
+    SDL_Event ev;
+    int shutdown = 0;
+
+    if (FatalExitTicks != 0) {
+        /* the graceful shutdown did not get through (VM out of memory...) */
+        if (now - FatalExitTicks > 6000) {
+            fprintf(stderr, "phoneME: game error screen: forced exit\n");
+            fflush(stderr);
+            sync();
+            _exit(1);
+        }
+        return 0;
+    }
+    if (FatalStartTicks == 0) FatalStartTicks = now;
+    if (OverlayVisible) return 0;
+    if (FatalTicks != 0) {
+        if (FatalFrameTicks > FatalTicks + 500) {
+            FatalTicks = 0;               /* still drawing: the game lives on */
+        } else if (FatalIsError && now - FatalTicks > 3000) {
+            FatalVisible = 1;
+        } else if (FatalKeyTicks != 0 && now - FatalTicks > 3000 &&
+                   FatalFrameTicks < FatalKeyTicks && now - FatalKeyTicks > 1500) {
+            FatalVisible = 1;
+        }
+    }
+    if (!FatalVisible && !FatalNoticeDone && FatalFrameTicks == 0 &&
+        now - FatalStartTicks > 60000) {
+        FatalVisible = 2;
+    }
+    if (!FatalVisible) return 0;
+
+    fprintf(stderr, "phoneME: %s screen (%s %s)\n",
+            FatalVisible == 1 ? "game error" : "no picture", FatalClass, FatalMsg);
+    fflush(stderr);
+    MediaSDL_PauseAll(1);
+    PhoneMEOverlayRefresh();
+    while (FatalVisible) {
+        while (SDL_PollEvent(&ev)) {
+            SDLKey key;
+            if (ev.type == SDL_QUIT) {
+                FatalVisible = 0;
+                shutdown = 1;
+                break;
+            }
+            if (ev.type != SDL_KEYDOWN) continue;
+            key = ev.key.keysym.sym;
+            if (key == SDLK_a || key == SDLK_RETURN || key == SDLK_SPACE) {
+                if (FatalVisible == 2) {
+                    FatalVisible = 0;
+                    FatalNoticeDone = 1;
+                } else {
+                    FatalVisible = 0;
+                    if (overlay_can_restart()) {
+                        overlay_request_restart();
+                        OverlayShutdownRequested = 0;
+                    }
+                    shutdown = 1;
+                }
+            } else if (key == SDLK_b || key == SDLK_q || key == SDLK_ESCAPE ||
+                       key == SDLK_x || key == SDLK_s) {
+                FatalVisible = 0;
+                shutdown = 1;
+            }
+            if (!FatalVisible) break;
+        }
+        if (FatalVisible) SDL_Delay(30);
+    }
+    if (shutdown) {
+        overlay_save_config();
+        FatalExitTicks = SDL_GetTicks();
+        return 1;
+    }
+    MediaSDL_PauseAll(0);
+    FrameLimitNext = 0;
+    PhoneMEOverlayRefresh();
+    return 0;
+}
+
 static void rotate_surface_90(unsigned short *srcPixels, int srcPitchPixels,
                               int srcWidth, int srcHeight,
                               unsigned short *dstPixels, int dstPitchPixels) {
@@ -1892,6 +2089,7 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
     SDL_UnlockSurface(Native_SDL_Screen);
     fps_draw();
     overlay_draw();
+    fatal_draw();
 }
 
 void PhoneMEOverlayRefresh(void) {
@@ -2044,6 +2242,7 @@ void lfjport_refresh(int x1, int y1, int x2, int y2)
 {
   wait_frame_limit();
   fps_count_frame();
+  fatal_frame_tick();
   update_refresh_bounds(x1, y1, x2, y2);
   SDL_UnlockSurface(Native_SDL_HScreen);
   SDL_UnlockSurface(Native_SDL_VScreen);

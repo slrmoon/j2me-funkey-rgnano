@@ -61,6 +61,11 @@ on the number of games in a folder.
 - **Debug options** in the launcher and the in-game menu: log file, detailed
   logs, FPS counter, CPU profiler and an on-device log viewer.
   See [Debugging](#debugging).
+- **Error screens** instead of frozen black/white screens: when a game thread
+  dies (OutOfMemoryError, a missing class, an exception in the game loop) and
+  the game stops drawing, a "Game error" screen names the error (A: restart,
+  B: exit); a game that crashes the runtime gets a "Game crashed" screen in
+  the launcher with a shortcut to the log.
 
 ## In-game menu
 

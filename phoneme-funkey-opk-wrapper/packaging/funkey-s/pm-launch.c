@@ -405,7 +405,7 @@ static int    delete_confirm = 0;
 
 /* ── state ──────────────────────────────────────────── */
 enum { STATE_BROWSER, STATE_KEYBINDS, STATE_LAUNCHING, STATE_RESOLUTION,
-       STATE_DEBUG, STATE_LOGVIEW };
+       STATE_DEBUG, STATE_LOGVIEW, STATE_CRASH };
 static int state = STATE_BROWSER;
 static int launching_game_idx = -1;
 
@@ -1654,6 +1654,8 @@ static char logview_lines[LOGVIEW_MAX][LOGVIEW_COLS + 1];
 static int logview_count = 0;
 static int logview_top = 0;
 static int logview_prev = 0;    /* 0 = last run, 1 = run before */
+static int logview_return = 0;  /* state to go back to (STATE_DEBUG when 0) */
+static int crash_signal = 0;    /* signal that killed the last game, 0 = none */
 
 static void logview_push(const char *text, int len) {
     if (logview_count >= LOGVIEW_MAX) {
@@ -1996,7 +1998,7 @@ static void handle_key_resolution(SDL_KeyboardEvent *key) {
             save_binds(games[launching_game_idx].config);
             launch_game(launching_game_idx);
             launching_game_idx = -1;
-            state = STATE_BROWSER;
+            state = crash_signal ? STATE_CRASH : STATE_BROWSER;
         }
         break;
     }
@@ -2552,6 +2554,7 @@ static int launch_game_once(int idx) {
         int status;
         waitpid(pid, &status, 0);
         sync();
+        crash_signal = WIFSIGNALED(status) ? WTERMSIG(status) : 0;
 
         /* re-init SDL for browser */
         SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK);
@@ -2665,6 +2668,55 @@ static void handle_key_debug(SDL_KeyboardEvent *kev) {
     }
 }
 
+/* the game process died (crash, killed): say so instead of a silent return */
+static void draw_crash(void) {
+    char buf[64];
+    const char *name;
+    int y = 6;
+
+    SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0x30, 0x10, 0x10));
+    draw_header_color("Game crashed", y, 0xff6060ff);
+    y += PM_FONT_LINE_H * 2;
+    switch (crash_signal) {
+    case SIGSEGV: name = "memory access error"; break;
+    case SIGBUS:  name = "bus error"; break;
+    case SIGILL:  name = "illegal instruction"; break;
+    case SIGFPE:  name = "arithmetic error"; break;
+    case SIGABRT: name = "aborted"; break;
+    case SIGKILL: name = "killed (out of memory?)"; break;
+    default:      name = "signal"; break;
+    }
+    stringColor(screen, 4, y, "The game closed unexpectedly:", 0xffffffff);
+    y += PM_FONT_LINE_H;
+    snprintf(buf, sizeof(buf), "%s (%d)", name, crash_signal);
+    stringColor(screen, 4, y, buf, 0xffd060ff);
+    y += PM_FONT_LINE_H * 2;
+    stringColor(screen, 4, y, "The log has the details", 0x9aaab0ff);
+    y += PM_FONT_LINE_H;
+    stringColor(screen, 4, y, "(turn on Log file in Debug).", 0x9aaab0ff);
+    stringColor(screen, 2, SCR_H - 15, "A:View log  B:Back", 0x607078ff);
+    SDL_Flip(screen);
+}
+
+static void handle_key_crash(SDL_KeyboardEvent *kev) {
+    if (kev->type != SDL_KEYDOWN) return;
+    switch (kev->keysym.sym) {
+    case SDLK_RETURN: case SDLK_SPACE: case SDLK_a:
+        logview_prev = 0;
+        logview_load();
+        logview_return = STATE_BROWSER;
+        crash_signal = 0;
+        state = STATE_LOGVIEW;
+        break;
+    case SDLK_b: case SDLK_ESCAPE: case SDLK_q:
+        crash_signal = 0;
+        state = STATE_BROWSER;
+        break;
+    default:
+        break;
+    }
+}
+
 static void draw_logview(void) {
     char buf[64];
     int i, y = 6;
@@ -2705,7 +2757,8 @@ static void handle_key_logview(SDL_KeyboardEvent *kev) {
         logview_load();
         return;
     case SDLK_b: case SDLK_a: case SDLK_ESCAPE: case SDLK_q:
-        state = STATE_DEBUG;
+        state = logview_return ? logview_return : STATE_DEBUG;
+        logview_return = 0;
         return;
     default:
         break;
@@ -2786,7 +2839,7 @@ static void handle_key_browser(SDL_KeyboardEvent *kev) {
             } else {
                 load_binds(games[game_sel].config, games[game_sel].path);
                 launch_game(game_sel);
-                state = STATE_BROWSER;
+                state = crash_signal ? STATE_CRASH : STATE_BROWSER;
             }
         }
         break;
@@ -3043,6 +3096,7 @@ int main(int argc, char **argv) {
         case STATE_RESOLUTION:  draw_resolution_picker(); break;
         case STATE_DEBUG:       draw_debug();            break;
         case STATE_LOGVIEW:     draw_logview();          break;
+        case STATE_CRASH:       draw_crash();            break;
         }
 
         while (SDL_WaitEvent(&ev)) {
@@ -3065,6 +3119,9 @@ int main(int argc, char **argv) {
                     break;
                 case STATE_LOGVIEW:
                     handle_key_logview(&ev.key);
+                    break;
+                case STATE_CRASH:
+                    handle_key_crash(&ev.key);
                     break;
                 }
                 if (ev.type == SDL_KEYDOWN) break; /* one event per frame */
