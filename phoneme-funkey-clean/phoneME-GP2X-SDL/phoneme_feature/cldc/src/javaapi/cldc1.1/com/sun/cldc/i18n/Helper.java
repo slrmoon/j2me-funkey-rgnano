@@ -42,6 +42,27 @@ public class Helper {
      */
     private static String defaultEncoding;
 
+    /*
+     * The romizer runs the static initializer at build time, when
+     * microedition.encoding (-D on the command line, SJIS for i-appli) is
+     * not set yet: read it again on the first use at run time.
+     */
+    private static boolean defaultChecked;
+
+    private static String defaultEnc() {
+        /* System.out is created at build time too (property = ISO8859_1),
+         * so an ISO value is read again until a run-time one is seen */
+        if (!defaultChecked || defaultEncoding == null
+                || defaultEncoding.startsWith("ISO")) {
+            defaultChecked = true;
+            String e = System.getProperty("microedition.encoding");
+            if (e != null && e.length() > 0) {
+                defaultEncoding = e;
+            }
+        }
+        return defaultEncoding;
+    }
+
     /**
      * Default path to the J2ME classes
      */
@@ -73,7 +94,7 @@ public class Helper {
      */
     public static Reader getStreamReader(InputStream is) {
         try {
-            return getStreamReader(is, defaultEncoding);
+            return getStreamReader(is, defaultEnc());
         } catch(UnsupportedEncodingException x) {
             try {
                 defaultEncoding = "ISO8859_1";
@@ -180,7 +201,7 @@ public class Helper {
      */
     public static Writer getStreamWriter(OutputStream os) {
         try {
-            return getStreamWriter(os, defaultEncoding);
+            return getStreamWriter(os, defaultEnc());
         } catch(UnsupportedEncodingException x) {
             try {
                 defaultEncoding = "ISO8859_1";
@@ -250,7 +271,7 @@ public class Helper {
      */
     public static char[] byteToCharArray(byte[] buffer, int offset, int length) {
         try {
-            return byteToCharArray(buffer, offset, length, defaultEncoding);
+            return byteToCharArray(buffer, offset, length, defaultEnc());
         } catch(UnsupportedEncodingException x) {
             throw new RuntimeException(
 /* #ifdef VERBOSE_EXCEPTIONS */
@@ -270,7 +291,7 @@ public class Helper {
      */
     public static byte[] charToByteArray(char[] buffer, int offset, int length) {
         try {
-            return charToByteArray(buffer, offset, length, defaultEncoding);
+            return charToByteArray(buffer, offset, length, defaultEnc());
         } catch(UnsupportedEncodingException x) {
             throw new RuntimeException(
 /* #ifdef VERBOSE_EXCEPTIONS */
