@@ -10,6 +10,9 @@ import com.funkey.doja.ResourceLoader;
  * through a cached derived image.
  */
 public abstract class Image {
+    /** GL state of this surface (com.funkey.doja.gl.FkGL) */
+    Object fkgl;
+
     javax.microedition.lcdui.Image img;
     boolean mutable;
     int transparentColor;

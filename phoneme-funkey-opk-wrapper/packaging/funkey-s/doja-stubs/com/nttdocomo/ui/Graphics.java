@@ -11,7 +11,7 @@ import com.nttdocomo.lang.XString;
  * created with the four argument getColorOfRGB()).
  */
 public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
-        com.nttdocomo.ui.graphics3d.Graphics3D {
+        com.nttdocomo.ui.graphics3d.Graphics3D, com.nttdocomo.ui.ogl.GraphicsOGL {
     public static final int BLACK = 0;
     public static final int BLUE = 1;
     public static final int LIME = 2;
@@ -63,6 +63,7 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
     int flipMode;
     boolean disposed;
     /* opt render mode (Graphics2.setRenderMode) */
+    Object r3dgl;
     int renderOp;
     /* opt.ui.Graphics2 render mode; ratios are 0..255 (255 = 100 %) */
     int renderSrc = 255;
@@ -1002,5 +1003,512 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
 
     public void renderObject3D(com.nttdocomo.ui.graphics3d.DrawableObject3D object,
             com.nttdocomo.ui.util3d.Transform transform) {
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* OpenGL ES (com.nttdocomo.ui.ogl.GraphicsOGL) on FkGL                */
+
+    private com.funkey.doja.gl.FkGL fkgl() {
+        return FkBridge.gl(this);
+    }
+
+    public void beginDrawing() {
+        com.funkey.doja.gl.Ogl.beginDrawing(fkgl());
+    }
+
+    public void endDrawing() {
+        com.funkey.doja.gl.Ogl.endDrawing(fkgl());
+    }
+
+    public void glActiveTexture(int texture) {
+        com.funkey.doja.gl.Ogl.glActiveTexture(fkgl(), texture);
+    }
+
+    public void glAlphaFunc(int func, float ref) {
+        com.funkey.doja.gl.Ogl.glAlphaFunc(fkgl(), func, ref);
+    }
+
+    public void glBindTexture(int target, int texture) {
+        com.funkey.doja.gl.Ogl.glBindTexture(fkgl(), target, texture);
+    }
+
+    public void glBlendFunc(int sfactor, int dfactor) {
+        com.funkey.doja.gl.Ogl.glBlendFunc(fkgl(), sfactor, dfactor);
+    }
+
+    public void glClear(int mask) {
+        com.funkey.doja.gl.Ogl.glClear(fkgl(), mask);
+    }
+
+    public void glClearColor(float red, float green, float blue, float alpha) {
+        com.funkey.doja.gl.Ogl.glClearColor(fkgl(), red, green, blue, alpha);
+    }
+
+    public void glClearDepthf(float depth) {
+        com.funkey.doja.gl.Ogl.glClearDepthf(fkgl(), depth);
+    }
+
+    public void glClearStencil(int s) {
+        com.funkey.doja.gl.Ogl.glClearStencil(fkgl(), s);
+    }
+
+    public void glClientActiveTexture(int texture) {
+        com.funkey.doja.gl.Ogl.glClientActiveTexture(fkgl(), texture);
+    }
+
+    public void glColor4f(float red, float green, float blue, float alpha) {
+        com.funkey.doja.gl.Ogl.glColor4f(fkgl(), red, green, blue, alpha);
+    }
+
+    public void glColorMask(boolean red, boolean green, boolean blue, boolean alpha) {
+        com.funkey.doja.gl.Ogl.glColorMask(fkgl(), red, green, blue, alpha);
+    }
+
+    public void glColorPointer(int size, int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glColorPointer(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glColorPointer(int size, int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glColorPointer(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glCompressedTexImage2D(int target, int level, int internalformat, int width, int height, int border, int imageSize, com.nttdocomo.ui.ogl.DirectBuffer data) {
+        com.funkey.doja.gl.Ogl.glCompressedTexImage2D(fkgl(), target, level, internalformat, width, height, border, imageSize, data);
+    }
+
+    public void glCompressedTexSubImage2D(int target, int level, int xoffset, int yoffset, int width, int height, int format, int imageSize, com.nttdocomo.ui.ogl.DirectBuffer data) {
+        com.funkey.doja.gl.Ogl.glCompressedTexSubImage2D(fkgl(), target, level, xoffset, yoffset, width, height, format, imageSize, data);
+    }
+
+    public void glCopyTexImage2D(int target, int level, int internalformat, int x, int y, int width, int height, int border) {
+        com.funkey.doja.gl.Ogl.glCopyTexImage2D(fkgl(), target, level, internalformat, x, y, width, height, border);
+    }
+
+    public void glCopyTexSubImage2D(int target, int level, int xoffset, int yoffset, int x, int y, int width, int height) {
+        com.funkey.doja.gl.Ogl.glCopyTexSubImage2D(fkgl(), target, level, xoffset, yoffset, x, y, width, height);
+    }
+
+    public void glCullFace(int mode) {
+        com.funkey.doja.gl.Ogl.glCullFace(fkgl(), mode);
+    }
+
+    public void glDeleteTextures(int n, int[] textures) {
+        com.funkey.doja.gl.Ogl.glDeleteTextures(fkgl(), n, textures);
+    }
+
+    public void glDepthFunc(int func) {
+        com.funkey.doja.gl.Ogl.glDepthFunc(fkgl(), func);
+    }
+
+    public void glDepthMask(boolean flag) {
+        com.funkey.doja.gl.Ogl.glDepthMask(fkgl(), flag);
+    }
+
+    public void glDepthRangef(float zNear, float zFar) {
+        com.funkey.doja.gl.Ogl.glDepthRangef(fkgl(), zNear, zFar);
+    }
+
+    public void glDisable(int cap) {
+        com.funkey.doja.gl.Ogl.glDisable(fkgl(), cap);
+    }
+
+    public void glDisableClientState(int array) {
+        com.funkey.doja.gl.Ogl.glDisableClientState(fkgl(), array);
+    }
+
+    public void glDrawArrays(int mode, int first, int count) {
+        com.funkey.doja.gl.Ogl.glDrawArrays(fkgl(), mode, first, count);
+    }
+
+    public void glDrawElements(int mode, int count, int type, com.nttdocomo.ui.ogl.DirectBuffer indices) {
+        com.funkey.doja.gl.Ogl.glDrawElements(fkgl(), mode, count, type, indices);
+    }
+
+    public void glDrawElements(int mode, int count, int type, int indices) {
+        com.funkey.doja.gl.Ogl.glDrawElements(fkgl(), mode, count, type, indices);
+    }
+
+    public void glEnable(int cap) {
+        com.funkey.doja.gl.Ogl.glEnable(fkgl(), cap);
+    }
+
+    public void glEnableClientState(int array) {
+        com.funkey.doja.gl.Ogl.glEnableClientState(fkgl(), array);
+    }
+
+    public void glFlush() {
+        com.funkey.doja.gl.Ogl.glFlush(fkgl());
+    }
+
+    public void glFogf(int pname, float param) {
+        com.funkey.doja.gl.Ogl.glFogf(fkgl(), pname, param);
+    }
+
+    public void glFogfv(int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glFogfv(fkgl(), pname, params);
+    }
+
+    public void glFrontFace(int mode) {
+        com.funkey.doja.gl.Ogl.glFrontFace(fkgl(), mode);
+    }
+
+    public void glFrustumf(float left, float right, float bottom, float top, float zNear, float zFar) {
+        com.funkey.doja.gl.Ogl.glFrustumf(fkgl(), left, right, bottom, top, zNear, zFar);
+    }
+
+    public void glGenTextures(int n, int[] textures) {
+        com.funkey.doja.gl.Ogl.glGenTextures(fkgl(), n, textures);
+    }
+
+    public int glGetError() {
+        return com.funkey.doja.gl.Ogl.glGetError(fkgl());
+    }
+
+    public void glGetIntegerv(int pname, int[] params) {
+        com.funkey.doja.gl.Ogl.glGetIntegerv(fkgl(), pname, params);
+    }
+
+    public void glHint(int target, int mode) {
+        com.funkey.doja.gl.Ogl.glHint(fkgl(), target, mode);
+    }
+
+    public void glLightModelf(int pname, float param) {
+        com.funkey.doja.gl.Ogl.glLightModelf(fkgl(), pname, param);
+    }
+
+    public void glLightModelfv(int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glLightModelfv(fkgl(), pname, params);
+    }
+
+    public void glLightf(int light, int pname, float param) {
+        com.funkey.doja.gl.Ogl.glLightf(fkgl(), light, pname, param);
+    }
+
+    public void glLightfv(int light, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glLightfv(fkgl(), light, pname, params);
+    }
+
+    public void glLineWidth(float width) {
+        com.funkey.doja.gl.Ogl.glLineWidth(fkgl(), width);
+    }
+
+    public void glLoadIdentity() {
+        com.funkey.doja.gl.Ogl.glLoadIdentity(fkgl());
+    }
+
+    public void glLoadMatrixf(float[] m) {
+        com.funkey.doja.gl.Ogl.glLoadMatrixf(fkgl(), m);
+    }
+
+    public void glLogicOp(int opcode) {
+        com.funkey.doja.gl.Ogl.glLogicOp(fkgl(), opcode);
+    }
+
+    public void glMaterialf(int face, int pname, float param) {
+        com.funkey.doja.gl.Ogl.glMaterialf(fkgl(), face, pname, param);
+    }
+
+    public void glMaterialfv(int face, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glMaterialfv(fkgl(), face, pname, params);
+    }
+
+    public void glMatrixMode(int mode) {
+        com.funkey.doja.gl.Ogl.glMatrixMode(fkgl(), mode);
+    }
+
+    public void glMultMatrixf(float[] m) {
+        com.funkey.doja.gl.Ogl.glMultMatrixf(fkgl(), m);
+    }
+
+    public void glMultiTexCoord4f(int target, float s, float t, float r, float q) {
+        com.funkey.doja.gl.Ogl.glMultiTexCoord4f(fkgl(), target, s, t, r, q);
+    }
+
+    public void glNormal3f(float nx, float ny, float nz) {
+        com.funkey.doja.gl.Ogl.glNormal3f(fkgl(), nx, ny, nz);
+    }
+
+    public void glNormalPointer(int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glNormalPointer(fkgl(), type, stride, pointer);
+    }
+
+    public void glNormalPointer(int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glNormalPointer(fkgl(), type, stride, pointer);
+    }
+
+    public void glOrthof(float left, float right, float bottom, float top, float zNear, float zFar) {
+        com.funkey.doja.gl.Ogl.glOrthof(fkgl(), left, right, bottom, top, zNear, zFar);
+    }
+
+    public void glPixelStorei(int pname, int param) {
+        com.funkey.doja.gl.Ogl.glPixelStorei(fkgl(), pname, param);
+    }
+
+    public void glPointSize(float size) {
+        com.funkey.doja.gl.Ogl.glPointSize(fkgl(), size);
+    }
+
+    public void glPolygonOffset(float factor, float units) {
+        com.funkey.doja.gl.Ogl.glPolygonOffset(fkgl(), factor, units);
+    }
+
+    public void glPopMatrix() {
+        com.funkey.doja.gl.Ogl.glPopMatrix(fkgl());
+    }
+
+    public void glPushMatrix() {
+        com.funkey.doja.gl.Ogl.glPushMatrix(fkgl());
+    }
+
+    public void glRotatef(float angle, float x, float y, float z) {
+        com.funkey.doja.gl.Ogl.glRotatef(fkgl(), angle, x, y, z);
+    }
+
+    public void glSampleCoverage(float value, boolean invert) {
+        com.funkey.doja.gl.Ogl.glSampleCoverage(fkgl(), value, invert);
+    }
+
+    public void glScalef(float x, float y, float z) {
+        com.funkey.doja.gl.Ogl.glScalef(fkgl(), x, y, z);
+    }
+
+    public void glScissor(int x, int y, int width, int height) {
+        com.funkey.doja.gl.Ogl.glScissor(fkgl(), x, y, width, height);
+    }
+
+    public void glShadeModel(int mode) {
+        com.funkey.doja.gl.Ogl.glShadeModel(fkgl(), mode);
+    }
+
+    public void glStencilFunc(int func, int ref, int mask) {
+        com.funkey.doja.gl.Ogl.glStencilFunc(fkgl(), func, ref, mask);
+    }
+
+    public void glStencilMask(int mask) {
+        com.funkey.doja.gl.Ogl.glStencilMask(fkgl(), mask);
+    }
+
+    public void glStencilOp(int fail, int zfail, int zpass) {
+        com.funkey.doja.gl.Ogl.glStencilOp(fkgl(), fail, zfail, zpass);
+    }
+
+    public void glTexCoordPointer(int size, int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glTexCoordPointer(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glTexCoordPointer(int size, int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glTexCoordPointer(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glTexEnvf(int target, int pname, float param) {
+        com.funkey.doja.gl.Ogl.glTexEnvf(fkgl(), target, pname, param);
+    }
+
+    public void glTexEnvfv(int target, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glTexEnvfv(fkgl(), target, pname, params);
+    }
+
+    public void glTexImage2D(int target, int level, int internalformat, int width, int height, int border, int format, int type, com.nttdocomo.ui.ogl.DirectBuffer pixels) {
+        com.funkey.doja.gl.Ogl.glTexImage2D(fkgl(), target, level, internalformat, width, height, border, format, type, pixels);
+    }
+
+    public void glTexParameterf(int target, int pname, float param) {
+        com.funkey.doja.gl.Ogl.glTexParameterf(fkgl(), target, pname, param);
+    }
+
+    public void glTexSubImage2D(int target, int level, int xoffset, int yoffset, int width, int height, int format, int type, com.nttdocomo.ui.ogl.DirectBuffer pixels) {
+        com.funkey.doja.gl.Ogl.glTexSubImage2D(fkgl(), target, level, xoffset, yoffset, width, height, format, type, pixels);
+    }
+
+    public void glTranslatef(float x, float y, float z) {
+        com.funkey.doja.gl.Ogl.glTranslatef(fkgl(), x, y, z);
+    }
+
+    public void glVertexPointer(int size, int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glVertexPointer(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glVertexPointer(int size, int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glVertexPointer(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glViewport(int x, int y, int width, int height) {
+        com.funkey.doja.gl.Ogl.glViewport(fkgl(), x, y, width, height);
+    }
+
+    public void glCompressedTexImage2D(int target, int level, int internalformat, int width, int height, int border, com.nttdocomo.ui.ogl.ByteBuffer data) {
+        com.funkey.doja.gl.Ogl.glCompressedTexImage2D(fkgl(), target, level, internalformat, width, height, border, data);
+    }
+
+    public void glCompressedTexSubImage2D(int target, int level, int xoffset, int yoffset, int width, int height, int format, com.nttdocomo.ui.ogl.ByteBuffer data) {
+        com.funkey.doja.gl.Ogl.glCompressedTexSubImage2D(fkgl(), target, level, xoffset, yoffset, width, height, format, data);
+    }
+
+    public void glDeleteTextures(int[] textures) {
+        com.funkey.doja.gl.Ogl.glDeleteTextures(fkgl(), textures);
+    }
+
+    public void glDrawElements(int mode, int count, com.nttdocomo.ui.ogl.DirectBuffer indices) {
+        com.funkey.doja.gl.Ogl.glDrawElements(fkgl(), mode, count, indices);
+    }
+
+    public void glGenTextures(int[] textures) {
+        com.funkey.doja.gl.Ogl.glGenTextures(fkgl(), textures);
+    }
+
+    public String glGetString(int name) {
+        return com.funkey.doja.gl.Ogl.glGetString(fkgl(), name);
+    }
+
+    public void glBindBuffer(int target, int buffer) {
+        com.funkey.doja.gl.Ogl.glBindBuffer(fkgl(), target, buffer);
+    }
+
+    public void glBufferData(int target, com.nttdocomo.ui.ogl.DirectBuffer data, int usage) {
+        com.funkey.doja.gl.Ogl.glBufferData(fkgl(), target, data, usage);
+    }
+
+    public void glBufferSubData(int target, int offset, com.nttdocomo.ui.ogl.DirectBuffer data) {
+        com.funkey.doja.gl.Ogl.glBufferSubData(fkgl(), target, offset, data);
+    }
+
+    public void glClipPlanef(int plane, float[] equation) {
+        com.funkey.doja.gl.Ogl.glClipPlanef(fkgl(), plane, equation);
+    }
+
+    public void glColor4ub(short red, short green, short blue, short alpha) {
+        com.funkey.doja.gl.Ogl.glColor4ub(fkgl(), red, green, blue, alpha);
+    }
+
+    public void glCurrentPaletteMatrixOES(int matrixpaletteindex) {
+        com.funkey.doja.gl.Ogl.glCurrentPaletteMatrixOES(fkgl(), matrixpaletteindex);
+    }
+
+    public void glDeleteBuffers(int[] buffers) {
+        com.funkey.doja.gl.Ogl.glDeleteBuffers(fkgl(), buffers);
+    }
+
+    public void glDrawTexfOES(float x, float y, float z, float width, float height) {
+        com.funkey.doja.gl.Ogl.glDrawTexfOES(fkgl(), x, y, z, width, height);
+    }
+
+    public void glDrawTexiOES(int x, int y, int z, int width, int height) {
+        com.funkey.doja.gl.Ogl.glDrawTexiOES(fkgl(), x, y, z, width, height);
+    }
+
+    public void glDrawTexsOES(short x, short y, short z, short width, short height) {
+        com.funkey.doja.gl.Ogl.glDrawTexsOES(fkgl(), x, y, z, width, height);
+    }
+
+    public void glGenBuffers(int[] buffers) {
+        com.funkey.doja.gl.Ogl.glGenBuffers(fkgl(), buffers);
+    }
+
+    public void glGetBooleanv(int pname, boolean[] params) {
+        com.funkey.doja.gl.Ogl.glGetBooleanv(fkgl(), pname, params);
+    }
+
+    public void glGetBufferParameteriv(int target, int pname, int[] params) {
+        com.funkey.doja.gl.Ogl.glGetBufferParameteriv(fkgl(), target, pname, params);
+    }
+
+    public void glGetClipPlanef(int pname, float[] eqn) {
+        com.funkey.doja.gl.Ogl.glGetClipPlanef(fkgl(), pname, eqn);
+    }
+
+    public void glGetFloatv(int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glGetFloatv(fkgl(), pname, params);
+    }
+
+    public void glGetLightfv(int light, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glGetLightfv(fkgl(), light, pname, params);
+    }
+
+    public void glGetMaterialfv(int face, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glGetMaterialfv(fkgl(), face, pname, params);
+    }
+
+    public void glGetTexEnvfv(int env, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glGetTexEnvfv(fkgl(), env, pname, params);
+    }
+
+    public void glGetTexEnviv(int env, int pname, int[] params) {
+        com.funkey.doja.gl.Ogl.glGetTexEnviv(fkgl(), env, pname, params);
+    }
+
+    public void glGetTexParameterfv(int target, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glGetTexParameterfv(fkgl(), target, pname, params);
+    }
+
+    public void glGetTexParameteriv(int target, int pname, int[] params) {
+        com.funkey.doja.gl.Ogl.glGetTexParameteriv(fkgl(), target, pname, params);
+    }
+
+    public boolean glIsBuffer(int buffer) {
+        return com.funkey.doja.gl.Ogl.glIsBuffer(fkgl(), buffer);
+    }
+
+    public boolean glIsEnabled(int cap) {
+        return com.funkey.doja.gl.Ogl.glIsEnabled(fkgl(), cap);
+    }
+
+    public boolean glIsTexture(int texture) {
+        return com.funkey.doja.gl.Ogl.glIsTexture(fkgl(), texture);
+    }
+
+    public void glLoadPaletteFromModelViewMatrixOES() {
+        com.funkey.doja.gl.Ogl.glLoadPaletteFromModelViewMatrixOES(fkgl());
+    }
+
+    public void glMatrixIndexPointerOES(int size, int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glMatrixIndexPointerOES(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glMatrixIndexPointerOES(int size, int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glMatrixIndexPointerOES(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glPointParameterf(int pname, float param) {
+        com.funkey.doja.gl.Ogl.glPointParameterf(fkgl(), pname, param);
+    }
+
+    public void glPointParameterfv(int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glPointParameterfv(fkgl(), pname, params);
+    }
+
+    public void glPointSizePointerOES(int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glPointSizePointerOES(fkgl(), type, stride, pointer);
+    }
+
+    public void glPointSizePointerOES(int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glPointSizePointerOES(fkgl(), type, stride, pointer);
+    }
+
+    public void glTexEnvi(int target, int pname, int param) {
+        com.funkey.doja.gl.Ogl.glTexEnvi(fkgl(), target, pname, param);
+    }
+
+    public void glTexEnviv(int target, int pname, int[] params) {
+        com.funkey.doja.gl.Ogl.glTexEnviv(fkgl(), target, pname, params);
+    }
+
+    public void glTexParameterfv(int target, int pname, float[] params) {
+        com.funkey.doja.gl.Ogl.glTexParameterfv(fkgl(), target, pname, params);
+    }
+
+    public void glTexParameteri(int target, int pname, int param) {
+        com.funkey.doja.gl.Ogl.glTexParameteri(fkgl(), target, pname, param);
+    }
+
+    public void glTexParameteriv(int target, int pname, int[] params) {
+        com.funkey.doja.gl.Ogl.glTexParameteriv(fkgl(), target, pname, params);
+    }
+
+    public void glWeightPointerOES(int size, int type, int stride, com.nttdocomo.ui.ogl.DirectBuffer pointer) {
+        com.funkey.doja.gl.Ogl.glWeightPointerOES(fkgl(), size, type, stride, pointer);
+    }
+
+    public void glWeightPointerOES(int size, int type, int stride, int pointer) {
+        com.funkey.doja.gl.Ogl.glWeightPointerOES(fkgl(), size, type, stride, pointer);
     }
 }

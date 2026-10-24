@@ -8,6 +8,9 @@ import com.funkey.doja.DoJaRuntime;
  * canvas shows it after paint() returns or when a lock is released.
  */
 public abstract class Canvas extends Frame {
+    /** GL state of this surface (com.funkey.doja.gl.FkGL) */
+    Object fkgl;
+
     public static final int IME_COMMITTED = 0;
     public static final int IME_CANCELED = 1;
 

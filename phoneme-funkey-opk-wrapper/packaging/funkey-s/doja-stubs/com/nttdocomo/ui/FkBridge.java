@@ -50,6 +50,43 @@ public final class FkBridge {
         return g;
     }
 
+    /** the GL state of the surface a Graphics draws on (kept across getGraphics) */
+    static com.funkey.doja.gl.FkGL gl(final Graphics g) {
+        com.funkey.doja.gl.FkGL gl = null;
+        if (g.canvas != null) {
+            gl = (com.funkey.doja.gl.FkGL) g.canvas.fkgl;
+            if (gl == null || gl.target() != g.target) {
+                final Canvas c = g.canvas;
+                gl = new com.funkey.doja.gl.FkGL(g.target);
+                gl.setChangeListener(new Runnable() {
+                    public void run() {
+                        c.drawn();
+                    }
+                });
+                c.fkgl = gl;
+            }
+        } else if (g.image != null) {
+            gl = (com.funkey.doja.gl.FkGL) g.image.fkgl;
+            if (gl == null || gl.target() != g.target) {
+                final Image im = g.image;
+                gl = new com.funkey.doja.gl.FkGL(g.target);
+                gl.setChangeListener(new Runnable() {
+                    public void run() {
+                        im.version++;
+                    }
+                });
+                im.fkgl = gl;
+            }
+        } else {
+            gl = (com.funkey.doja.gl.FkGL) g.r3dgl;
+            if (gl == null) {
+                gl = new com.funkey.doja.gl.FkGL(g.target);
+                g.r3dgl = gl;
+            }
+        }
+        return gl;
+    }
+
     static com.nttdocomo.opt.ui.j3d.FkRender render3d(final Graphics g) {
         com.nttdocomo.opt.ui.j3d.FkRender r = (com.nttdocomo.opt.ui.j3d.FkRender) g.r3d;
         if (r == null) {
