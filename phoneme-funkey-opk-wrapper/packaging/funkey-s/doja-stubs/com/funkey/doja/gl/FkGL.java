@@ -140,6 +140,44 @@ public final class FkGL {
     private boolean caOn;
     private boolean naOn;
     private boolean taOn;
+    /* arrays a draw reads: the client arrays, or the immediate-mode ones */
+    private Attrib curV = vertexArray;
+    private Attrib curC = colorArray;
+    private Attrib curN = normalArray;
+    private Attrib curT = texArray;
+    private boolean useC;
+    private boolean useN;
+    private boolean useT;
+    private final Attrib immV = new Attrib();
+    private final Attrib immC = new Attrib();
+    private final Attrib immN = new Attrib();
+    private final Attrib immT = new Attrib();
+
+    /**
+     * Immediate-mode vertices (glBegin / glEnd style): positions x,y,z,
+     * colors r,g,b,a, normals, texture s,t (arrays may be null).
+     */
+    public void drawImmediate(int mode, int n, float[] p, float[] c, float[] nn, float[] t) {
+        immV.set(3, Attrib.FLOAT, 0, p, 0);
+        immC.set(4, Attrib.FLOAT, 0, c, 0);
+        immN.set(3, Attrib.FLOAT, 0, nn, 0);
+        immT.set(2, Attrib.FLOAT, 0, t, 0);
+        curV = immV;
+        curC = immC;
+        curN = immN;
+        curT = immT;
+        useC = c != null;
+        useN = nn != null;
+        useT = t != null;
+        try {
+            drawWith(mode, null, 0, 0, n);
+        } finally {
+            curV = vertexArray;
+            curC = colorArray;
+            curN = normalArray;
+            curT = texArray;
+        }
+    }
 
     /* lights / material / fog */
     private final float[][] lAmb = new float[8][];
@@ -1127,10 +1165,17 @@ public final class FkGL {
      * in a primitive mode. idx: vertex numbers (null = first..first+count).
      */
     public void draw(int mode, int[] idx, int idxOff, int first, int count) {
-        if (count <= 0) {
+        if (!vaOn) {
             return;
         }
-        if (!vaOn || !vertexArray.valid()) {
+        useC = caOn;
+        useN = naOn;
+        useT = taOn;
+        drawWith(mode, idx, idxOff, first, count);
+    }
+
+    private void drawWith(int mode, int[] idx, int idxOff, int first, int count) {
+        if (count <= 0 || !curV.valid()) {
             return;
         }
         if (mode == POINTS || mode == LINES || mode == LINE_LOOP || mode == LINE_STRIP) {
@@ -1190,16 +1235,16 @@ public final class FkGL {
             grow(nc);
         }
         float ps = fillPositions(nc);
-        boolean colors = caOn && colorArray.valid();
+        boolean colors = useC && curC.valid();
         if (colors) {
             fillColors(nc);
         }
-        boolean normals = lighting && naOn && normalArray.valid();
+        boolean normals = lighting && useN && curN.valid();
         if (normals) {
             fillNormals(nc);
         }
         Tex t = texture2d ? bound() : null;
-        boolean textured = t != null && t.img != null && taOn && texArray.valid();
+        boolean textured = t != null && t.img != null && useT && curT.valid();
         if (textured) {
             fillTexCoords(nc);
         } else if (t != null && t.img != null && texture2d) {
@@ -1231,7 +1276,7 @@ public final class FkGL {
     private float tBiasT;
 
     private float fillPositions(int nc) {
-        Attrib va = vertexArray;
+        Attrib va = curV;
         int vs = va.size;
         float max = 0f;
         for (int i = 0; i < nc; i++) {
@@ -1267,7 +1312,7 @@ public final class FkGL {
     }
 
     private void fillColors(int nc) {
-        Attrib ca = colorArray;
+        Attrib ca = curC;
         for (int i = 0; i < nc; i++) {
             int v = corners[i];
             col[i * 4] = (byte) (clamp01(ca.get(v, 0, true)) * 255f);
@@ -1278,7 +1323,7 @@ public final class FkGL {
     }
 
     private void fillNormals(int nc) {
-        Attrib na = normalArray;
+        Attrib na = curN;
         for (int i = 0; i < nc; i++) {
             int v = corners[i];
             float x = na.get(v, 0, true);
@@ -1297,7 +1342,7 @@ public final class FkGL {
     }
 
     private void fillTexCoords(int nc) {
-        Attrib ta = texArray;
+        Attrib ta = curT;
         float smin = Float.MAX_VALUE;
         float smax = -Float.MAX_VALUE;
         for (int i = 0; i < nc; i++) {
@@ -1342,7 +1387,7 @@ public final class FkGL {
     private final float[] mvp = new float[16];
 
     private boolean toScreen(int v, float[] out) {
-        Attrib va = vertexArray;
+        Attrib va = curV;
         float x = va.get(v, 0, false);
         float y = va.size > 1 ? va.get(v, 1, false) : 0f;
         float z = va.size > 2 ? va.get(v, 2, false) : 0f;
@@ -1378,7 +1423,8 @@ public final class FkGL {
         if (nv > cap) {
             grow(nv);
         }
-        boolean colors = caOn && colorArray.valid();
+        boolean colors = useC && curC.valid();
+        Attrib colorArray = curC;
         int n = 0;
         for (int k = 0; k < segs; k++) {
             int a;

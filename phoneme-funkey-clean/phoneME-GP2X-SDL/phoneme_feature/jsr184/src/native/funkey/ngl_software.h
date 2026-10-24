@@ -1171,7 +1171,9 @@ static float ngl_sw_clip_distance(const NGLVertex *v, int plane) {
     case 2: return v->w - v->x;
     case 3: return v->y + v->w;
     case 4: return v->w - v->y;
-    case 5: return v->z + v->w;
+    /* near plane with a little slack: vertices placed exactly on it
+     * (full-screen quads at z = -near) must not be lost to rounding */
+    case 5: return v->z + v->w * 1.0002f;
     default: return v->w - v->z;
     }
 }
@@ -2260,7 +2262,7 @@ static unsigned int ngl_sw_outcode(const NGLVertex *v) {
     if (v->w - v->x < 0.0f) code |= 4U;
     if (v->y + v->w < 0.0f) code |= 8U;
     if (v->w - v->y < 0.0f) code |= 16U;
-    if (v->z + v->w < 0.0f) code |= 32U;
+    if (v->z + v->w * 1.0002f < 0.0f) code |= 32U;
     if (v->w - v->z < 0.0f) code |= 64U;
     return code;
 }
