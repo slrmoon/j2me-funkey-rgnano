@@ -1,7 +1,5 @@
 package com.nttdocomo.opt.ui.j3d;
 
-import java.util.Hashtable;
-
 import javax.microedition.m3g.Appearance;
 import javax.microedition.m3g.Background;
 import javax.microedition.m3g.Camera;
@@ -295,7 +293,6 @@ public final class FkRender {
     private static short[] pos;
     private static byte[] col;
     private static short[] tex;
-    private static final Hashtable strips = new Hashtable();
     private static final Appearance[] plainApp = new Appearance[16];
     private static boolean failed;
 
@@ -324,7 +321,6 @@ public final class FkRender {
         vaPos = new VertexArray(c, 3, 2);
         vaCol = new VertexArray(c, 4, 1);
         vaTex = new VertexArray(c, 2, 2);
-        strips.clear();
     }
 
     private javax.microedition.lcdui.Graphics bound;
@@ -455,16 +451,22 @@ public final class FkRender {
         model.set(mtx);
     }
 
+    private static TriangleStripArray[] stripCache = new TriangleStripArray[256];
+
     private static TriangleStripArray strip(int tris) {
-        Integer key = new Integer(tris);
-        TriangleStripArray s = (TriangleStripArray) strips.get(key);
+        if (tris >= stripCache.length) {
+            TriangleStripArray[] n = new TriangleStripArray[tris * 2];
+            System.arraycopy(stripCache, 0, n, 0, stripCache.length);
+            stripCache = n;
+        }
+        TriangleStripArray s = stripCache[tris];
         if (s == null) {
             int[] len = new int[tris];
             for (int i = 0; i < tris; i++) {
                 len[i] = 3;
             }
             s = new TriangleStripArray(0, len);
-            strips.put(key, s);
+            stripCache[tris] = s;
         }
         return s;
     }
@@ -603,13 +605,9 @@ public final class FkRender {
         int vx = (view[0] * nx + view[1] * ny + view[2] * nz) >> 12;
         int vy = (view[4] * nx + view[5] * ny + view[6] * nz) >> 12;
         int vz = (view[8] * nx + view[9] * ny + view[10] * nz) >> 12;
-        long len2 = (long) vx * vx + (long) vy * vy + (long) vz * vz;
-        int d = 0;
-        if (len2 > 0) {
-            int len = (int) java.lang.Math.sqrt((double) len2);
-            /* the light shines along dir: faces turned against it are lit */
-            d = (int) (-((long) vx * dirX + (long) vy * dirY + (long) vz * dirZ) / (len == 0 ? 1 : len));
-        }
+        /* normals stay unit length (4096) under rotations; the light
+         * shines along dir: faces turned against it are lit */
+        int d = -((vx * dirX + vy * dirY + vz * dirZ) >> 12);
         if (d < 0) {
             d = 0;
         }

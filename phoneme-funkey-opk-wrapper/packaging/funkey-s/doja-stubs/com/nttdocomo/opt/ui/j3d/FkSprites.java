@@ -29,6 +29,7 @@ final class FkSprites {
     }
 
     private static final int[] FAN = { 0, 1, 2, 0, 2, 3 };
+    private static final int[] TUV = new int[8];
 
     private static int quad(int n, float z, int color, int alpha, int[] tuv, Texture t) {
         for (int k = 0; k < 6; k++) {
@@ -59,7 +60,7 @@ final class FkSprites {
         int per = type == 2 ? 2 : 1;
         ensure(count);
         int n = 0;
-        int[] tuv = new int[8];
+        int[] tuv = TUV;
         for (int i = start; i < start + count; i++) {
             int color = 0xffffff;
             if (cl != null && cl.length > 0) {

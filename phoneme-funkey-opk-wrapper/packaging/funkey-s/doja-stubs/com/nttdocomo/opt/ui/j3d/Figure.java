@@ -20,6 +20,7 @@ public class Figure {
     private int[] local;
     private int[] global;
     private int[] act;
+    private boolean[] done;
 
     protected Figure() {
     }
@@ -163,7 +164,12 @@ public class Figure {
             }
         }
         /* parents come before children in MBAC files; fall back to a loop */
-        boolean[] done = new boolean[nb];
+        if (done == null || done.length < nb) {
+            done = new boolean[nb];
+        }
+        for (int b = 0; b < nb; b++) {
+            done[b] = false;
+        }
         int left = nb;
         while (left > 0) {
             int before = left;
