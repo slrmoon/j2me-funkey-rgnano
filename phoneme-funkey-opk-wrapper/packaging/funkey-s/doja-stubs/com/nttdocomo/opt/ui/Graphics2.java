@@ -36,6 +36,44 @@ public class Graphics2 extends Graphics {
         FkBridge2.setRenderMode(this, operator, srcRatio, dstRatio);
     }
 
+    public void drawSpriteSet(SpriteSet sprites) {
+        if (sprites == null) {
+            throw new NullPointerException("sprites");
+        }
+        drawSpriteSet(sprites, 0, sprites.getCount());
+    }
+
+    /** each visible sprite with its own flip and render mode */
+    public void drawSpriteSet(SpriteSet sprites, int offset, int count) {
+        if (sprites == null) {
+            throw new NullPointerException("sprites");
+        }
+        if (offset < 0 || count < 0 || offset + count > sprites.getCount()) {
+            throw new ArrayIndexOutOfBoundsException();
+        }
+        int op = FkBridge2.renderOp(this);
+        int src = FkBridge2.renderSrc(this);
+        int dst = FkBridge2.renderDst(this);
+        int flip = FkBridge2.flipMode(this);
+        try {
+            for (int i = offset; i < offset + count; i++) {
+                Sprite s = sprites.getSprite(i);
+                if (s == null || s.image == null) {
+                    throw new NullPointerException("sprite");
+                }
+                if (!s.visible) {
+                    continue;
+                }
+                super.setFlipMode(s.flipMode);
+                FkBridge2.setRenderMode(this, s.op, s.srcRatio, s.dstRatio);
+                drawImage(s.image, s.x, s.y, s.sx, s.sy, s.width, s.height);
+            }
+        } finally {
+            super.setFlipMode(flip);
+            FkBridge2.setRenderMode(this, op, src, dst);
+        }
+    }
+
     public Image getImage(int x, int y, int width, int height) {
         return getImageRegion(x, y, width, height);
     }
