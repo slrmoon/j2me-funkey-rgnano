@@ -19,7 +19,7 @@ public class Vector3D {
         long sq = (long) x * x + (long) y * y + (long) z * z;
         long len = (long) (java.lang.Math.sqrt((double) sq) + 0.5);
         if (len == 0) {
-            throw new ArithmeticException("zero vector");
+            return;     /* games pass zero vectors; leave them as they are */
         }
         x = (int) (((long) x << 12) / len);
         y = (int) (((long) y << 12) / len);

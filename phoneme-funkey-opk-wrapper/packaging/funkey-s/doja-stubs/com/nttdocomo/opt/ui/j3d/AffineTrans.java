@@ -134,6 +134,12 @@ public class AffineTrans {
             throw new NullPointerException("v");
         }
         Vector3D n = new Vector3D(v.x, v.y, v.z);
+        if (n.x == 0 && n.y == 0 && n.z == 0) {
+            m00 = 4096; m01 = 0; m02 = 0;
+            m10 = 0; m11 = 4096; m12 = 0;
+            m20 = 0; m21 = 0; m22 = 4096;
+            return;
+        }
         n.normalize();
         int c = Math.cos(a);
         int s = Math.sin(a);
@@ -163,18 +169,25 @@ public class AffineTrans {
         }
         Vector3D f = new Vector3D(look.x - position.x, look.y - position.y, look.z - position.z);
         if (f.x == 0 && f.y == 0 && f.z == 0) {
-            throw new IllegalArgumentException("look");
+            f.z = 4096;
         }
         f.normalize();
         Vector3D u = new Vector3D(up.x, up.y, up.z);
         if (u.x == 0 && u.y == 0 && u.z == 0) {
-            throw new IllegalArgumentException("up");
+            u.y = 4096;
         }
         u.normalize();
         Vector3D s = new Vector3D();
         s.cross(f, u);
         if (s.x == 0 && s.y == 0 && s.z == 0) {
-            throw new IllegalArgumentException("up");
+            /* up parallel to the view direction: pick another up */
+            u.x = 0;
+            u.y = f.z != 0 || f.x != 0 ? 4096 : 0;
+            u.z = u.y == 0 ? 4096 : 0;
+            s.cross(f, u);
+            if (s.x == 0 && s.y == 0 && s.z == 0) {
+                s.x = 4096;
+            }
         }
         s.normalize();
         Vector3D v = new Vector3D();
