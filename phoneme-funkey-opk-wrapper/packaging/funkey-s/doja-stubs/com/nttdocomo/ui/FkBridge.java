@@ -1,6 +1,5 @@
 package com.nttdocomo.ui;
 
-import com.funkey.doja.Render3D;
 
 /**
  * Entry points of com.nttdocomo.ui used by the runtime package
@@ -51,10 +50,14 @@ public final class FkBridge {
         return g;
     }
 
-    static Render3D render3d(Graphics g) {
-        Render3D r = (Render3D) g.r3d;
+    static com.nttdocomo.opt.ui.j3d.FkRender render3d(final Graphics g) {
+        com.nttdocomo.opt.ui.j3d.FkRender r = (com.nttdocomo.opt.ui.j3d.FkRender) g.r3d;
         if (r == null) {
-            r = new Render3D(g.target, g);
+            r = new com.nttdocomo.opt.ui.j3d.FkRender(g.target, new Runnable() {
+                public void run() {
+                    g.changed();
+                }
+            });
             g.r3d = r;
         }
         return r;
