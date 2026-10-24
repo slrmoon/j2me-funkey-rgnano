@@ -17,6 +17,40 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
     private int mode;
     private ScratchOutputStream out;
 
+    private static boolean rawNoted;
+
+    /** SPsize: from the launcher, else from the .jam text (-Ddoja.jam.hex) */
+    private static String spsize() {
+        String v = System.getProperty("doja.spsize");
+        if (v != null && v.trim().length() > 0) {
+            return v;
+        }
+        String hex = System.getProperty("doja.jam.hex");
+        if (hex == null) {
+            return null;
+        }
+        int n = hex.length() / 2;
+        StringBuffer line = new StringBuffer();
+        for (int i = 0; i <= n; i++) {
+            int c = i < n ? Character.digit(hex.charAt(2 * i), 16) * 16 + Character.digit(hex.charAt(2 * i + 1), 16) : '\n';
+            if (c == '\n' || c == '\r') {
+                String l = line.toString().trim();
+                line.setLength(0);
+                if (l.startsWith("SPsize")) {
+                    int eq = l.indexOf('=');
+                    if (eq > 0) {
+                        return l.substring(eq + 1).trim();
+                    }
+                }
+            } else if (c < 128) {
+                line.append((char) c);
+            } else {
+                line.append('?');
+            }
+        }
+        return null;
+    }
+
     private static final boolean TRACE = "1".equals(System.getProperty("doja.trace"));
 
     public Connection openPrim(String name, int mode, boolean timeouts)
@@ -37,13 +71,25 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
         stream.connect(path, mode == Connector.READ ? Connector.READ : Connector.READ_WRITE);
         /*
          * DoJa 4+ can declare several scratchpads (SPsize = a,b,c), addressed
-         * as scratchpad:///N. The .sp header holds their sizes: 16
-         * little-endian ints, -1 after the last one. Segment N starts after
-         * the previous ones and a stream does not run past its segment.
+         * as scratchpad:///N; segment N starts after the previous ones and a
+         * stream does not run past its segment.
+         *
+         * Two file layouts exist:
+         *  - headered (DoJa SDK emulator, Keitai World, our own files): 64
+         *    bytes of segment sizes (16 little-endian ints, -1 after the
+         *    last one), then the data;
+         *  - raw (phone dumps, some other emulators): just the data, exactly
+         *    the declared size.
+         * A header is only trusted when it looks like one; a raw file is
+         * never shifted by 64 bytes or has its first bytes overwritten.
          */
         int index = parseIndex(name);
-        int base = 0;
-        int segSize = -1;
+        int[] declared = parseSizes(spsize());
+        int declTotal = 0;
+        for (int i = 0; i < declared.length; i++) {
+            declTotal += declared[i];
+        }
+        int fileSize = stream.getSizeOf();
         byte[] hdr = new byte[SP_HEADER_SIZE];
         int got = 0;
         stream.setPosition(0);
@@ -54,56 +100,55 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
             }
             got += n;
         }
-        if (got < SP_HEADER_SIZE || headerSize(hdr, 0) <= 0) {
-            /* new scratchpad: sizes from the .jam (launcher: -Ddoja.spsize) */
-            String sizes = System.getProperty("doja.spsize");
-            if (sizes != null && sizes.length() > 0) {
+        int[] sizes = null;
+        int dataStart = SP_HEADER_SIZE;
+        if (got == SP_HEADER_SIZE) {
+            sizes = validHeader(hdr, declared, fileSize);
+        }
+        if (sizes == null) {
+            if (fileSize >= SP_HEADER_SIZE) {
+                /* raw scratchpad: data from byte 0 */
+                dataStart = 0;
+                sizes = declared.length > 0 ? declared : null;
+                if (!rawNoted && (TRACE || fileSize != declTotal)) {
+                    rawNoted = true;
+                    System.out.println("DoJa scratchpad: no header, raw layout (" + fileSize
+                            + " bytes, declared " + declTotal + ")");
+                }
+            } else if (declared.length > 0) {
+                /* new scratchpad: write the header from the .jam sizes */
                 for (int i = 0; i < SP_HEADER_SIZE; i++) {
                     hdr[i] = (byte) 0xff;
                 }
-                int k = 0, v = 0;
-                boolean any = false;
-                for (int i = 0; i <= sizes.length() && k < 16; i++) {
-                    char ch = i < sizes.length() ? sizes.charAt(i) : ',';
-                    if (ch >= '0' && ch <= '9') {
-                        v = v * 10 + (ch - '0');
-                        any = true;
-                    } else if (ch == ',') {
-                        if (any) {
-                            hdr[k * 4] = (byte) v;
-                            hdr[k * 4 + 1] = (byte) (v >> 8);
-                            hdr[k * 4 + 2] = (byte) (v >> 16);
-                            hdr[k * 4 + 3] = (byte) (v >> 24);
-                            k++;
-                        }
-                        v = 0;
-                        any = false;
-                    }
+                for (int k = 0; k < declared.length && k < 16; k++) {
+                    int v = declared[k];
+                    hdr[k * 4] = (byte) v;
+                    hdr[k * 4 + 1] = (byte) (v >> 8);
+                    hdr[k * 4 + 2] = (byte) (v >> 16);
+                    hdr[k * 4 + 3] = (byte) (v >> 24);
                 }
-                if (k > 0) {
-                    got = SP_HEADER_SIZE;
-                    if (mode != Connector.READ) {
-                        stream.setPosition(0);
-                        stream.writeBytes(hdr, 0, SP_HEADER_SIZE);
-                        stream.commitWrite();
-                    }
+                if (mode != Connector.READ) {
+                    stream.setPosition(0);
+                    stream.writeBytes(hdr, 0, SP_HEADER_SIZE);
+                    stream.commitWrite();
                 }
+                sizes = declared;
+            } else {
+                /* nothing known: keep the historical headered layout */
+                sizes = null;
             }
         }
-        if (got == SP_HEADER_SIZE && headerSize(hdr, 0) > 0) {
-            for (int i = 0; i < index && i < 16; i++) {
-                int sz = headerSize(hdr, i);
-                if (sz <= 0) {
-                    break;
-                }
-                base += sz;
+        int base = 0;
+        if (sizes != null) {
+            for (int i = 0; i < index && i < sizes.length; i++) {
+                base += sizes[i];
             }
-            segSize = index < 16 ? headerSize(hdr, index) : -1;
+            int segSize = index < sizes.length ? sizes[index] : -1;
             if (segSize > 0 && pos <= segSize && (length < 0 || pos + length > segSize)) {
                 length = segSize - pos;
             }
         }
-        stream.setPosition(SP_HEADER_SIZE + base + pos);
+        stream.setPosition(dataStart + base + pos);
         this.mode = mode;
         remaining = length;
         open = true;
@@ -321,6 +366,79 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
                 }
             }
         }
+    }
+
+    /** "a,b,c" -> sizes (empty when missing) */
+    private static int[] parseSizes(String sizes) {
+        if (sizes == null) {
+            return new int[0];
+        }
+        int[] tmp = new int[16];
+        int k = 0, v = 0;
+        boolean any = false;
+        for (int i = 0; i <= sizes.length() && k < 16; i++) {
+            char ch = i < sizes.length() ? sizes.charAt(i) : ',';
+            if (ch >= '0' && ch <= '9') {
+                v = v * 10 + (ch - '0');
+                any = true;
+            } else if (ch == ',') {
+                if (any && v > 0) {
+                    tmp[k++] = v;
+                }
+                v = 0;
+                any = false;
+            }
+        }
+        int[] r = new int[k];
+        System.arraycopy(tmp, 0, r, 0, k);
+        return r;
+    }
+
+    /**
+     * The segment sizes of a 64-byte header, or null when the bytes are not
+     * one: positive sizes, then only -1 entries, and either the same
+     * sizes as the .jam or a file large enough to hold them.
+     */
+    private static int[] validHeader(byte[] h, int[] declared, int fileSize) {
+        int n = 0;
+        long sum = 0;
+        boolean ended = false;
+        for (int i = 0; i < 16; i++) {
+            int v = headerSize(h, i);
+            if (!ended && v > 0) {
+                n++;
+                sum += v;
+            } else if (v == -1) {
+                ended = true;
+            } else {
+                return null;
+            }
+        }
+        if (n == 0) {
+            return null;
+        }
+        int[] sizes = new int[n];
+        for (int i = 0; i < n; i++) {
+            sizes[i] = headerSize(h, i);
+        }
+        boolean same = declared.length == n;
+        for (int i = 0; same && i < n; i++) {
+            same = declared[i] == sizes[i];
+        }
+        if (same) {
+            return sizes;
+        }
+        int declTotal = 0;
+        for (int i = 0; i < declared.length; i++) {
+            declTotal += declared[i];
+        }
+        if (declTotal > 0 && fileSize == declTotal) {
+            return null;   /* exactly the declared size: raw data */
+        }
+        if (SP_HEADER_SIZE + sum <= (long) fileSize) {
+            return sizes;
+        }
+        return null;
     }
 
     private static int headerSize(byte[] h, int i) {

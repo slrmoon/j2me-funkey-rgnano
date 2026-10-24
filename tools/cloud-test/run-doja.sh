@@ -17,7 +17,7 @@ jam=$base.jam
 [ -f "$jar" ] || { echo "no jar: $jar" >&2; exit 1; }
 [ -f "$jam" ] || { echo "no jam: $jam" >&2; exit 1; }
 # .jam files are Shift-JIS; the keys are ASCII
-jamval() { iconv -f SHIFT_JIS -t UTF-8 "$jam" 2>/dev/null | tr -d '\r' |
+jamval() { iconv -c -f SHIFT_JIS -t UTF-8 "$jam" 2>/dev/null | tr -d '\r' |
            sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" | head -1; }
 APP_CLASS=$(jamval AppClass)
 APP_PARAM=$(jamval AppParam)
