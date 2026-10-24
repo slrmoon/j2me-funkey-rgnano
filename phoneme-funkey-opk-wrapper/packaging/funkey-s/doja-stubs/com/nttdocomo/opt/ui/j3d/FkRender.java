@@ -717,10 +717,49 @@ public final class FkRender {
                 figureGroup(f, groupTex[g], groupFlags[g], shift, nrm);
             }
         }
-        groupTex[0] = null;
         for (int g = 0; g < groups; g++) {
             groupTex[g] = null;
         }
+        if (sphere && sphereTex != null) {
+            figureSphere(f, shift, nrm);
+        }
+    }
+
+    /** environment map: the sphere texture looked up by the view-space
+     * normal, blended half over the figure's opaque polygons */
+    private void figureSphere(Figure f, int shift, int[] nrm) {
+        FkModel m = f.model;
+        int[] p = f.posed;
+        int n = 0;
+        for (int i = 0; i < m.numPolys; i++) {
+            if (!visible(m.polyPattern[i], f.pattern) || (m.polyMaterial[i] & FkModel.MAT_BLEND) != 0) {
+                continue;
+            }
+            int base = i * 4;
+            int[] order = m.polyVerts[base + 3] >= 0 ? QUAD_STRIP : TRI;
+            if (nrm == null) {
+                normalOf(p, m.polyVerts[base], m.polyVerts[base + 1], m.polyVerts[base + 2]);
+            }
+            for (int k = 0; k < order.length; k++) {
+                int v = m.polyVerts[base + order[k]];
+                pos[n * 3] = (short) (p[v * 3] >> shift);
+                pos[n * 3 + 1] = (short) (p[v * 3 + 1] >> shift);
+                pos[n * 3 + 2] = (short) (p[v * 3 + 2] >> shift);
+                int nx = nrm == null ? faceNormal[0] : nrm[v * 3];
+                int ny = nrm == null ? faceNormal[1] : nrm[v * 3 + 1];
+                int nz = nrm == null ? faceNormal[2] : nrm[v * 3 + 2];
+                int vx = (view[0] * nx + view[1] * ny + view[2] * nz) >> 12;
+                int vy = (view[4] * nx + view[5] * ny + view[6] * nz) >> 12;
+                tex[n * 2] = (short) ((vx + 4096) >> 1);
+                tex[n * 2 + 1] = (short) ((vy + 4096) >> 1);
+                col[n * 4] = (byte) 255;
+                col[n * 4 + 1] = (byte) 255;
+                col[n * 4 + 2] = (byte) 255;
+                col[n * 4 + 3] = (byte) 128;
+                n++;
+            }
+        }
+        draw(n, 0, true, appearance(sphereTex, 1));
     }
 
     private static boolean visible(int polyPattern, int pattern) {
