@@ -147,14 +147,23 @@ public abstract class Image {
         }
     }
 
+    /**
+     * Runtime hook: images whose pixels are computed (paletted images)
+     * rebuild them here before they are read or drawn.
+     */
+    protected void fkPrepare() {
+    }
+
     /** The MIDP image holding the pixels. */
     javax.microedition.lcdui.Image raw() {
+        fkPrepare();
         checkDisposed();
         return img;
     }
 
     /** The MIDP image to draw: transparency color and alpha applied. */
     javax.microedition.lcdui.Image drawable() {
+        fkPrepare();
         checkDisposed();
         if (!transparentEnabled && alpha >= 255) {
             return img;

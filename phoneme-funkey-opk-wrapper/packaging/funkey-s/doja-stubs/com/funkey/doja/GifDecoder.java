@@ -93,7 +93,46 @@ public final class GifDecoder {
                 }
             }
 
-            return new DecodedImage(canvasWidth, canvasHeight, argb, hasAlpha);
+            DecodedImage d = new DecodedImage(canvasWidth, canvasHeight, argb, hasAlpha);
+            /* index view for PalettedImage: rows in display order */
+            byte[] idx = new byte[canvasWidth * canvasHeight];
+            if (hasAlpha && transparentIndex >= 0) {
+                for (int q = 0; q < idx.length; q++) {
+                    idx[q] = (byte) transparentIndex;
+                }
+            }
+            int[] order = new int[height];
+            if (interlaced) {
+                int[] starts = { 0, 4, 2, 1 };
+                int[] steps = { 8, 8, 4, 2 };
+                int r = 0;
+                for (int pass = 0; pass < 4; pass++) {
+                    for (int y = starts[pass]; y < height; y += steps[pass]) {
+                        order[r++] = y;
+                    }
+                }
+            } else {
+                for (int y = 0; y < height; y++) {
+                    order[y] = y;
+                }
+            }
+            for (int r = 0; r < height; r++) {
+                int y = top + order[r];
+                if (y < 0 || y >= canvasHeight) {
+                    continue;
+                }
+                for (int x = 0; x < width; x++) {
+                    int sIdx = r * width + x;
+                    int dx = left + x;
+                    if (sIdx < pixels.length && dx >= 0 && dx < canvasWidth) {
+                        idx[y * canvasWidth + dx] = pixels[sIdx];
+                    }
+                }
+            }
+            d.indices = idx;
+            d.palette = colorTable;
+            d.transparentIndex = hasAlpha ? transparentIndex : -1;
+            return d;
         }
 
         throw new IOException("No GIF image");
@@ -296,6 +335,10 @@ public final class GifDecoder {
         public final int height;
         public final int[] argb;
         public final boolean hasAlpha;
+        /** palette indices (one byte per pixel), the color table, -1 = none */
+        public byte[] indices;
+        public int[] palette;
+        public int transparentIndex = -1;
 
         DecodedImage(int w, int h, int[] pixels, boolean alpha) {
             width = w;

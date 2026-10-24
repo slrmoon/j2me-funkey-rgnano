@@ -10,4 +10,20 @@ public final class FkBridge2 {
         g.renderSrc = src;
         g.renderDst = dst;
     }
+
+    public static int renderOp(Graphics g) {
+        return g.renderOp;
+    }
+
+    public static int renderSrc(Graphics g) {
+        return g.renderSrc;
+    }
+
+    public static int renderDst(Graphics g) {
+        return g.renderDst;
+    }
+
+    public static int flipMode(Graphics g) {
+        return g.flipMode;
+    }
 }

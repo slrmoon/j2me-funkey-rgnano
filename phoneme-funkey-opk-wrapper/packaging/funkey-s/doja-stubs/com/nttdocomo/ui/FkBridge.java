@@ -61,6 +61,18 @@ public final class FkBridge {
     }
 
     /** MIDP image behind a DoJa image, as drawn (transparency applied). */
+    /** sets the pixels of a runtime-made image (paletted, transparent) */
+    public static void setPixels(Image img, javax.microedition.lcdui.Image pixels) {
+        img.img = pixels;
+        img.mutable = false;
+        img.disposed = false;
+        img.touched();
+    }
+
+    public static boolean isDisposed(Image img) {
+        return img.disposed;
+    }
+
     public static javax.microedition.lcdui.Image drawableOf(Image img) {
         return img.drawable();
     }
