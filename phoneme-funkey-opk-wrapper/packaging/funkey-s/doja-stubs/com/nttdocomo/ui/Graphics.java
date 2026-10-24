@@ -769,13 +769,38 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
         }
         int ow = x1 - x0;
         int oh = y1 - y0;
-        int[] dst = new int[ow * oh];
+        int[] dst = scratch(ow * oh);
         target.getRGB(dst, 0, ow, x0 + originX, y0 + originY, ow, oh);
         int a = argb >>> 24;
-        for (int i = 0; i < dst.length; i++) {
-            dst[i] = mix(argb, a, dst[i]);
+        if (renderOp == 0 && renderSrc == 255) {
+            /* plain alpha blend of one color: precomputed source terms */
+            int na = 255 - a;
+            int sr = ((argb >> 16) & 255) * a;
+            int sg = ((argb >> 8) & 255) * a;
+            int sb = (argb & 255) * a;
+            for (int i = 0, cnt = ow * oh; i < cnt; i++) {
+                int d = dst[i];
+                int r = (sr + ((d >> 16) & 255) * na + 127) / 255;
+                int gg = (sg + ((d >> 8) & 255) * na + 127) / 255;
+                int b = (sb + (d & 255) * na + 127) / 255;
+                dst[i] = 0xff000000 | (r << 16) | (gg << 8) | b;
+            }
+        } else {
+            for (int i = 0, cnt = ow * oh; i < cnt; i++) {
+                dst[i] = mix(argb, a, dst[i]);
+            }
         }
         g.drawRGB(dst, 0, ow, x0, y0, ow, oh, false);
+    }
+
+    private int[] scratchBuf = new int[0];
+
+    /** pixel buffer reused by this Graphics */
+    private int[] scratch(int n) {
+        if (scratchBuf.length < n) {
+            scratchBuf = new int[n];
+        }
+        return scratchBuf;
     }
 
     private void blendImage(javax.microedition.lcdui.Image src, int sx, int sy, int sw, int sh,
