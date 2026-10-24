@@ -2735,6 +2735,7 @@ static int launch_game_once(int idx) {
             char prop_encoding[64];
             char prop_scratchpad[PATH_MAX + 32];
             char prop_spsize[160];
+            char prop_pictures[PATH_MAX + 32];
             static char prop_jam[2 * 8192 + 32];
             prop_jam[0] = '\0';
             if (games[idx].is_doja) {
@@ -2782,7 +2783,26 @@ static int launch_game_once(int idx) {
                         sizes[0] = '\0';
                     snprintf(prop_spsize, sizeof(prop_spsize), "-Ddoja.spsize=%s", sizes);
                 }
+                /* the handset picture folder (ImageStore): "mypicture" or
+                 * "<game>.pictures" next to the jar */
+                prop_pictures[0] = '\0';
+                {
+                    char dir[PATH_MAX], cand[PATH_MAX], link[PATH_MAX];
+                    const char *slash = strrchr(jar_path, '/');
+                    struct stat pst;
+                    int len = (int) strlen(jar_path);
+                    snprintf(dir, sizeof(dir), "%.*s", slash ? (int) (slash - jar_path) : 0, jar_path);
+                    snprintf(cand, sizeof(cand), "%s/mypicture", dir);
+                    if (stat(cand, &pst) != 0 || !S_ISDIR(pst.st_mode)) {
+                        snprintf(cand, sizeof(cand), "%.*s.pictures", len > 4 ? len - 4 : len, jar_path);
+                    }
+                    if (stat(cand, &pst) == 0 && S_ISDIR(pst.st_mode)) {
+                        snprintf(prop_pictures, sizeof(prop_pictures), "-Ddoja.pictures=%s",
+                                 ascii_path(cand, "pm-pictures", link, sizeof(link)));
+                    }
+                }
             } else {
+                prop_pictures[0] = '\0';
                 prop_spsize[0] = '\0';
                 prop_app[0] = '\0';
                 prop_param[0] = '\0';
@@ -2803,6 +2823,7 @@ static int launch_game_once(int idx) {
             prop_scratchpad,
             prop_spsize,
             prop_jam[0] ? prop_jam : "-Ddoja.jam.hex=",
+            prop_pictures[0] ? prop_pictures : "-Ddoja.pictures=",
             "-classpathext",
             classpath,
             "internal",
