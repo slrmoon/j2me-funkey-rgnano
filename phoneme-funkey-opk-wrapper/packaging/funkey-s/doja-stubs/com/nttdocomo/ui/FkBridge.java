@@ -50,6 +50,20 @@ public final class FkBridge {
         return g;
     }
 
+    /** binds a Graphics subclass created outside this package to a canvas surface */
+    public static void initOn(Graphics g, Canvas c) {
+        g.init(c.surface(), c, null);
+    }
+
+    /** true when the canvas surface was replaced since g was bound */
+    public static boolean stale(Graphics g, Canvas c) {
+        return g.target != c.surface();
+    }
+
+    public static com.funkey.doja.gl.FkGL glOf(Graphics g) {
+        return gl(g);
+    }
+
     /** the GL state of the surface a Graphics draws on (kept across getGraphics) */
     static com.funkey.doja.gl.FkGL gl(final Graphics g) {
         com.funkey.doja.gl.FkGL gl = null;
