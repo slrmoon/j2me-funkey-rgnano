@@ -23,7 +23,8 @@ public final class Math {
 
     public static int atan2(int y, int x) {
         double v = com.funkey.doja.FMath.atan2(y, x) * 2048.0 / java.lang.Math.PI;
-        return (int) java.lang.Math.floor(v + 0.5);
+        /* 0..4095: games index tables with the angle (FIFA 2006) */
+        return ((int) java.lang.Math.floor(v + 0.5)) & 4095;
     }
 
 }
