@@ -25,6 +25,19 @@ typedef struct {
     int open_note;          /* currently sounding note or -1 */
 } Mono;
 
+/* atoi that stops at end: the data is not NUL-terminated */
+static int num_at(const char *p, const char *end)
+{
+    int v = 0, neg = 0;
+    while (p < end && (*p == ' ' || *p == '\t')) ++p;
+    if (p < end && (*p == '-' || *p == '+')) neg = *p++ == '-';
+    while (p < end && *p >= '0' && *p <= '9') {
+        if (v < 100000) v = v * 10 + (*p - '0');
+        ++p;
+    }
+    return neg ? -v : v;
+}
+
 static void mono_start(Mono *m, FkaSong *s, int program)
 {
     fka_song_init(s);
@@ -159,7 +172,7 @@ int fka_parse_tone_sequence(const uint8_t *data, int len, FkaSong *out)
             open = b;
             ts.block_start[b] = i + 2;
         } else if (a == TS_BLOCK_END) {
-            if (b != open) return -1;
+            if (open < 0 || b != open) return -1;
             ts.block_end[b] = i;
             open = -1;
         } else if (a == TS_REPEAT) {
@@ -349,7 +362,7 @@ int fka_parse_imelody(const uint8_t *data, int len, FkaSong *out)
         const char *line = p, *eol = p;
         while (eol < end && *eol != '\n' && *eol != '\r') ++eol;
         if (imy_match(line, eol, "BEAT:")) {
-            int bpm = atoi(line + 5);
+            int bpm = num_at(line + 5, eol);
             if (bpm >= 25 && bpm <= 900) tick = 60.0e6 / bpm / 8.0;
         } else if (imy_match(line, eol, "STYLE:")) {
             const char *s = line + 6;
@@ -358,7 +371,7 @@ int fka_parse_imelody(const uint8_t *data, int len, FkaSong *out)
         } else if (imy_match(line, eol, "VOLUME:")) {
             const char *s = line + 7;
             if (s < eol && (*s == 'V' || *s == 'v')) ++s;
-            volume = atoi(s);
+            volume = num_at(s, eol);
             if (volume < 0) volume = 0;
             if (volume > 15) volume = 15;
         } else if (imy_match(line, eol, "MELODY:")) {
@@ -394,7 +407,7 @@ int fka_parse_imelody(const uint8_t *data, int len, FkaSong *out)
             continue;
         }
         if (c == '@') {
-            rep_count = atoi(p);
+            rep_count = num_at(p, mel_end);
             while (p < mel_end && *p >= '0' && *p <= '9') ++p;
             if (rep_count == 0) rep_count = 1;   /* infinite: Player loops */
             if (rep_count > 16) rep_count = 16;
@@ -414,7 +427,7 @@ int fka_parse_imelody(const uint8_t *data, int len, FkaSong *out)
             if (p < mel_end && *p == '+') { if (volume < 15) ++volume; ++p; }
             else if (p < mel_end && *p == '-') { if (volume > 0) --volume; ++p; }
             else {
-                volume = atoi(p);
+                volume = num_at(p, mel_end);
                 while (p < mel_end && *p >= '0' && *p <= '9') ++p;
                 if (volume > 15) volume = 15;
             }
@@ -476,7 +489,7 @@ int fka_parse_rtttl(const uint8_t *data, int len, FkaSong *out)
     while (p < end && *p != ':') {
         while (p < end && (*p == ' ' || *p == ',')) ++p;
         if (p + 2 < end && p[1] == '=') {
-            int v = atoi(p + 2);
+            int v = num_at(p + 2, end);
             if (*p == 'd' || *p == 'D') { if (v > 0) def_d = v; }
             else if (*p == 'o' || *p == 'O') { if (v >= 3 && v <= 8) def_o = v; }
             else if (*p == 'b' || *p == 'B') { if (v >= 5 && v <= 900) bpm = v; }
@@ -496,7 +509,7 @@ int fka_parse_rtttl(const uint8_t *data, int len, FkaSong *out)
         if (++guard > 10000) break;
         while (p < end && (*p == ' ' || *p == ',' || *p == '\r' || *p == '\n')) ++p;
         if (p >= end) break;
-        while (p < end && *p >= '0' && *p <= '9') d = d * 10 + (*p++ - '0');
+        while (p < end && *p >= '0' && *p <= '9') { if (d < 1000) d = d * 10 + (*p - '0'); ++p; }
         if (d <= 0) d = def_d;
         if (p >= end) break;
         {

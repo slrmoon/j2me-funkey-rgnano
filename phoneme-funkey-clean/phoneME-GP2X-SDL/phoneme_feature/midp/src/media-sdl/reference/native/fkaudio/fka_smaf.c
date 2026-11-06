@@ -658,7 +658,10 @@ int fka_parse_smaf(const uint8_t *data, int len, FkaSong *out)
             } else {
                 t->status_len = t->format == 0 ? 2 : (t->format == 3 ? 32 : 16);
                 hdr = 4 + t->status_len;
-                if ((uint32_t) hdr > sz) hdr = (int) sz;
+                if ((uint32_t) hdr > sz) {
+                    hdr = (int) sz;
+                    t->status_len = hdr - 4;  /* truncated chunk */
+                }
                 t->status = b + 4;
             }
             sm_track_chunks(m, out, b + hdr, sz - (uint32_t) hdr, t);

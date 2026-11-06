@@ -414,7 +414,7 @@ int fka_parse_smf(const uint8_t *data, int len, FkaSong *out)
         free(l.pool);
         return l.error ? -3 : -4;
     }
-    qsort(l.ev, (size_t) l.count, sizeof(SmfRaw), smf_cmp);
+    if (l.count > 1) qsort(l.ev, (size_t) l.count, sizeof(SmfRaw), smf_cmp);
 
     fka_song_init(out);
     for (i = 0; i < l.count; ++i) {
