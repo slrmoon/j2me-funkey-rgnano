@@ -1000,6 +1000,23 @@ static unsigned int ngl_sw_blend(unsigned int src, unsigned int dst) {
     return ngl_sw_pack(r, g, b, 255U);
 }
 
+/* Fog blend factor for fog coordinate z: 1 = no fog, 0 = fog colour. */
+static float ngl_sw_fog_factor(float z) {
+    float factor;
+    if (ngl_sw.fog_mode == GL_EXP) {
+        factor = expf(-ngl_sw.fog_density * z);
+    } else if (ngl_sw.fog_mode == GL_EXP2) {
+        float d = ngl_sw.fog_density * z;
+        factor = expf(-(d * d));
+    } else {
+        float span = ngl_sw.fog_end - ngl_sw.fog_start;
+        factor = span != 0.0f ? (ngl_sw.fog_end - z) / span : 1.0f;
+    }
+    if (factor < 0.0f) factor = 0.0f;
+    if (factor > 1.0f) factor = 1.0f;
+    return factor;
+}
+
 static unsigned int ngl_sw_apply_fog(unsigned int color, float z) {
     float factor;
     unsigned int cr;
@@ -1012,17 +1029,7 @@ static unsigned int ngl_sw_apply_fog(unsigned int color, float z) {
     if (!ngl_sw.fog) {
         return color;
     }
-    if (ngl_sw.fog_mode == GL_EXP) {
-        factor = expf(-ngl_sw.fog_density * z);
-    } else if (ngl_sw.fog_mode == GL_EXP2) {
-        float d = ngl_sw.fog_density * z;
-        factor = expf(-(d * d));
-    } else {
-        float span = ngl_sw.fog_end - ngl_sw.fog_start;
-        factor = span != 0.0f ? (ngl_sw.fog_end - z) / span : 1.0f;
-    }
-    if (factor < 0.0f) factor = 0.0f;
-    if (factor > 1.0f) factor = 1.0f;
+    factor = ngl_sw_fog_factor(z);
     cr = (color >> 16) & 0xffU;
     cg = (color >> 8) & 0xffU;
     cb = color & 0xffU;
@@ -1619,16 +1626,148 @@ static void ngl_sw_span_neon(const NGLSpanNeon *s, unsigned short *dst,
 
 /*
  * Span fast path for the common state: at most one texture (unit 0),
- * nearest, no mipmaps, REPLACE or MODULATE; no fog, blending or colour
- * mask; depth test off or LESS/LEQUAL/ALWAYS. Per row the covered span is
+ * nearest or bilinear without mipmaps, REPLACE or MODULATE; any fog;
+ * no colour mask; depth test off or LESS/LEQUAL/ALWAYS. Per row the covered span is
  * found with the integer edge functions alone, then attributes are stepped
  * across it instead of being rebuilt from barycentrics at every pixel:
  * depth in 20.12 fixed point, texture coordinates and colours in 16.16,
  * with the perspective division done every NGL_SW_SPAN pixels and linear
- * interpolation in between (subpixel error, invisible at 240 px). Returns
+ * interpolation in between (subpixel error, invisible at 240 px). The fog
+ * factor is evaluated at the segment ends and stepped linearly (8.8 blend,
+ * within one level of the per-pixel path). Returns
  * 0 when the state needs the general per-pixel loop.
  */
 #define NGL_SW_SPAN 16
+
+/* Per-triangle constants of the scalar span loop. */
+typedef struct {
+    const NGLTexture *tex;
+    int tw, wmask, hmask, repeat_s, repeat_t, replace;
+    int smooth;
+    unsigned int flat_color;
+    int depth_test, depth_less, depth_write;
+    int alpha_test, blend_mode;
+    unsigned int fog_rgb;
+} NGLSpanState;
+
+#if defined(__GNUC__)
+#define NGL_SW_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+#define NGL_SW_ALWAYS_INLINE inline
+#endif
+
+/* n pixels of one span segment. Always inlined with constant fog and
+ * bilinear flags, so the plain nearest loop carries no extra tests. */
+static NGL_SW_ALWAYS_INLINE void
+ngl_sw_span_scalar(const NGLSpanState *st, unsigned short *dst,
+                   unsigned short *zbuf, int n, int *pz, int dz,
+                   int *psu, int *psv, int dsu, int dsv,
+                   int *ci, const int *dci, int *pfi, int dfi,
+                   const int fog, const int bilinear) {
+    int z = *pz, su = *psu, sv = *psv, fi = *pfi;
+    int i;
+    for (i = 0; i < n; ++i) {
+        unsigned int color;
+        int kf = 0;
+        int dv = z >> 12;
+        if (dv < 0) dv = 0;
+        if (dv > 65535) dv = 65535;
+        z += dz;
+        if (st->depth_test) {
+            unsigned short old = zbuf[i];
+            if (st->depth_less ? (unsigned int)dv >= old : (unsigned int)dv > old) {
+                su += dsu; sv += dsv; fi += dfi;
+                if (st->smooth) { ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3]; }
+                continue;
+            }
+        }
+        if (fog) {
+            kf = fi >> 16;
+            fi += dfi;
+        }
+        if (st->smooth) {
+            int r = ci[0] >> 16, g = ci[1] >> 16, bl = ci[2] >> 16, al = ci[3] >> 16;
+            ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3];
+            color = ngl_sw_pack((unsigned int)(r < 0 ? 0 : r), (unsigned int)(g < 0 ? 0 : g),
+                                (unsigned int)(bl < 0 ? 0 : bl), (unsigned int)(al < 0 ? 0 : al));
+        } else {
+            color = st->flat_color;
+        }
+        if (st->tex != NULL) {
+            unsigned int texel;
+            if (bilinear) {
+                /* same taps and 8-bit weights as ngl_sw_texel_bilinear */
+                int fx = su - 32768, fy = sv - 32768;
+                int x0 = fx >> 16, y0 = fy >> 16, x1 = x0 + 1, y1 = y0 + 1;
+                unsigned int wx = (unsigned int)(fx >> 8) & 0xffU;
+                unsigned int wy = (unsigned int)(fy >> 8) & 0xffU;
+                const unsigned int *r0, *r1;
+                if (st->repeat_s) { x0 &= st->wmask; x1 &= st->wmask; }
+                else {
+                    x0 = x0 < 0 ? 0 : (x0 > st->wmask ? st->wmask : x0);
+                    x1 = x1 < 0 ? 0 : (x1 > st->wmask ? st->wmask : x1);
+                }
+                if (st->repeat_t) { y0 &= st->hmask; y1 &= st->hmask; }
+                else {
+                    y0 = y0 < 0 ? 0 : (y0 > st->hmask ? st->hmask : y0);
+                    y1 = y1 < 0 ? 0 : (y1 > st->hmask ? st->hmask : y1);
+                }
+                r0 = st->tex->argb + y0 * st->tw;
+                r1 = st->tex->argb + y1 * st->tw;
+                texel = ngl_sw_lerp8(ngl_sw_lerp8(r0[x0], r0[x1], wx),
+                                     ngl_sw_lerp8(r1[x0], r1[x1], wx), wy);
+            } else {
+                int tx = su >> 16, ty = sv >> 16;
+                if (st->repeat_s) tx &= st->wmask;
+                else if (tx < 0) tx = 0;
+                else if (tx > st->wmask) tx = st->wmask;
+                if (st->repeat_t) ty &= st->hmask;
+                else if (ty < 0) ty = 0;
+                else if (ty > st->hmask) ty = st->hmask;
+                texel = st->tex->argb[ty * st->tw + tx];
+            }
+            su += dsu;
+            sv += dsv;
+            if (st->replace) {
+                color = (texel & 0x00ffffffU) |
+                        (st->tex->no_alpha ? (color & 0xff000000U) : (texel & 0xff000000U));
+            } else if (color != 0xffffffffU) {
+                color = ngl_sw_modulate(color, texel);
+            } else {
+                color = texel;   /* modulate by white */
+            }
+        }
+        if (st->alpha_test &&
+                !ngl_sw_compare(ngl_sw.alpha_func,
+                                (float)((color >> 24) & 0xffU) / 255.0f,
+                                ngl_sw.alpha_ref)) {
+            continue;
+        }
+        if (fog) {
+            int k = kf < 0 ? 0 : (kf > 256 ? 256 : kf);
+            color = (ngl_sw_lerp8(st->fog_rgb, color, (unsigned int)k) & 0x00ffffffU) |
+                    (color & 0xff000000U);
+        }
+        if (st->depth_write) zbuf[i] = (unsigned short)dv;
+        if (st->blend_mode == 1) {
+            /* same result as ngl_sw_blend(); alpha 0 leaves the
+             * pixel as it is (565 -> 8888 -> 565 round-trips) */
+            unsigned int al = color >> 24;
+            if (al == 0) continue;
+            if (al != 255U) {
+                color = ngl_sw_lerp8(ngl_sw_rgb565_to_argb(dst[i]),
+                                     color, al + (al >> 7));
+            }
+        } else if (st->blend_mode == 2) {
+            color = ngl_sw_blend(color, ngl_sw_rgb565_to_argb(dst[i]));
+        }
+        dst[i] = ngl_sw_rgb565(color);
+    }
+    *pz = z;
+    *psu = su;
+    *psv = sv;
+    *pfi = fi;
+}
 
 static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                             const int *tex_mips, int perspective, int smooth,
@@ -1636,6 +1775,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                             float inv_area, const NGLPlane *pz,
                             const NGLPlane *pinvw, const NGLPlane *pu,
                             const NGLPlane *pv, const NGLPlane *pcol,
+                            const NGLPlane *pfog,
                             int minx, int maxx, int miny, int maxy,
                             int row0, int row1, int row2,
                             int a0, int a1, int a2, int b0, int b1, int b2,
@@ -1644,6 +1784,10 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     int depth_on = ngl_sw.depth_test && ngl_sw.depth != NULL;
     int depth_less = depth_on && ngl_sw.depth_func == GL_LESS;
     int depth_write = depth_on && ngl_sw.depth_mask;
+    int fog = ngl_sw.fog;
+    int bilinear = 0;
+    unsigned int fog_rgb = ngl_sw.fog_color & 0x00ffffffU;
+    float dfx = 0.0f;
     int mode = GL_MODULATE;
     int repeat_s = 0, repeat_t = 0;
     int tw = 0, th = 0, wmask = 0, hmask = 0;
@@ -1654,12 +1798,13 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     int y, ch;
     /* 0: plain write, 1: SRC_ALPHA/ONE_MINUS_SRC_ALPHA, 2: other blend */
     int blend_mode = 0;
+    NGLSpanState ss;
 #ifdef NGL_SW_HAVE_NEON
     NGLSpanNeon ns;
     int use_neon;
 #endif
 
-    if (!rgb_mask_all || ngl_sw.fog) return 0;
+    if (!rgb_mask_all) return 0;
     if (ngl_sw.blend) {
         blend_mode = (ngl_sw.blend_src == GL_SRC_ALPHA &&
                       ngl_sw.blend_dst == GL_ONE_MINUS_SRC_ALPHA) ? 1 : 2;
@@ -1669,7 +1814,8 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     if (NGL_SW_TEXTURE_UNITS > 1 && tex_unit[1] != NULL) return 0;
     if (tex != NULL) {
         mode = ngl_sw.tex_env_mode[0];
-        if (!tex_nearest[0] || tex_mips[0] || tex->no_color) return 0;
+        if (tex_mips[0] || tex->no_color) return 0;
+        bilinear = !tex_nearest[0];
         if (mode != GL_MODULATE && mode != GL_REPLACE) return 0;
         tw = tex->width;
         th = tex->height;
@@ -1683,7 +1829,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     }
 
 #ifdef NGL_SW_HAVE_NEON
-    use_neon = !ngl_sw.alpha_test && blend_mode == 0;
+    use_neon = !ngl_sw.alpha_test && blend_mode == 0 && !fog && !bilinear;
     ns.depth_test = (depth_on && ngl_sw.depth_func != GL_ALWAYS) ? (depth_less ? 1 : 2) : 0;
     ns.depth_write = depth_write;
     ns.tex = tex != NULL ? tex->argb : NULL;
@@ -1697,6 +1843,22 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     ns.flat_color = flat_color;
 #endif
 
+    ss.tex = tex;
+    ss.tw = tw;
+    ss.wmask = wmask;
+    ss.hmask = hmask;
+    ss.repeat_s = repeat_s;
+    ss.repeat_t = repeat_t;
+    ss.replace = mode == GL_REPLACE;
+    ss.smooth = smooth;
+    ss.flat_color = flat_color;
+    ss.depth_test = depth_on && ngl_sw.depth_func != GL_ALWAYS;
+    ss.depth_less = depth_less;
+    ss.depth_write = depth_write;
+    ss.alpha_test = ngl_sw.alpha_test;
+    ss.blend_mode = blend_mode;
+    ss.fog_rgb = fog_rgb;
+
     dzx = pz->db * l1x + pz->dc * l2x;
     if (perspective) dqx = pinvw->db * l1x + pinvw->dc * l2x;
     if (tex != NULL) {
@@ -1706,6 +1868,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     if (smooth) {
         for (ch = 0; ch < 4; ++ch) dcx[ch] = pcol[ch].db * l1x + pcol[ch].dc * l2x;
     }
+    if (fog) dfx = pfog->db * l1x + pfog->dc * l2x;
 
     for (y = miny; y < maxy; ++y, row0 += b0, row1 += b1, row2 += b2) {
         int e0 = row0, e1 = row1, e2 = row2;
@@ -1715,6 +1878,7 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         float l1, l2, q, uq = 0.0f, vq = 0.0f, rw0;
         float cq[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float u0 = 0.0f, v0 = 0.0f, c0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        float fq = 0.0f, k0 = 0.0f;
         int zfix, dzfix;
 
         /* covered span of this row (triangles are convex) */
@@ -1753,6 +1917,10 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                 c0[ch] = cq[ch] * rw0;
             }
         }
+        if (fog) {
+            fq = NGL_SW_PLANE(*pfog, l1, l2);
+            k0 = ngl_sw_fog_factor(fq * rw0) * 256.0f;
+        }
 
         for (x = xs; x < xe; ) {
             int n = xe - x < NGL_SW_SPAN ? xe - x : NGL_SW_SPAN;
@@ -1760,6 +1928,8 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
             float rw1, u1 = 0.0f, v1 = 0.0f, c1[4] = {0.0f, 0.0f, 0.0f, 0.0f};
             int su = 0, sv = 0, dsu = 0, dsv = 0;
             int ci[4] = {0, 0, 0, 0}, dci[4] = {0, 0, 0, 0};
+            int fi = 0, dfi = 0;
+            float k1 = 0.0f;
             float inv_n = 1.0f / (float)n;
 
             q += dqx * (float)n;
@@ -1810,6 +1980,12 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                     dci[ch] = (int)((c1[ch] - c0[ch]) * inv_n * 65536.0f);
                 }
             }
+            if (fog) {
+                fq += dfx * (float)n;
+                k1 = ngl_sw_fog_factor(fq * rw1) * 256.0f;
+                fi = (int)(k0 * 65536.0f) + 32768;
+                dfi = (int)((k1 - k0) * inv_n * 65536.0f);
+            }
 
             i = 0;
 #ifdef NGL_SW_HAVE_NEON
@@ -1822,72 +1998,20 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
                 x += cnt;
             }
 #endif
-            for (; i < n; ++i, ++x) {
-                unsigned int color;
-                int dv = zfix >> 12;
-                if (dv < 0) dv = 0;
-                if (dv > 65535) dv = 65535;
-                zfix += dzfix;
-                if (depth_row != NULL && ngl_sw.depth_func != GL_ALWAYS) {
-                    unsigned short old = depth_row[x];
-                    if (depth_less ? (unsigned int)dv >= old : (unsigned int)dv > old) {
-                        su += dsu; sv += dsv;
-                        if (smooth) { ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3]; }
-                        continue;
-                    }
-                }
-                if (smooth) {
-                    int r = ci[0] >> 16, g = ci[1] >> 16, bl = ci[2] >> 16, al = ci[3] >> 16;
-                    ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3];
-                    color = ngl_sw_pack((unsigned int)(r < 0 ? 0 : r), (unsigned int)(g < 0 ? 0 : g),
-                                        (unsigned int)(bl < 0 ? 0 : bl), (unsigned int)(al < 0 ? 0 : al));
-                } else {
-                    color = flat_color;
-                }
-                if (tex != NULL) {
-                    int tx = su >> 16, ty = sv >> 16;
-                    unsigned int texel;
-                    su += dsu;
-                    sv += dsv;
-                    if (repeat_s) tx &= wmask;
-                    else if (tx < 0) tx = 0;
-                    else if (tx > wmask) tx = wmask;
-                    if (repeat_t) ty &= hmask;
-                    else if (ty < 0) ty = 0;
-                    else if (ty > hmask) ty = hmask;
-                    texel = tex->argb[ty * tw + tx];
-                    if (mode == GL_REPLACE) {
-                        color = (texel & 0x00ffffffU) |
-                                (tex->no_alpha ? (color & 0xff000000U) : (texel & 0xff000000U));
-                    } else if (color != 0xffffffffU) {
-                        color = ngl_sw_modulate(color, texel);
-                    } else {
-                        color = texel;   /* modulate by white */
-                    }
-                }
-                if (ngl_sw.alpha_test &&
-                        !ngl_sw_compare(ngl_sw.alpha_func,
-                                        (float)((color >> 24) & 0xffU) / 255.0f,
-                                        ngl_sw.alpha_ref)) {
-                    continue;
-                }
-                if (depth_write) depth_row[x] = (unsigned short)dv;
-                if (blend_mode == 1) {
-                    /* same result as ngl_sw_blend(); alpha 0 leaves the
-                     * pixel as it is (565 -> 8888 -> 565 round-trips) */
-                    unsigned int al = color >> 24;
-                    if (al == 0) continue;
-                    if (al != 255U) {
-                        color = ngl_sw_lerp8(ngl_sw_rgb565_to_argb(dst_row[x]),
-                                             color, al + (al >> 7));
-                    }
-                } else if (blend_mode == 2) {
-                    color = ngl_sw_blend(color, ngl_sw_rgb565_to_argb(dst_row[x]));
-                }
-                dst_row[x] = ngl_sw_rgb565(color);
+            {
+                unsigned short *zrow = depth_row != NULL ? depth_row + x : NULL;
+                if (fog || bilinear)
+                    ngl_sw_span_scalar(&ss, dst_row + x, zrow, n - i, &zfix, dzfix,
+                                       &su, &sv, dsu, dsv, ci, dci, &fi, dfi,
+                                       fog, bilinear);
+                else
+                    ngl_sw_span_scalar(&ss, dst_row + x, zrow, n - i, &zfix, dzfix,
+                                       &su, &sv, dsu, dsv, ci, dci, &fi, dfi, 0, 0);
+                x += n - i;
             }
             u0 = u1;
             v0 = v1;
+            k0 = k1;
             if (smooth) {
                 for (ch = 0; ch < 4; ++ch) c0[ch] = c1[ch];
             }
@@ -1926,7 +2050,7 @@ static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
     int simple_write;
     int rgb_mask_all;
     float zscale, zbase;
-    NGLPlane pz, pinvw, pfog;
+    NGLPlane pz, pinvw, pfog = {0.0f, 0.0f, 0.0f};
     NGLPlane pu[NGL_SW_TEXTURE_UNITS], pv[NGL_SW_TEXTURE_UNITS];
     NGLPlane pcol[4];
     unsigned int flat_color;
@@ -2139,7 +2263,7 @@ static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
     }
     if (ngl_sw_span_fast(tex_unit, tex_nearest, tex_mips, perspective, smooth,
                          rgb_mask_all, flat_color, inv_area, &pz, &pinvw,
-                         pu, pv, pcol, minx, maxx, miny, maxy,
+                         pu, pv, pcol, &pfog, minx, maxx, miny, maxy,
                          row0, row1, row2, a0, a1, a2, b0, b1, b2,
                          bias1, bias2)) {
         return;
