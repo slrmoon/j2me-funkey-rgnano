@@ -2176,6 +2176,13 @@ static M3Gbool m3gLoadImage(Loader *loader)
         pixelsLength = m3gLoadInt(data);
         data += 4;
         if (m3gCheckSectionDataLength(loader, data, pixelsLength) == M3G_FALSE) return M3G_FALSE;
+        /* The pixel array must cover the whole image (one index per pixel
+         * when paletted): a short array made m3gSetImage read past the
+         * section data. */
+        if (width <= 0 || height <= 0 ||
+            pixelsLength / (palette != NULL ? 1 : bpp) / height < width) {
+            return M3G_FALSE;
+        }
         pixels = data;
         data += pixelsLength;
 
