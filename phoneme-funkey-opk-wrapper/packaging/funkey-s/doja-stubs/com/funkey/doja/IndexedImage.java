@@ -103,11 +103,15 @@ public final class IndexedImage {
         int h = le32(d, 22);
         int bpp = le16(d, 28);
         int comp = le32(d, 30);
-        if (comp != 0 || (bpp != 1 && bpp != 4 && bpp != 8) || w <= 0 || h == 0) {
+        /* odd header values fall back to Image.createImage instead of
+         * throwing (negative offsets, huge sizes, a bogus color count) */
+        if (comp != 0 || (bpp != 1 && bpp != 4 && bpp != 8) || w <= 0 || h == 0
+                || w > 4096 || h > 4096 || h < -4096 || hdr < 12 || hdr > d.length
+                || off < 0 || off >= d.length) {
             return false;
         }
         int colors = le32(d, 46);
-        if (colors == 0) {
+        if (colors <= 0 || colors > (1 << bpp)) {
             colors = 1 << bpp;
         }
         int[] pal = new int[colors];
