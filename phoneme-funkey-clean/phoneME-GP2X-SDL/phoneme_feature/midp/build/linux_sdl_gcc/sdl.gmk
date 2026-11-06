@@ -58,6 +58,7 @@ ifeq ($(TARGET_CPU), arm)
     LIBS += -lfloat
   endif
 else
-  # SDL_gfx: in-game menu text (characterColor)
-  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_gfx -lm
+  # SDL_gfx: in-game menu text (characterColor). -ldl -lrt: the profiler's
+  # dladdr/timer_* live there before glibc 2.34
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_gfx -lm -ldl -lrt
 endif

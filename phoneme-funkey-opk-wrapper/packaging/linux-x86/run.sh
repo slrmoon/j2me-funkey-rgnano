@@ -5,7 +5,7 @@
 #
 # MIDP: the main class comes from MIDlet-1 in the manifest (or a .jad next
 # to the jar). DoJa: a .jam next to the jar (game.jam, or the only .jam in
-# the folder) with an AppClass; the scratchpad is game.sp next to it.
+# the folder if its AppClass is in the jar); the scratchpad is game.sp.
 #
 # Environment (all optional):
 #   SCALE=3         window size multiplier of the 240x240 screen (1..8)
@@ -42,22 +42,36 @@ jar_entry() {  # jar_entry <jar> <entry>: print one entry
         python3 -c 'import sys,zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' "$1" "$2" 2>/dev/null
     fi
 }
+jar_has() {  # jar_has <jar> <entry>
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -l "$1" "$2" >/dev/null 2>&1
+    else
+        python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).getinfo(sys.argv[2])' "$1" "$2" 2>/dev/null
+    fi
+}
 jam_value() {  # jam_value <jam> <key>
     tr -d '\r' < "$1" | grep -a "^$2 *=" | head -n 1 | sed "s/^$2 *= *//; s/ *\$//"
 }
 
-# DoJa: game.jam, or the only .jam of the folder
+# DoJa: game.jam, or the only .jam of the folder when its AppClass is in
+# this jar (dumps often name the two differently); MIDP otherwise
 JAM=""
+APP_CLASS=""
 if [ -f "$BASE.jam" ]; then
     JAM=$BASE.jam
+    APP_CLASS=$(jam_value "$JAM" AppClass)
 else
     shopt -s nullglob
     jams=("$DIR"/*.jam)
     shopt -u nullglob
-    [ ${#jams[@]} -eq 1 ] && JAM=${jams[0]}
+    if [ ${#jams[@]} -eq 1 ]; then
+        cls=$(jam_value "${jams[0]}" AppClass)
+        if [ -n "$cls" ] && jar_has "$JAR" "$(printf '%s' "$cls" | tr . /).class"; then
+            JAM=${jams[0]}
+            APP_CLASS=$cls
+        fi
+    fi
 fi
-APP_CLASS=""
-[ -n "$JAM" ] && APP_CLASS=$(jam_value "$JAM" AppClass)
 
 export MIDP_HOME=$HERE
 export PHONEME_RMS_HOME=$DATA/rms/$NAME

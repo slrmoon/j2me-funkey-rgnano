@@ -5,4 +5,4 @@ phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/
 
 *.opk
 *.log
-build_output_linux_x86/
+build_output_linux_x86*/

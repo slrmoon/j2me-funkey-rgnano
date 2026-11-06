@@ -475,6 +475,9 @@ JDK_DIR=/path/to/zulu7... ./package-linux-x86.sh
 ```
 
 Result: `phoneme-funkey-opk-wrapper/dist/funkey-j2me-linux-x86.tar.gz`.
+The binary needs the glibc of the build machine or newer: build on Ubuntu
+20.04 (or in a 20.04 chroot: `debootstrap focal`, then the same packages and
+`BUILD_OUTPUT_DIR=...` per build) to run on 20.04 and later.
 Unpack it and run `./run.sh game.jar` (i-appli: `game.jam` next to the jar).
 `SCALE=4` makes the window bigger (the screen is 240x240 times `SCALE`,
 default 3), `LCD=240x320` sets the screen size the game sees; the packed

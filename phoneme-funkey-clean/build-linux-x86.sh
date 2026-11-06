@@ -21,10 +21,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 MEHOME=$ROOT/phoneME-GP2X-SDL/phoneme_feature
 BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$MEHOME/build_output_linux_x86}
 MAKE_JOBS=${MAKE_JOBS:-$(nproc 2>/dev/null || echo 1)}
-# MIDP generates sources with tools it builds first: parallel make races.
+# MIDP generates sources with tools it builds first, and CLDC's romgen and
+# loopgen both build classes.zip: parallel make races in both.
 MIDP_MAKE_JOBS=${MIDP_MAKE_JOBS:-1}
+CLDC_MAKE_JOBS=${CLDC_MAKE_JOBS:-1}
 HOST_CFLAGS=${HOST_CFLAGS:--m32}
-HOST_LINK_FLAGS=${HOST_LINK_FLAGS:--m32}
+# -pthread: glibc < 2.34 keeps pthread/sem_* in libpthread
+HOST_LINK_FLAGS=${HOST_LINK_FLAGS:--m32 -pthread}
 HOST_ASM_FLAGS=${HOST_ASM_FLAGS:---32}
 # CFLAGS on the make command line replaces PCSL's own "CFLAGS +=" lines,
 # so the server-socket switch has to be repeated here.
@@ -86,7 +89,7 @@ make -j "$MAKE_JOBS" \
 
 echo "Building CLDC (linux_i386)..."
 cd "$JVMWorkSpace/build/linux_i386"
-make -j "$MAKE_JOBS" \
+make -j "$CLDC_MAKE_JOBS" \
     ENABLE_PCSL=true \
     PCSL_PLATFORM=linux_i386_gcc \
     PCSL_OUTPUT_DIR="$PCSL_OUTPUT_DIR" \
@@ -115,7 +118,7 @@ make -j "$MIDP_MAKE_JOBS" \
     TARGET_CPU=i386 \
     USE_MULTIPLE_ISOLATES=false \
     CMDLINE_CFLAGS="$X86_CFLAGS" \
-    LD_FLAGS="-m32" \
+    LD_FLAGS="-m32 -pthread" \
     USE_LIBFLOAT=false
 
 echo "Built: $MIDP_OUTPUT_DIR/bin/i386/runMidlet"
