@@ -94,11 +94,8 @@ CC_OUTPUT	= -o
 
 LD		= $(GNU_TOOLS_BINDIR)g++$(GCC_VERSION)
 LINKER_OUTPUT	= -o
-ifeq ($(TARGET_CPU), arm)
+# No -lnsl: nothing uses NIS/RPC, and glibc >= 2.26 no longer ships it.
 LIBS		= -lpthread -lm
-else
-LIBS		= -lpthread -lm -lnsl
-endif
 
 # Options to force single-pass linker to search undefined references repeatly.
 # Note. '-Wl,' option cannot be used instead of -Xlinker

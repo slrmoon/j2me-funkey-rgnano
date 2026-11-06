@@ -58,5 +58,6 @@ ifeq ($(TARGET_CPU), arm)
     LIBS += -lfloat
   endif
 else
-  LIBS	+= $(SDL_LIBS) -lSDL_image -lm
+  # SDL_gfx: in-game menu text (characterColor)
+  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_gfx -lm
 endif
