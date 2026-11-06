@@ -1464,10 +1464,16 @@ static void ngl_sw_plane(NGLPlane *p, float va, float vb, float vc) {
 
 #define NGL_SW_PLANE(p, l1, l2) ((p).a + (l1) * (p).db + (l2) * (p).dc)
 
+#if defined(__GNUC__)
+#define NGL_SW_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+#define NGL_SW_ALWAYS_INLINE inline
+#endif
+
 /* Narrow [lo, hi) to the steps k where e + k * a >= 0 (one edge of a row).
  * Edge functions are linear in x, so this is exactly the set a pixel scan
  * would find, without walking the empty part of the bounding box. */
-static void ngl_sw_edge_range(int e, int a, int *lo, int *hi) {
+static NGL_SW_ALWAYS_INLINE void ngl_sw_edge_range(int e, int a, int *lo, int *hi) {
     if (a > 0) {
         if (e < 0) {
             unsigned int k = ((unsigned int)(-e) + (unsigned int)a - 1U) / (unsigned int)a;
@@ -1626,9 +1632,12 @@ static void ngl_sw_span_neon(const NGLSpanNeon *s, unsigned short *dst,
 #endif
 
 /*
- * Span fast path for the common state: at most one texture (unit 0),
- * nearest or bilinear without mipmaps, REPLACE or MODULATE; any fog;
- * no colour mask; depth test off or LESS/LEQUAL/ALWAYS. Per row the covered span is
+ * Span fast path: any textures (two units, mipmaps, every env mode),
+ * any fog, no colour mask, depth test off or LESS/LEQUAL/ALWAYS. One
+ * texture on unit 0 without mipmaps, MODULATE or REPLACE, takes the lean
+ * single-texture loop (and the NEON kernel when it can); everything else
+ * the multi-texture loop, which picks the mip level once per segment with
+ * the per-pixel path's rho formula at the segment start. Per row the covered span is
  * found with the integer edge functions alone, then attributes are stepped
  * across it instead of being rebuilt from barycentrics at every pixel:
  * depth in 20.12 fixed point, texture coordinates and colours in 16.16,
@@ -1639,6 +1648,93 @@ static void ngl_sw_span_neon(const NGLSpanNeon *s, unsigned short *dst,
  * 0 when the state needs the general per-pixel loop.
  */
 #define NGL_SW_SPAN 16
+
+/* One texture unit of the multi-texture span loop: the level picked for
+ * the current segment and its 16.16 coordinates in that level's texels. */
+typedef struct {
+    const NGLTexture *base;      /* level 0: tex env reads its format */
+    const unsigned int *argb;
+    int unit, tw, wmask, hmask, repeat_s, repeat_t, bilinear;
+    int su, sv, dsu, dsv;
+} NGLSpanTex;
+
+/* Bilinear sample at 16.16 texel coordinates: same taps, wrap/clamp and
+ * 8-bit weights as ngl_sw_texel_bilinear. */
+static NGL_SW_ALWAYS_INLINE unsigned int ngl_sw_sample_bilinear(const unsigned int *argb, int tw,
+                                                  int wmask, int hmask,
+                                                  int repeat_s, int repeat_t,
+                                                  int su, int sv) {
+    int fx = su - 32768, fy = sv - 32768;
+    int x0 = fx >> 16, y0 = fy >> 16, x1 = x0 + 1, y1 = y0 + 1;
+    unsigned int wx = (unsigned int)(fx >> 8) & 0xffU;
+    unsigned int wy = (unsigned int)(fy >> 8) & 0xffU;
+    const unsigned int *r0, *r1;
+    if (repeat_s) { x0 &= wmask; x1 &= wmask; }
+    else {
+        x0 = x0 < 0 ? 0 : (x0 > wmask ? wmask : x0);
+        x1 = x1 < 0 ? 0 : (x1 > wmask ? wmask : x1);
+    }
+    if (repeat_t) { y0 &= hmask; y1 &= hmask; }
+    else {
+        y0 = y0 < 0 ? 0 : (y0 > hmask ? hmask : y0);
+        y1 = y1 < 0 ? 0 : (y1 > hmask ? hmask : y1);
+    }
+    r0 = argb + y0 * tw;
+    r1 = argb + y1 * tw;
+    return ngl_sw_lerp8(ngl_sw_lerp8(r0[x0], r0[x1], wx),
+                        ngl_sw_lerp8(r1[x0], r1[x1], wx), wy);
+}
+
+/* Nearest sample at 16.16 texel coordinates. */
+static NGL_SW_ALWAYS_INLINE unsigned int ngl_sw_sample_nearest(const unsigned int *argb, int tw,
+                                                 int wmask, int hmask,
+                                                 int repeat_s, int repeat_t,
+                                                 int su, int sv) {
+    int tx = su >> 16, ty = sv >> 16;
+    if (repeat_s) tx &= wmask;
+    else if (tx < 0) tx = 0;
+    else if (tx > wmask) tx = wmask;
+    if (repeat_t) ty &= hmask;
+    else if (ty < 0) ty = 0;
+    else if (ty > hmask) ty = hmask;
+    return argb[ty * tw + tx];
+}
+
+/* Segment ends (s0,t0)-(s1,t1) in texels of a w x h image -> 16.16 start
+ * and per-pixel step. Repeating coordinates are shifted by whole periods
+ * (needs pow2, so inv_w/inv_h = 1/w, 1/h are exact; only read when
+ * repeating), the others clamped, so 16.16 stays in range. */
+static NGL_SW_ALWAYS_INLINE void ngl_sw_span_tex_seg(float s0, float t0, float s1, float t1,
+                                       int w, int h, float inv_w, float inv_h,
+                                       int repeat_s, int repeat_t,
+                                       float inv_n, int *su, int *sv,
+                                       int *dsu, int *dsv) {
+    if (repeat_s) {
+        float k = ngl_sw_floorf(s0 * inv_w) * (float)w;
+        s0 -= k;
+        s1 -= k;
+    } else {
+        s0 = s0 < -8192.0f ? -8192.0f : (s0 > 8192.0f ? 8192.0f : s0);
+        s1 = s1 < -8192.0f ? -8192.0f : (s1 > 8192.0f ? 8192.0f : s1);
+    }
+    if (repeat_t) {
+        float k = ngl_sw_floorf(t0 * inv_h) * (float)h;
+        t0 -= k;
+        t1 -= k;
+    } else {
+        t0 = t0 < -8192.0f ? -8192.0f : (t0 > 8192.0f ? 8192.0f : t0);
+        t1 = t1 < -8192.0f ? -8192.0f : (t1 > 8192.0f ? 8192.0f : t1);
+    }
+    if (s1 - s0 > 16384.0f || s0 - s1 > 16384.0f ||
+        t1 - t0 > 16384.0f || t0 - t1 > 16384.0f) {
+        s1 = s0;   /* absurd gradient (degenerate w): flat */
+        t1 = t0;
+    }
+    *su = (int)(s0 * 65536.0f);
+    *sv = (int)(t0 * 65536.0f);
+    *dsu = (int)((s1 - s0) * inv_n * 65536.0f);
+    *dsv = (int)((t1 - t0) * inv_n * 65536.0f);
+}
 
 /* Per-triangle constants of the scalar span loop. */
 typedef struct {
@@ -1651,20 +1747,17 @@ typedef struct {
     unsigned int fog_rgb;
 } NGLSpanState;
 
-#if defined(__GNUC__)
-#define NGL_SW_ALWAYS_INLINE inline __attribute__((always_inline))
-#else
-#define NGL_SW_ALWAYS_INLINE inline
-#endif
-
-/* n pixels of one span segment. Always inlined with constant fog and
- * bilinear flags, so the plain nearest loop carries no extra tests. */
+/* n pixels of one span segment. Always inlined with constant fog,
+ * bilinear and multi flags, so the plain nearest loop carries no extra
+ * tests. multi: textures come from tx[0..ntex) (mip level per segment,
+ * any env mode, two units), combined with ngl_sw_apply_tex_env. */
 static NGL_SW_ALWAYS_INLINE void
 ngl_sw_span_scalar(const NGLSpanState *st, unsigned short *dst,
                    unsigned short *zbuf, int n, int *pz, int dz,
                    int *psu, int *psv, int dsu, int dsv,
                    int *ci, const int *dci, int *pfi, int dfi,
-                   const int fog, const int bilinear) {
+                   NGLSpanTex *tx, int ntex,
+                   const int fog, const int bilinear, const int multi) {
     int z = *pz, su = *psu, sv = *psv, fi = *pfi;
     int i;
     for (i = 0; i < n; ++i) {
@@ -1678,6 +1771,10 @@ ngl_sw_span_scalar(const NGLSpanState *st, unsigned short *dst,
             unsigned short old = zbuf[i];
             if (st->depth_less ? (unsigned int)dv >= old : (unsigned int)dv > old) {
                 su += dsu; sv += dsv; fi += dfi;
+                if (multi) {
+                    int k;
+                    for (k = 0; k < ntex; ++k) { tx[k].su += tx[k].dsu; tx[k].sv += tx[k].dsv; }
+                }
                 if (st->smooth) { ci[0] += dci[0]; ci[1] += dci[1]; ci[2] += dci[2]; ci[3] += dci[3]; }
                 continue;
             }
@@ -1694,39 +1791,26 @@ ngl_sw_span_scalar(const NGLSpanState *st, unsigned short *dst,
         } else {
             color = st->flat_color;
         }
-        if (st->tex != NULL) {
-            unsigned int texel;
-            if (bilinear) {
-                /* same taps and 8-bit weights as ngl_sw_texel_bilinear */
-                int fx = su - 32768, fy = sv - 32768;
-                int x0 = fx >> 16, y0 = fy >> 16, x1 = x0 + 1, y1 = y0 + 1;
-                unsigned int wx = (unsigned int)(fx >> 8) & 0xffU;
-                unsigned int wy = (unsigned int)(fy >> 8) & 0xffU;
-                const unsigned int *r0, *r1;
-                if (st->repeat_s) { x0 &= st->wmask; x1 &= st->wmask; }
-                else {
-                    x0 = x0 < 0 ? 0 : (x0 > st->wmask ? st->wmask : x0);
-                    x1 = x1 < 0 ? 0 : (x1 > st->wmask ? st->wmask : x1);
-                }
-                if (st->repeat_t) { y0 &= st->hmask; y1 &= st->hmask; }
-                else {
-                    y0 = y0 < 0 ? 0 : (y0 > st->hmask ? st->hmask : y0);
-                    y1 = y1 < 0 ? 0 : (y1 > st->hmask ? st->hmask : y1);
-                }
-                r0 = st->tex->argb + y0 * st->tw;
-                r1 = st->tex->argb + y1 * st->tw;
-                texel = ngl_sw_lerp8(ngl_sw_lerp8(r0[x0], r0[x1], wx),
-                                     ngl_sw_lerp8(r1[x0], r1[x1], wx), wy);
-            } else {
-                int tx = su >> 16, ty = sv >> 16;
-                if (st->repeat_s) tx &= st->wmask;
-                else if (tx < 0) tx = 0;
-                else if (tx > st->wmask) tx = st->wmask;
-                if (st->repeat_t) ty &= st->hmask;
-                else if (ty < 0) ty = 0;
-                else if (ty > st->hmask) ty = st->hmask;
-                texel = st->tex->argb[ty * st->tw + tx];
+        if (multi) {
+            int k;
+            for (k = 0; k < ntex; ++k) {
+                NGLSpanTex *t = &tx[k];
+                unsigned int texel = t->bilinear ?
+                    ngl_sw_sample_bilinear(t->argb, t->tw, t->wmask, t->hmask,
+                                           t->repeat_s, t->repeat_t, t->su, t->sv) :
+                    ngl_sw_sample_nearest(t->argb, t->tw, t->wmask, t->hmask,
+                                          t->repeat_s, t->repeat_t, t->su, t->sv);
+                t->su += t->dsu;
+                t->sv += t->dsv;
+                color = ngl_sw_apply_tex_env(t->unit, t->base, color, texel);
             }
+        } else if (st->tex != NULL) {
+            const unsigned int *argb = st->tex->argb;
+            unsigned int texel = bilinear ?
+                ngl_sw_sample_bilinear(argb, st->tw, st->wmask, st->hmask,
+                                       st->repeat_s, st->repeat_t, su, sv) :
+                ngl_sw_sample_nearest(argb, st->tw, st->wmask, st->hmask,
+                                      st->repeat_s, st->repeat_t, su, sv);
             su += dsu;
             sv += dsv;
             if (st->replace) {
@@ -1770,17 +1854,26 @@ ngl_sw_span_scalar(const NGLSpanState *st, unsigned short *dst,
     *pfi = fi;
 }
 
-static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
-                            const int *tex_mips, int perspective, int smooth,
-                            int rgb_mask_all, unsigned int flat_color,
-                            float inv_area, const NGLPlane *pz,
-                            const NGLPlane *pinvw, const NGLPlane *pu,
-                            const NGLPlane *pv, const NGLPlane *pcol,
-                            const NGLPlane *pfog,
-                            int minx, int maxx, int miny, int maxy,
-                            int row0, int row1, int row2,
-                            int a0, int a1, int a2, int b0, int b1, int b2,
-                            int bias1, int bias2) {
+#define NGL_SW_SPAN_PARAMS \
+    NGLTexture *const *tex_unit, const int *tex_nearest, \
+    const int *tex_mips, const int *tex_min_nearest, \
+    int perspective, int smooth, int rgb_mask_all, unsigned int flat_color, \
+    float inv_area, const NGLPlane *pz, const NGLPlane *pinvw, \
+    const NGLPlane *pu, const NGLPlane *pv, const NGLPlane *pcol, \
+    const NGLPlane *pfog, int minx, int maxx, int miny, int maxy, \
+    int row0, int row1, int row2, \
+    int a0, int a1, int a2, int b0, int b1, int b2, int bias1, int bias2
+#define NGL_SW_SPAN_ARGS \
+    tex_unit, tex_nearest, tex_mips, tex_min_nearest, perspective, smooth, \
+    rgb_mask_all, flat_color, inv_area, pz, pinvw, pu, pv, pcol, pfog, \
+    minx, maxx, miny, maxy, row0, row1, row2, a0, a1, a2, b0, b1, b2, \
+    bias1, bias2
+
+/* Returns 1 when drawn, 0 when the state needs the per-pixel loop, -1
+ * when it needs the other specialization (want_multi is a constant, so
+ * each instance keeps only its own texture code). */
+static NGL_SW_ALWAYS_INLINE int ngl_sw_span_fast_body(NGL_SW_SPAN_PARAMS,
+                                                      const int want_multi) {
     const NGLTexture *tex = tex_unit[0];
     int depth_on = ngl_sw.depth_test && ngl_sw.depth != NULL;
     int depth_less = depth_on && ngl_sw.depth_func == GL_LESS;
@@ -1792,9 +1885,16 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     int mode = GL_MODULATE;
     int repeat_s = 0, repeat_t = 0;
     int tw = 0, th = 0, wmask = 0, hmask = 0;
-    float inv_tw = 0.0f, inv_th = 0.0f;  /* exact: repeat needs pow2 */
+    float inv_tw = 0.0f, inv_th = 0.0f;
     float l1x = (float)a1 * inv_area, l2x = (float)a2 * inv_area;
-    float dqx = 0.0f, duqx = 0.0f, dvqx = 0.0f, dzx;
+    float l1y = (float)b1 * inv_area, l2y = (float)b2 * inv_area;
+    float dqx = 0.0f, dqy = 0.0f, dzx;
+    /* per texture unit: plane steps of u*q, v*q along x and y */
+    float duqx[NGL_SW_TEXTURE_UNITS] = {0.0f}, dvqx[NGL_SW_TEXTURE_UNITS] = {0.0f};
+    float duqy[NGL_SW_TEXTURE_UNITS] = {0.0f}, dvqy[NGL_SW_TEXTURE_UNITS] = {0.0f};
+    int units[NGL_SW_TEXTURE_UNITS];
+    int ntex = 0, multi = 0, k;
+    NGLSpanTex tx[NGL_SW_TEXTURE_UNITS];
     float dcx[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     int y, ch;
     /* 0: plain write, 1: SRC_ALPHA/ONE_MINUS_SRC_ALPHA, 2: other blend */
@@ -1812,25 +1912,38 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     }
     if (depth_on && ngl_sw.depth_func != GL_LEQUAL &&
             ngl_sw.depth_func != GL_LESS && ngl_sw.depth_func != GL_ALWAYS) return 0;
-    if (NGL_SW_TEXTURE_UNITS > 1 && tex_unit[1] != NULL) return 0;
-    if (tex != NULL) {
+    for (k = 0; k < NGL_SW_TEXTURE_UNITS; ++k) {
+        const NGLTexture *t = tex_unit[k];
+        if (t == NULL) continue;
+        /* repeating coordinates are kept in range by whole periods */
+        if ((t->wrap_s == GL_REPEAT && !ngl_sw_is_pow2(t->width)) ||
+            (t->wrap_t == GL_REPEAT && !ngl_sw_is_pow2(t->height))) return 0;
+        units[ntex++] = k;
+    }
+    if (ntex > 1 || (ntex == 1 && units[0] != 0)) {
+        multi = 1;
+    } else if (tex != NULL) {
         mode = ngl_sw.tex_env_mode[0];
-        if (tex_mips[0] || tex->no_color) return 0;
+        multi = tex_mips[0] || tex->no_color ||
+                (mode != GL_MODULATE && mode != GL_REPLACE);
+    }
+    if (multi != want_multi) return -1;
+    if (multi) {
+        tex = NULL;   /* the single-texture state below stays unused */
+    } else if (tex != NULL) {
         bilinear = !tex_nearest[0];
-        if (mode != GL_MODULATE && mode != GL_REPLACE) return 0;
         tw = tex->width;
         th = tex->height;
         inv_tw = 1.0f / (float)tw;
         inv_th = 1.0f / (float)th;
         repeat_s = tex->wrap_s == GL_REPEAT;
         repeat_t = tex->wrap_t == GL_REPEAT;
-        if ((repeat_s && !ngl_sw_is_pow2(tw)) || (repeat_t && !ngl_sw_is_pow2(th))) return 0;
         wmask = tw - 1;
         hmask = th - 1;
     }
 
 #ifdef NGL_SW_HAVE_NEON
-    use_neon = !ngl_sw.alpha_test && blend_mode == 0 && !fog && !bilinear;
+    use_neon = !ngl_sw.alpha_test && blend_mode == 0 && !fog && !bilinear && !multi;
     ns.depth_test = (depth_on && ngl_sw.depth_func != GL_ALWAYS) ? (depth_less ? 1 : 2) : 0;
     ns.depth_write = depth_write;
     ns.tex = tex != NULL ? tex->argb : NULL;
@@ -1861,10 +1974,20 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
     ss.fog_rgb = fog_rgb;
 
     dzx = pz->db * l1x + pz->dc * l2x;
-    if (perspective) dqx = pinvw->db * l1x + pinvw->dc * l2x;
-    if (tex != NULL) {
-        duqx = pu[0].db * l1x + pu[0].dc * l2x;
-        dvqx = pv[0].db * l1x + pv[0].dc * l2x;
+    if (perspective) {
+        dqx = pinvw->db * l1x + pinvw->dc * l2x;
+        dqy = pinvw->db * l1y + pinvw->dc * l2y;
+    }
+    for (k = 0; k < ntex; ++k) {
+        int un = units[k];
+        duqx[k] = pu[un].db * l1x + pu[un].dc * l2x;
+        dvqx[k] = pv[un].db * l1x + pv[un].dc * l2x;
+        duqy[k] = pu[un].db * l1y + pu[un].dc * l2y;
+        dvqy[k] = pv[un].db * l1y + pv[un].dc * l2y;
+        tx[k].unit = un;
+        tx[k].base = tex_unit[un];
+        tx[k].repeat_s = tex_unit[un]->wrap_s == GL_REPEAT;
+        tx[k].repeat_t = tex_unit[un]->wrap_t == GL_REPEAT;
     }
     if (smooth) {
         for (ch = 0; ch < 4; ++ch) dcx[ch] = pcol[ch].db * l1x + pcol[ch].dc * l2x;
@@ -1876,7 +1999,8 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         int xs, xe, x;
         unsigned short *dst_row;
         unsigned short *depth_row;
-        float l1, l2, q, uq = 0.0f, vq = 0.0f, rw0;
+        float l1, l2, q, rw0, rws;
+        float uqk[NGL_SW_TEXTURE_UNITS], vqk[NGL_SW_TEXTURE_UNITS];
         float cq[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float u0 = 0.0f, v0 = 0.0f, c0[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float fq = 0.0f, k0 = 0.0f;
@@ -1906,11 +2030,17 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         }
         q = perspective ? NGL_SW_PLANE(*pinvw, l1, l2) : 1.0f;
         rw0 = 1.0f / q;
-        if (tex != NULL) {
-            uq = NGL_SW_PLANE(pu[0], l1, l2);
-            vq = NGL_SW_PLANE(pv[0], l1, l2);
-            u0 = uq * rw0 * (float)tw;
-            v0 = vq * rw0 * (float)th;
+        rws = rw0;
+        if (multi) {
+            for (k = 0; k < ntex; ++k) {
+                uqk[k] = NGL_SW_PLANE(pu[units[k]], l1, l2);
+                vqk[k] = NGL_SW_PLANE(pv[units[k]], l1, l2);
+            }
+        } else if (tex != NULL) {
+            uqk[0] = NGL_SW_PLANE(pu[0], l1, l2);
+            vqk[0] = NGL_SW_PLANE(pv[0], l1, l2);
+            u0 = uqk[0] * rw0 * (float)tw;
+            v0 = vqk[0] * rw0 * (float)th;
         }
         if (smooth) {
             for (ch = 0; ch < 4; ++ch) {
@@ -1936,42 +2066,55 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
             q += dqx * (float)n;
             rw1 = 1.0f / q;
             if (tex != NULL) {
-                /* segment ends in texels; s0/s1, t0/t1 are working copies,
-                 * u1/v1 stay unshifted as the next segment's start */
-                float s0 = u0, t0 = v0, s1, t1;
-                uq += duqx * (float)n;
-                vq += dvqx * (float)n;
-                u1 = uq * rw1 * (float)tw;
-                v1 = vq * rw1 * (float)th;
-                s1 = u1;
-                t1 = v1;
-                /* keep 16.16 in range: shift repeating coordinates by whole
-                 * texture periods, clamp the others (indices clamp anyway) */
-                if (repeat_s) {
-                    float k = ngl_sw_floorf(s0 * inv_tw) * (float)tw;
-                    s0 -= k;
-                    s1 -= k;
-                } else {
-                    s0 = s0 < -8192.0f ? -8192.0f : (s0 > 8192.0f ? 8192.0f : s0);
-                    s1 = s1 < -8192.0f ? -8192.0f : (s1 > 8192.0f ? 8192.0f : s1);
+                /* segment ends in texels; u1/v1 are the next segment's start */
+                uqk[0] += duqx[0] * (float)n;
+                vqk[0] += dvqx[0] * (float)n;
+                u1 = uqk[0] * rw1 * (float)tw;
+                v1 = vqk[0] * rw1 * (float)th;
+                ngl_sw_span_tex_seg(u0, v0, u1, v1, tw, th, inv_tw, inv_th,
+                                    repeat_s, repeat_t,
+                                    inv_n, &su, &sv, &dsu, &dsv);
+            }
+            if (multi) for (k = 0; k < ntex; ++k) {
+                /* multi: normalized coordinates at both segment ends */
+                int un = units[k];
+                const NGLTexture *bt = tex_unit[un];
+                const NGLTexture *lt = bt;
+                float us0 = uqk[k] * rws, vs0 = vqk[k] * rws, us1, vs1;
+                int bil = !tex_nearest[un];
+                uqk[k] += duqx[k] * (float)n;
+                vqk[k] += dvqx[k] * (float)n;
+                us1 = uqk[k] * rw1;
+                vs1 = vqk[k] * rw1;
+                if (tex_mips[un]) {
+                    /* same rho as the per-pixel path, at the segment start */
+                    float ux = (duqx[k] - us0 * dqx) * rws * (float)bt->width;
+                    float uy = (duqy[k] - us0 * dqy) * rws * (float)bt->width;
+                    float vx = (dvqx[k] - vs0 * dqx) * rws * (float)bt->height;
+                    float vy = (dvqy[k] - vs0 * dqy) * rws * (float)bt->height;
+                    float rx = ux * ux + vx * vx;
+                    float ry = uy * uy + vy * vy;
+                    float rho2 = rx > ry ? rx : ry;
+                    if (rho2 > 1.0f) {
+                        int level = ngl_sw_mip_level(rho2);
+                        if (level > tex_mips[un]) level = tex_mips[un];
+                        if (level > 0) lt = &bt->mips[level - 1];
+                        bil = !tex_min_nearest[un];
+                    } else {
+                        bil = bt->mag_filter == GL_LINEAR;
+                    }
                 }
-                if (repeat_t) {
-                    float k = ngl_sw_floorf(t0 * inv_th) * (float)th;
-                    t0 -= k;
-                    t1 -= k;
-                } else {
-                    t0 = t0 < -8192.0f ? -8192.0f : (t0 > 8192.0f ? 8192.0f : t0);
-                    t1 = t1 < -8192.0f ? -8192.0f : (t1 > 8192.0f ? 8192.0f : t1);
-                }
-                if (s1 - s0 > 16384.0f || s0 - s1 > 16384.0f ||
-                    t1 - t0 > 16384.0f || t0 - t1 > 16384.0f) {
-                    s1 = s0;   /* absurd gradient (degenerate w): flat */
-                    t1 = t0;
-                }
-                su = (int)(s0 * 65536.0f);
-                sv = (int)(t0 * 65536.0f);
-                dsu = (int)((s1 - s0) * inv_n * 65536.0f);
-                dsv = (int)((t1 - t0) * inv_n * 65536.0f);
+                tx[k].argb = lt->argb;
+                tx[k].tw = lt->width;
+                tx[k].wmask = lt->width - 1;
+                tx[k].hmask = lt->height - 1;
+                tx[k].bilinear = bil;
+                ngl_sw_span_tex_seg(us0 * (float)lt->width, vs0 * (float)lt->height,
+                                    us1 * (float)lt->width, vs1 * (float)lt->height,
+                                    lt->width, lt->height,
+                                    1.0f / (float)lt->width, 1.0f / (float)lt->height,
+                                    tx[k].repeat_s, tx[k].repeat_t, inv_n,
+                                    &tx[k].su, &tx[k].sv, &tx[k].dsu, &tx[k].dsv);
             }
             if (smooth) {
                 for (ch = 0; ch < 4; ++ch) {
@@ -2001,17 +2144,23 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
 #endif
             {
                 unsigned short *zrow = depth_row != NULL ? depth_row + x : NULL;
-                if (fog || bilinear)
+                if (multi)
                     ngl_sw_span_scalar(&ss, dst_row + x, zrow, n - i, &zfix, dzfix,
                                        &su, &sv, dsu, dsv, ci, dci, &fi, dfi,
-                                       fog, bilinear);
+                                       tx, ntex, fog, 0, 1);
+                else if (fog || bilinear)
+                    ngl_sw_span_scalar(&ss, dst_row + x, zrow, n - i, &zfix, dzfix,
+                                       &su, &sv, dsu, dsv, ci, dci, &fi, dfi,
+                                       NULL, 0, fog, bilinear, 0);
                 else
                     ngl_sw_span_scalar(&ss, dst_row + x, zrow, n - i, &zfix, dzfix,
-                                       &su, &sv, dsu, dsv, ci, dci, &fi, dfi, 0, 0);
+                                       &su, &sv, dsu, dsv, ci, dci, &fi, dfi,
+                                       NULL, 0, 0, 0, 0);
                 x += n - i;
             }
             u0 = u1;
             v0 = v1;
+            rws = rw1;
             k0 = k1;
             if (smooth) {
                 for (ch = 0; ch < 4; ++ch) c0[ch] = c1[ch];
@@ -2019,6 +2168,24 @@ static int ngl_sw_span_fast(NGLTexture *const *tex_unit, const int *tex_nearest,
         }
     }
     return 1;
+}
+
+static int ngl_sw_span_fast_multi(NGL_SW_SPAN_PARAMS) {
+    return ngl_sw_span_fast_body(NGL_SW_SPAN_ARGS, 1);
+}
+
+/* Below this bounding-box area (pixels) the multi-texture span setup
+ * (per row and per 16-px segment, per unit) costs more than the per-pixel
+ * loop saves. */
+#ifndef NGL_SW_MULTI_MIN_AREA
+#define NGL_SW_MULTI_MIN_AREA 32
+#endif
+
+static int ngl_sw_span_fast(NGL_SW_SPAN_PARAMS) {
+    int r = ngl_sw_span_fast_body(NGL_SW_SPAN_ARGS, 0);
+    if (r >= 0) return r;
+    if ((maxx - minx) * (maxy - miny) < NGL_SW_MULTI_MIN_AREA) return 0;
+    return ngl_sw_span_fast_multi(NGL_SW_SPAN_ARGS);
 }
 
 static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
@@ -2262,7 +2429,8 @@ static void ngl_sw_raster_tri_fast(const NGLVertex *a, const NGLVertex *b,
             dvy[unit] = pv[unit].db * l1y + pv[unit].dc * l2y;
         }
     }
-    if (ngl_sw_span_fast(tex_unit, tex_nearest, tex_mips, perspective, smooth,
+    if (ngl_sw_span_fast(tex_unit, tex_nearest, tex_mips, tex_min_nearest,
+                         perspective, smooth,
                          rgb_mask_all, flat_color, inv_area, &pz, &pinvw,
                          pu, pv, pcol, &pfog, minx, maxx, miny, maxy,
                          row0, row1, row2, a0, a1, a2, b0, b1, b2,

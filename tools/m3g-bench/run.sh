@@ -6,7 +6,9 @@
 # Builds the bench twice: against the working tree and against the
 # ngl_software.h of a git revision (REF, default HEAD), renders each mode,
 # compares the last frames and prints callgrind instruction counts.
-# Modes: n plain, f linear fog, e exp fog, l bilinear, lf / le combined.
+# Modes (letters combine): n plain, f linear fog, e exp fog, l bilinear,
+# m mipmaps (level NEAREST), M level LINEAR, 2 second texture unit,
+# d DECAL env (RGBA texture on the cars).
 # ARM=1 builds for cortex-a7+NEON with Zig (pip install ziglang) and runs
 # under qemu-arm (no instruction counts; qemu timing is meaningless).
 set -e

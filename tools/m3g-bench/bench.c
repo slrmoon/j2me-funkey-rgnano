@@ -33,6 +33,8 @@ static void my_err(M3Genum e, M3GInterface m) { (void)m; fprintf(stderr, "M3G er
 #define H 240
 static unsigned short fb[W * H];
 static int opt_lin, opt_fog;  /* 1 linear fog, 2 exponential */
+static int opt_mip;           /* 1 mipmaps (level NEAREST), 2 level LINEAR */
+static int opt_two, opt_decal;
 
 #define GN 17   /* grid vertices per side */
 
@@ -77,6 +79,7 @@ static M3GVertexBuffer make_grid(M3GInterface m3g, int sphere, int with_colors,
     m3gSetVertexArray(vb, va, 0.001f, bias, 3);
     m3gSetNormalArray(vb, na);
     m3gSetTexCoordArray(vb, 0, ta, 1.0f / 255, bias, 2);
+    if (opt_two) m3gSetTexCoordArray(vb, 1, ta, 0.5f / 255, bias, 2);
     if (with_colors) {
         ca = m3gCreateVertexArray(m3g, GN * GN, 4, M3G_BYTE);
         m3gSetVertexArrayElements(ca, 0, GN * GN, GN * GN * 4, M3G_BYTE, col);
@@ -102,7 +105,9 @@ static M3GTexture make_tex(M3GInterface m3g, int seed, int alpha) {
     img = m3gCreateImage(m3g, alpha ? M3G_RGBA : M3G_RGB, 64, 64, 0);
     m3gSetImage(img, px);
     t = m3gCreateTexture(m3g, img);
-    m3gSetFiltering(t, M3G_FILTER_BASE_LEVEL, opt_lin ? M3G_FILTER_LINEAR : M3G_FILTER_NEAREST);
+    m3gSetFiltering(t, opt_mip == 1 ? M3G_FILTER_NEAREST :
+                       opt_mip == 2 ? M3G_FILTER_LINEAR : M3G_FILTER_BASE_LEVEL,
+                    opt_lin ? M3G_FILTER_LINEAR : M3G_FILTER_NEAREST);
     return t;
 }
 
@@ -124,7 +129,14 @@ int main(int argc, char **argv) {
     unsigned long sum = 0;
     FILE *fo;
 
-    if (argc > 2) { opt_lin = strchr(argv[2], 'l') != 0; opt_fog = strchr(argv[2], 'f') ? 1 : strchr(argv[2], 'e') ? 2 : 0; }
+    if (argc > 2) {
+        const char *o = argv[2];
+        opt_lin = strchr(o, 'l') != 0;
+        opt_fog = strchr(o, 'f') ? 1 : strchr(o, 'e') ? 2 : 0;
+        opt_mip = strchr(o, 'm') ? 1 : strchr(o, 'M') ? 2 : 0;
+        opt_two = strchr(o, '2') != 0;    /* second texture unit */
+        opt_decal = strchr(o, 'd') != 0;  /* DECAL env on the cars */
+    }
     memset(&p, 0, sizeof(p));
     p.mallocFunc = my_malloc; p.freeFunc = my_free; p.errorFunc = my_err;
     m3g = m3gCreateInterface(&p);
@@ -149,10 +161,22 @@ int main(int argc, char **argv) {
     acar = m3gCreateAppearance(m3g);
     m3gSetMaterial(acar, mat);
     m3gSetPolygonMode(acar, pm);
-    m3gSetTexture(acar, 0, make_tex(m3g, 10, 0));
+    { M3GTexture t = make_tex(m3g, 10, opt_decal);
+      if (opt_decal) m3gTextureSetBlending(t, M3G_FUNC_DECAL);
+      m3gSetTexture(acar, 0, t); }
+    if (opt_two) {
+        M3GTexture t = make_tex(m3g, 90, 0);
+        m3gTextureSetBlending(t, M3G_FUNC_MODULATE);
+        m3gSetTexture(acar, 1, t);
+    }
 
     aground = m3gCreateAppearance(m3g);
     m3gSetTexture(aground, 0, make_tex(m3g, 40, 0));
+    if (opt_two) {
+        M3GTexture t = make_tex(m3g, 120, 0);
+        m3gTextureSetBlending(t, M3G_FUNC_ADD);
+        m3gSetTexture(aground, 1, t);
+    }
     { M3GPolygonMode p2 = m3gCreatePolygonMode(m3g); m3gSetCulling(p2, M3G_CULL_NONE); m3gSetPolygonMode(aground, p2); }
 
     acol = m3gCreateAppearance(m3g);
