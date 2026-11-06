@@ -25,16 +25,20 @@ MAKE_JOBS=${MAKE_JOBS:-$(nproc 2>/dev/null || echo 1)}
 # loopgen both build classes.zip: parallel make races in both.
 MIDP_MAKE_JOBS=${MIDP_MAKE_JOBS:-1}
 CLDC_MAKE_JOBS=${CLDC_MAKE_JOBS:-1}
-HOST_CFLAGS=${HOST_CFLAGS:--m32}
+# Large-file API (stat64, readdir64, ...): without it stat() fails with
+# EOVERFLOW on file systems with 64-bit inode numbers (WSL /mnt/c, NFS,
+# XFS, btrfs): "IOException while loading skin: Value too large".
+LFS_CFLAGS="-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
+HOST_CFLAGS=${HOST_CFLAGS:--m32 $LFS_CFLAGS}
 # -pthread: glibc < 2.34 keeps pthread/sem_* in libpthread
 HOST_LINK_FLAGS=${HOST_LINK_FLAGS:--m32 -pthread}
 HOST_ASM_FLAGS=${HOST_ASM_FLAGS:---32}
 # CFLAGS on the make command line replaces PCSL's own "CFLAGS +=" lines,
 # so the server-socket switch has to be repeated here.
-HOST_PCSL_CFLAGS=${HOST_PCSL_CFLAGS:--c -m32 -O3 -fexpensive-optimizations -DENABLE_SERVER_SOCKET=1}
+HOST_PCSL_CFLAGS=${HOST_PCSL_CFLAGS:--c -m32 -O3 -fexpensive-optimizations -DENABLE_SERVER_SOCKET=1 $LFS_CFLAGS}
 HOST_PCSL_LD_FLAGS=${HOST_PCSL_LD_FLAGS:--m32}
 # SSE2 maths (every x86 CPU of the last 20 years), no x87 excess precision.
-X86_CFLAGS=${X86_CFLAGS:--m32 -O2 -march=i686 -msse2 -mfpmath=sse}
+X86_CFLAGS=${X86_CFLAGS:--m32 -O2 -march=i686 -msse2 -mfpmath=sse $LFS_CFLAGS}
 
 if [ -z "${JDK_DIR:-}" ]; then
     for d in "$ROOT/zulu7.24.0.1-jdk7.0.191-linux_x64" \
