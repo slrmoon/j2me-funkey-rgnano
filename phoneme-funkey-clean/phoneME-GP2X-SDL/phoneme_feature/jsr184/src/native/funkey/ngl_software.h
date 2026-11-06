@@ -1168,6 +1168,7 @@ static NGLVertex ngl_sw_lerp_vertex(NGLVertex a, NGLVertex b, float t) {
         }
     }
     out.color = ngl_sw_lerp_color(a.color, b.color, t);
+    out.outcode = 0;   /* clipped vertices are not tested again */
     return out;
 }
 
