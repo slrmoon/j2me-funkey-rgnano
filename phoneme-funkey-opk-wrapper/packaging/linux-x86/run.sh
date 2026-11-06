@@ -1,0 +1,122 @@
+#!/bin/bash
+# Run a J2ME (MIDP) or i-appli (DoJa) game with the desktop runtime.
+#
+#   ./run.sh game.jar
+#
+# MIDP: the main class comes from MIDlet-1 in the manifest (or a .jad next
+# to the jar). DoJa: a .jam next to the jar (game.jam, or the only .jam in
+# the folder) with an AppClass; the scratchpad is game.sp next to it.
+#
+# Environment (all optional):
+#   SCALE=3         window size multiplier of the 240x240 screen (1..8)
+#   LCD=240x320     screen size the game sees (default: runtime default,
+#                   DoJa: the .jam DrawArea)
+#   MODE=fit        fit | integer | crop | fill | center | zoom | auto
+#   FILTER=sharp    sharp | smooth | pixel
+#   FPS=30          frame limit;  HEAP_MB=16 (DoJa 32)
+#   MUTE=1          no sound;     VMARGS="-int" extra VM options
+# Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/funkey-j2me/rms/<game>.
+#
+# Keys: arrows, Enter/Space = fire, F1/Tab = left soft key,
+# F2/Esc/Backspace = right soft key, 0-9 / numpad, * #. Menu: see README.
+
+set -e
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+if [ $# -lt 1 ] || [ ! -f "$1" ]; then
+    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+fi
+
+JAR=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+BASE=${JAR%.*}
+NAME=$(basename "$BASE")
+DIR=$(dirname "$JAR")
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}/funkey-j2me
+mkdir -p "$DATA/rms/$NAME" "$DATA/run/$NAME"
+
+jar_entry() {  # jar_entry <jar> <entry>: print one entry
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -p "$1" "$2" 2>/dev/null
+    else
+        python3 -c 'import sys,zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' "$1" "$2" 2>/dev/null
+    fi
+}
+jam_value() {  # jam_value <jam> <key>
+    tr -d '\r' < "$1" | grep -a "^$2 *=" | head -n 1 | sed "s/^$2 *= *//; s/ *\$//"
+}
+
+# DoJa: game.jam, or the only .jam of the folder
+JAM=""
+if [ -f "$BASE.jam" ]; then
+    JAM=$BASE.jam
+else
+    shopt -s nullglob
+    jams=("$DIR"/*.jam)
+    shopt -u nullglob
+    [ ${#jams[@]} -eq 1 ] && JAM=${jams[0]}
+fi
+APP_CLASS=""
+[ -n "$JAM" ] && APP_CLASS=$(jam_value "$JAM" AppClass)
+
+export MIDP_HOME=$HERE
+export PHONEME_RMS_HOME=$DATA/rms/$NAME
+export PHONEME_WINDOW_SCALE=${SCALE:-3}
+export PHONEME_SCALE_MODE=${MODE:-fit}
+[ -n "${FILTER:-}" ] && export PHONEME_SCALE_FILTER=$FILTER
+[ -n "${FPS:-}" ] && export PHONEME_FPS_LIMIT=$FPS
+[ -z "${MUTE:-}" ] && export PHONEME_ENABLE_AUDIO=1
+if [ -n "${LCD:-}" ]; then
+    export PHONEME_LCD_SIZE=$LCD PHONEME_SOURCE_SIZE=$LCD
+fi
+
+cd "$HERE/bin"
+if [ -n "$APP_CLASS" ]; then
+    export PHONEME_HEAP_MB=${HEAP_MB:-32}
+    area=$(jam_value "$JAM" DrawArea)
+    case "$area" in
+        [0-9]*x[0-9]*) ;;
+        *) area=240x240 ;;
+    esac
+    if [ -z "${LCD:-}" ]; then
+        export PHONEME_LCD_SIZE=$area PHONEME_SOURCE_SIZE=$area
+    fi
+    hex=$(od -An -tx1 -v "$JAM" | tr -d ' \n')
+    pics=""
+    if [ -d "$DIR/mypicture" ]; then pics=$DIR/mypicture
+    elif [ -d "$BASE.pictures" ]; then pics=$BASE.pictures; fi
+    exec ./runMidlet $VMARGS =MaxMethodToCompile3000 \
+        "-Ddoja.app.class=$APP_CLASS" \
+        "-Ddoja.app.param=$(jam_value "$JAM" AppParam)" \
+        "-Ddoja.app.ver=$(jam_value "$JAM" AppVer)" \
+        -Dmicroedition.encoding=SJIS \
+        "-Ddoja.scratchpad.path=$BASE.sp" \
+        "-Ddoja.spsize=$(jam_value "$JAM" SPsize)" \
+        "-Ddoja.jam.hex=$hex" \
+        "-Ddoja.pictures=$pics" \
+        -classpathext "$JAR:$HERE/lib/doja-support.jar" \
+        internal com.funkey.doja.DoJaMIDlet
+fi
+
+export PHONEME_HEAP_MB=${HEAP_MB:-16}
+# getAppProperty() reads a .jad next to the jar: use the game's own one,
+# otherwise make one from the manifest beside a link to the jar.
+RUNJAR=$JAR
+if [ -f "$BASE.jad" ]; then
+    DESC=$BASE.jad
+else
+    jar_entry "$JAR" META-INF/MANIFEST.MF > "$DATA/run/$NAME/game.jad"
+    ln -sf "$JAR" "$DATA/run/$NAME/game.jar"
+    RUNJAR=$DATA/run/$NAME/game.jar
+    DESC=$DATA/run/$NAME/game.jad
+fi
+MAIN=$(tr -d '\r' < "$DESC" | grep -a '^MIDlet-1:' | head -n 1 | awk -F, '{print $3}' | tr -d ' ')
+if [ -z "$MAIN" ]; then
+    MAIN=$(jar_entry "$JAR" META-INF/MANIFEST.MF | tr -d '\r' | grep -a '^MIDlet-1:' |
+           head -n 1 | awk -F, '{print $3}' | tr -d ' ')
+fi
+if [ -z "$MAIN" ]; then
+    echo "No MIDlet-1 entry in $JAR" >&2
+    exit 1
+fi
+exec ./runMidlet $VMARGS -classpathext "$RUNJAR" internal "$MAIN"

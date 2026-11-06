@@ -453,6 +453,33 @@ Set `FUNKEY_MIDLET_MAIN` to specify the main class explicitly.
 
 Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
 
+## Desktop build (Linux x86)
+
+The same runtime (M3G, fkaudio, DoJa) also builds as a 32-bit x86 Linux
+program with an SDL window, for testing games on a PC. Needs the JDK 7 above,
+no FunKey SDK. Host packages (Debian/Ubuntu):
+
+```bash
+sudo dpkg --add-architecture i386 && sudo apt update
+sudo apt install gcc-multilib g++-multilib libc6-dev-i386 zlib1g-dev:i386 \
+    libsdl1.2-dev:i386 libsdl-image1.2-dev:i386 libsdl-gfx1.2-dev:i386
+```
+
+```bash
+cd phoneme-funkey-clean
+JDK_DIR=/path/to/zulu7... ./build-linux-x86.sh
+# Ubuntu 24.04 only: its static i386 libm has no fmod, see tools/cloud-test/README.md
+#   HOST_LINK_FLAGS="-m32 /path/to/fmodshim.o" JDK_DIR=... ./build-linux-x86.sh
+cd ../phoneme-funkey-opk-wrapper
+JDK_DIR=/path/to/zulu7... ./package-linux-x86.sh
+```
+
+Result: `phoneme-funkey-opk-wrapper/dist/funkey-j2me-linux-x86.tar.gz`.
+Unpack it and run `./run.sh game.jar` (i-appli: `game.jam` next to the jar).
+`SCALE=4` makes the window bigger (the screen is 240x240 times `SCALE`,
+default 3), `LCD=240x320` sets the screen size the game sees; the packed
+`README.txt` lists keys and runtime library packages.
+
 ## Known issues
 
 - **Controls** — button mapping is still incomplete on FunKey S / RG Nano; some games may need a different key profile (in-game menu → Controls, or `PHONEME_KEY_PROFILE` in `r.sh`).

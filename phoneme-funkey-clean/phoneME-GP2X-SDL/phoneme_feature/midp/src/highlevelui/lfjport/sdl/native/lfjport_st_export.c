@@ -132,6 +132,36 @@ void PhoneMEProfileInit(void);
 void PhoneMEInputApplyProfile(int index);
 
 SDL_Surface     *Native_SDL_Screen, *Native_SDL_HScreen, *Native_SDL_VScreen;
+/* Desktop builds: PHONEME_WINDOW_SCALE=N opens an N times larger window;
+ * Native_SDL_Screen is then an off-screen 240x240 surface and each flip
+ * enlarges it by pixel duplication. NULL on the device. */
+static SDL_Surface *Native_SDL_Window;
+static int WindowScale = 1;
+
+static void screen_flip(void) {
+    int x, y, k;
+    if (Native_SDL_Window == NULL) {
+        SDL_Flip(Native_SDL_Screen);
+        return;
+    }
+    if (SDL_LockSurface(Native_SDL_Window) != 0) return;
+    for (y = 0; y < Native_SDL_Screen->h; ++y) {
+        const Uint16 *src = (const Uint16 *)((const Uint8 *)Native_SDL_Screen->pixels +
+                                             y * Native_SDL_Screen->pitch);
+        Uint16 *dst = (Uint16 *)((Uint8 *)Native_SDL_Window->pixels +
+                                 y * WindowScale * Native_SDL_Window->pitch);
+        Uint16 *d = dst;
+        for (x = 0; x < Native_SDL_Screen->w; ++x) {
+            for (k = 0; k < WindowScale; ++k) *d++ = src[x];
+        }
+        for (k = 1; k < WindowScale; ++k) {
+            memcpy((Uint8 *)dst + k * Native_SDL_Window->pitch, dst,
+                   (size_t)Native_SDL_Screen->w * WindowScale * 2);
+        }
+    }
+    SDL_UnlockSurface(Native_SDL_Window);
+    SDL_Flip(Native_SDL_Window);
+}
 SDL_Surface     *Native_SDL_PScreen;
 static jboolean  Native_SDL_ScreenOrientation;
 static jboolean  Native_SDL_Fullscreen;
@@ -2104,7 +2134,7 @@ void PhoneMEOverlayRefresh(void) {
     } else {
         present_surface(Native_SDL_HScreen, OriginalOrientation == 1);
     }
-    SDL_Flip(Native_SDL_Screen);
+    screen_flip();
 }
 
 /**
@@ -2164,7 +2194,26 @@ int lfjport_ui_init()
   }
   overlay_init();
   PhoneMEProfileInit();
-  Native_SDL_Screen = SDL_SetVideoMode(SDL_FULLWIDTH, SDL_FULLHEIGHT, 16, 0);
+  {
+    const char *ws = getenv("PHONEME_WINDOW_SCALE");
+    WindowScale = ws != NULL ? atoi(ws) : 1;
+    if (WindowScale < 1) WindowScale = 1;
+    if (WindowScale > 8) WindowScale = 8;
+  }
+  if (WindowScale > 1) {
+    Native_SDL_Window = SDL_SetVideoMode(SDL_FULLWIDTH * WindowScale,
+                                         SDL_FULLHEIGHT * WindowScale, 16, SDL_SWSURFACE);
+    if (Native_SDL_Window != NULL && Native_SDL_Window->format->BitsPerPixel == 16) {
+      Native_SDL_Screen = SDL_CreateRGBSurface(SDL_SWSURFACE, SDL_FULLWIDTH, SDL_FULLHEIGHT,
+                                               16, 0xF800, 0x07E0, 0x001F, 0);
+    } else {
+      fprintf(stderr, "lfjport_ui_init: %dx window unavailable, using 1x\n", WindowScale);
+      Native_SDL_Window = NULL;
+      WindowScale = 1;
+    }
+  }
+  if (Native_SDL_Window == NULL)
+    Native_SDL_Screen = SDL_SetVideoMode(SDL_FULLWIDTH, SDL_FULLHEIGHT, 16, 0);
   if (Native_SDL_Screen == NULL)
    { fprintf(stderr, "lfjport_ui_init: SDL_SetVideoMode failed: %s\n",
              SDL_GetError());
@@ -2173,7 +2222,7 @@ int lfjport_ui_init()
   if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: SDL_SetVideoMode ok\n");
   SDL_FillRect(Native_SDL_Screen, NULL,
                SDL_MapRGB(Native_SDL_Screen->format, 0, 64, 96));
-  SDL_Flip(Native_SDL_Screen);
+  screen_flip();
   if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: initial fill ok\n");
   Native_SDL_HScreen = SDL_CreateRGBSurface(SDL_SWSURFACE, OriginalWidth, OriginalHeight, 16, 0x0000F800, 0x000007E0, 0x0000001F, 0x00000000);
   if (Native_SDL_HScreen == NULL)
@@ -2253,7 +2302,7 @@ void lfjport_refresh(int x1, int y1, int x2, int y2)
   }
   /* SDL_Flip alone pushes the frame (on a software surface it is the full
    * update); calling SDL_UpdateRect before it copied every frame twice */
-  SDL_Flip(Native_SDL_Screen);
+  screen_flip();
   SDL_LockSurface(Native_SDL_HScreen);
   SDL_LockSurface(Native_SDL_VScreen);
 }
