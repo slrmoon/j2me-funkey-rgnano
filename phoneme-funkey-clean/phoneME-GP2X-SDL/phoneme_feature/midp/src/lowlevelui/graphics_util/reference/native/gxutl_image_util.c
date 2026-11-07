@@ -94,7 +94,8 @@ MIDP_ERROR gxutl_image_get_info(unsigned char *imgBuf,
 	return MIDP_ERROR_NONE;
 
     } else if ((length >= 4 + 8) &&
-               (memcmp(imgBuf, &gxutl_jpeg_header, 4) == 0)) {
+               (memcmp(imgBuf, &gxutl_jpeg_header, 3) == 0)) {
+        /* SOI and any marker: JFIF, Exif, plain and Adobe JPEGs alike */
         unsigned int i, field_len;
 
 	*format = GXUTL_IMAGE_FORMAT_JPEG;
@@ -129,7 +130,8 @@ MIDP_ERROR gxutl_image_get_info(unsigned char *imgBuf,
             if ((imgBuf[i+1] & 0xf0) == 0xc0) {
                 unsigned char code = imgBuf[i+1];
 
-                if (code != 0xc4 || code != 0xcc) {
+                /* not DHT, JPG or DAC (was ||: always true) */
+                if (code != 0xc4 && code != 0xc8 && code != 0xcc) {
                     /* Big endian */
                     *height = (imgBuf[i + 5] << 8) | imgBuf[i + 6];
                     *width  = (imgBuf[i + 7] << 8) | imgBuf[i + 8];

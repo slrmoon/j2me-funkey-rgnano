@@ -52,7 +52,9 @@ class ImageDataFactory implements AbstractImageDataFactory {
      * JPEG Header Data
      */
     private static final byte[] jpegHeader = new byte[] {
-         (byte)0xff, (byte)0xd8, (byte)0xff, (byte)0xe0
+         /* SOI and any marker: not only JFIF (ff e0) but Exif (ff e1),
+          * plain (ff db), Adobe (ff ee) JPEGs */
+         (byte)0xff, (byte)0xd8, (byte)0xff
     };
 
     /**
@@ -600,7 +602,11 @@ class ImageDataFactory implements AbstractImageDataFactory {
             if ((byte) (imageBytes[idx + 1] & 0xf0) == (byte) 0xc0) {
                 byte code = imageBytes[idx + 1];
 
-                if (code != (byte) 0xc4 || code != (byte) 0xcc) {
+                /* SOF0..15 except DHT (c4), JPG (c8), DAC (cc): with ||
+                 * a Huffman table before the frame header gave its
+                 * bytes as the image size */
+                if (code != (byte) 0xc4 && code != (byte) 0xc8
+                        && code != (byte) 0xcc) {
                     /* Big endian */
                     height = ((imageBytes[idx + 5] & 0xff) << 8) +
                             (imageBytes[idx + 6] & 0xff);

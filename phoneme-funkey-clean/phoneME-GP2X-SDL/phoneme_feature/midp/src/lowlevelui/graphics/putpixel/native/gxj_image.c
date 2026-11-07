@@ -45,7 +45,7 @@
 
 #if ENABLE_JPEG
 #include <jpegdecoder.h>
-#elif defined(ARM)
+#else
 #include <string.h>
 #include <SDL.h>
 #include <SDL_image.h>
@@ -294,9 +294,10 @@ decode_jpeg
         midpFree(src);
     }
 
-#elif defined(ARM)
-    /* no phoneME JPEG decoder in this build: SDL_image (libjpeg) does it;
-     * i-appli load JPEG pictures (photos, illustrations) */
+#else
+    /* no phoneME JPEG decoder in this build: SDL_image (libjpeg) does it,
+     * on the device and the desktop build alike; i-appli load JPEG
+     * pictures (photos, illustrations) */
     {
         SDL_RWops *rw = SDL_RWFromConstMem(srcBuffer, length);
         SDL_Surface *s = rw != NULL ? IMG_LoadTyped_RW(rw, 1, "JPG") : NULL;
@@ -327,11 +328,6 @@ decode_jpeg
         if (c != NULL) SDL_FreeSurface(c);
         if (s != NULL) SDL_FreeSurface(s);
     }
-#else
-    (void)srcBuffer;
-    (void)length;
-    (void)image;
-    *creationErrorPtr = GXUTL_NATIVE_IMAGE_UNSUPPORTED_FORMAT_ERROR;
 #endif
 }
 

@@ -301,6 +301,17 @@ public class Connector {
             /* only if the protocol name actually contains dashes */
             protocol = protocol.replace('-', '_');
 
+            /* i-appli cast http: connections to com.nttdocomo.io.
+             * HttpConnection, which the MIDP classes are not: a
+             * ClassCastException killed them at start. No network here
+             * anyway, so answer as for an unknown protocol (an
+             * IOException, which games handle). */
+            if ((protocol.equals("http") || protocol.equals("https"))
+                    && System.getProperty("doja.app.class") != null) {
+                throw new ConnectionNotFoundException(
+                    "no network for i-appli: " + protocol);
+            }
+
             /* Use the platform and protocol names to look up */
             /* a class to implement the connection */
             /* MIDP keeps http, socket, ... in com.sun.midp.io (the
