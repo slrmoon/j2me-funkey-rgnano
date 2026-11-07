@@ -509,6 +509,13 @@ default 3), `LCD=240x320` sets the screen size the game sees; the packed
   slower general path. Perspective is corrected every 16 pixels, which can
   bend textures slightly on large surfaces seen at a steep angle.
 - **Not supported**: Motorola `com.motorola.game` (GameScreen API), Mobile XMF music, video, camera/recording.
+- **Optional JSRs without the hardware** (JSR 75 FileConnection/PIM, JSR 82
+  Bluetooth/OBEX, JSR 179 Location, JSR 226 SVG, JSR 239 OpenGL ES) are
+  present as "not available": games that refer to them load, and the entry
+  points refuse the way a handset without the feature does (no file roots,
+  Bluetooth off, no location provider, SVG not loadable, EGL without a
+  display); their version properties stay unset. Games that need one of
+  them to play still cannot. Test: `tools/optional-stubs-test`.
 
 ## Debugging
 

@@ -19,3 +19,4 @@ SUBSYSTEM_OPTIONAL_STUBS_JAVA_FILES := \
     $(shell find $(OPTIONAL_STUBS_CLASSES_DIR) -name '*.java' | sort)
 
 $(MIDP_OUTPUT_DIR)/classes.zip:: $(SUBSYSTEM_OPTIONAL_STUBS_JAVA_FILES)
+	$(appendjavafiles)
