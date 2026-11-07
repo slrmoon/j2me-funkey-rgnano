@@ -305,7 +305,6 @@ public final class FkRender {
         depthOnly.setDepthClearEnable(true);
         model = new Transform();
         proj = new Transform();
-        vb = new VertexBuffer();
         grow(768);
     }
 
@@ -321,6 +320,9 @@ public final class FkRender {
         vaPos = new VertexArray(c, 3, 2);
         vaCol = new VertexArray(c, 4, 1);
         vaTex = new VertexArray(c, 2, 2);
+        /* a VertexBuffer only takes arrays of one length: the old one still
+         * holds the previous colors / texture coordinates */
+        vb = new VertexBuffer();
     }
 
     private javax.microedition.lcdui.Graphics bound;
