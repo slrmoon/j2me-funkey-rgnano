@@ -36,7 +36,22 @@ BASE=${JAR%.*}
 NAME=$(basename "$BASE")
 DIR=$(dirname "$JAR")
 DATA=${XDG_DATA_HOME:-$HOME/.local/share}/funkey-j2me
+# The VM cannot open a jar (or scratchpad) whose path has non-ASCII
+# characters (BatSwingⅢ/, ギャング弾.JAR: ClassNotFoundException for the
+# main class): such files are reached through ASCII links in $DATA/run.
+nonascii() { printf '%s' "$1" | LC_ALL=C grep -q '[^ -~]'; }
+if nonascii "$NAME"; then
+    NAME=$(printf '%s' "$NAME" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')_$(printf '%s' "$JAR" | cksum | cut -d' ' -f1)
+fi
 mkdir -p "$DATA/rms/$NAME" "$DATA/run/$NAME"
+ascii_link() {  # ascii_link <file> <link name>: prints a path the VM can open
+    if nonascii "$1"; then
+        ln -sfn "$1" "$DATA/run/$NAME/$2"
+        printf '%s' "$DATA/run/$NAME/$2"
+    else
+        printf '%s' "$1"
+    fi
+}
 
 jar_entry() {  # jar_entry <jar> <entry>: print one entry
     if command -v unzip >/dev/null 2>&1; then
@@ -129,6 +144,9 @@ if [ -n "$APP_CLASS" ]; then
     pics=""
     if [ -d "$DIR/mypicture" ]; then pics=$DIR/mypicture
     elif [ -d "$BASE.pictures" ]; then pics=$BASE.pictures; fi
+    SP=$(ascii_link "$SP" "$NAME.sp")  # temp files are named after it
+    [ -n "$pics" ] && pics=$(ascii_link "$pics" pictures)
+    VMJAR=$(ascii_link "$JAR" game.jar)
     param=$(jam_value "$JAM" AppParam)
     ver=$(jam_value "$JAM" AppVer)
     spsize=$(jam_value "$JAM" SPsize)
@@ -142,7 +160,7 @@ if [ -n "$APP_CLASS" ]; then
         "-Ddoja.spsize=$spsize" \
         "-Ddoja.jam.hex=$hex" \
         "-Ddoja.pictures=$pics" \
-        -classpathext "$JAR:$HERE/lib/doja-support.jar" \
+        -classpathext "$VMJAR:$HERE/lib/doja-support.jar" \
         internal com.funkey.doja.DoJaMIDlet
 fi
 
@@ -150,8 +168,13 @@ export PHONEME_HEAP_MB=${HEAP_MB:-16}
 # getAppProperty() reads a .jad next to the jar: use the game's own one,
 # otherwise make one from the manifest beside a link to the jar.
 RUNJAR=$JAR
-if [ -f "$BASE.jad" ] && tr -d '\r' < "$BASE.jad" | grep -aq '^MIDlet-1:'; then
+if [ -f "$BASE.jad" ] && tr -d '\r' < "$BASE.jad" | grep -aq '^MIDlet-1:' && ! nonascii "$JAR"; then
     DESC=$BASE.jad
+elif [ -f "$BASE.jad" ] && tr -d '\r' < "$BASE.jad" | grep -aq '^MIDlet-1:'; then
+    cp "$BASE.jad" "$DATA/run/$NAME/game.jad"
+    ln -sf "$JAR" "$DATA/run/$NAME/game.jar"
+    RUNJAR=$DATA/run/$NAME/game.jar
+    DESC=$DATA/run/$NAME/game.jad
 else
     manifest "$JAR" > "$DATA/run/$NAME/game.jad"
     ln -sf "$JAR" "$DATA/run/$NAME/game.jar"

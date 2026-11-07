@@ -22,8 +22,13 @@ public final class ShortTimer implements TimeKeeper {
         if (canvas == null) {
             throw new NullPointerException("canvas");
         }
-        if (interval <= 0) {
+        if (interval < 0) {
             throw new IllegalArgumentException("interval");
+        }
+        if (interval == 0) {
+            /* handsets run it at their shortest interval; throwing here
+             * killed ~10 games at start */
+            interval = 10;
         }
         ShortTimer t = new ShortTimer();
         t.canvas = canvas;

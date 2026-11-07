@@ -36,6 +36,7 @@ import threading
 import struct
 import time
 import zipfile
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -194,7 +195,11 @@ def result_name(jar, used, lock, label=None):
         parent = os.path.basename(os.path.dirname(jar))
         stem = os.path.splitext(os.path.basename(jar))[0]
         base = (parent + '_' + stem) if parent else stem
-    base = re.sub(r'[^\w.-]+', '_', base).strip('_')[:120] or 'game'
+    # ASCII only: the VM cannot open files under a non-ASCII path
+    ascii = re.sub(r'[^\w.-]+', '_', base, flags=re.ASCII).strip('_')[:110]
+    if not base.isascii():  # keep names told apart: add a short hash
+        ascii = (ascii + '_' if ascii else '') + '%08x' % (zlib.crc32(base.encode()) & 0xffffffff)
+    base = ascii or 'game'
     with lock:
         name = base
         n = 2
