@@ -2526,19 +2526,32 @@ static int launch_game_once(int idx) {
         int jar_len = strlen(jar_path);
         snprintf(jad_path, sizeof(jad_path), "%.*s.jad", jar_len - 4, jar_path);
 
-        char extract_cmd[PATH_MAX * 2 + 256];
+        char extract_cmd[PATH_MAX * 3 + 768];
+        /* The manifest, readable: its name in any letter case (phones take
+         * Meta-inf/Manifest.mf; BusyBox unzip has no -C, so look the name
+         * up in the listing), no CR or UTF-8 BOM, continuation lines (a
+         * leading space; long class names get wrapped at 72 bytes) joined. */
         snprintf(extract_cmd, sizeof(extract_cmd),
-            "unzip -p \"%s\" META-INF/MANIFEST.MF 2>/dev/null | "
-            "grep -i '^MIDlet-1:' | sed 's/.*://' | tr -d '\\r' | "
-            "awk -F, '{print $3}' | tr -d ' ' > "
-            "%s/main-class", jar_path, PM_DIR);
+            "rm -f %s/manifest.mf; "
+            "n=$(unzip -l \"%s\" 2>/dev/null | awk '{print $NF}' | "
+            "grep -i '^meta-inf/manifest.mf$' | head -n 1); "
+            "[ -n \"$n\" ] && unzip -p \"%s\" \"$n\" 2>/dev/null | tr -d '\\r' | "
+            "LC_ALL=C awk 'NR == 1 { sub(/^\\357\\273\\277/, \"\") } "
+            "NR > 1 && /^ / { line = line substr($0, 2); next } "
+            "NR > 1 { print line } { line = $0 } END { if (NR) print line }' "
+            "> %s/manifest.mf",
+            PM_DIR, jar_path, jar_path, PM_DIR);
         fflush(stdout);
+        system(extract_cmd);
+        snprintf(extract_cmd, sizeof(extract_cmd),
+            "grep -i '^MIDlet-1:' %s/manifest.mf | head -n 1 | sed 's/^[^:]*://' | "
+            "awk -F, '{print $3}' | tr -d ' ' > %s/main-class",
+            PM_DIR, PM_DIR);
         system(extract_cmd);
 
         /* create .jad from manifest so phoneME sees app properties */
         snprintf(extract_cmd, sizeof(extract_cmd),
-            "unzip -p \"%s\" META-INF/MANIFEST.MF 2>/dev/null > \"%s\"",
-            jar_path, jad_path);
+            "cp %s/manifest.mf \"%s\" 2>/dev/null", PM_DIR, jad_path);
         system(extract_cmd);
         read_midlet_name_from_jad(jad_path, games[idx].title,
                                   sizeof(games[idx].title));
@@ -2816,6 +2829,7 @@ static int launch_game_once(int idx) {
              * broken code (bad literal load, SIGSEGV); bigger i-appli
              * methods run in the interpreter */
             "=MaxMethodToCompile3000",
+            "-UseVerifier",
             prop_app,
             prop_param,
             prop_ver,
@@ -2834,6 +2848,9 @@ static int launch_game_once(int idx) {
         } else {
         char *argv[] = {
             "runMidlet",
+            /* no bytecode verification: modded games often fail it
+             * (ClassFormatError 154) but run, as on most emulators */
+            "-UseVerifier",
             "-classpathext",
             classpath,
             "internal",
