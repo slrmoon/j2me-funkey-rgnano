@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import threading
+import struct
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -53,6 +54,7 @@ ERROR_PATTERNS = [
     ('missing class', re.compile(r'NoClassDefFoundError|ClassNotFoundException')),
     ('out of memory', re.compile(r'OutOfMemoryError')),
     ('cannot run', re.compile(r'could not be run|cannot be launched|MIDlet suite could not')),
+    ('start failed', re.compile(r'DoJa: application start failed|fatal error screen')),
     ('exception', re.compile(r'(\w+\.)*\w+(Exception|Error)\b')),
     ('m3g error', re.compile(r'\[native\] Error')),
 ]
@@ -123,6 +125,38 @@ def jar_for_jam(jam):
         except Exception:
             pass
     return None
+
+
+def super_class(jar, cls):
+    """the superclass name of a class in a jar, or None"""
+    try:
+        d = zipfile.ZipFile(jar).read(cls.replace('.', '/') + '.class')
+        n = struct.unpack('>H', d[8:10])[0]
+        cp = [None] * n
+        i = 10
+        k = 1
+        while k < n:
+            t = d[i]
+            if t == 1:
+                ln = struct.unpack('>H', d[i + 1:i + 3])[0]
+                cp[k] = d[i + 3:i + 3 + ln].decode('utf-8', 'replace')
+                i += 3 + ln
+            elif t in (3, 4, 9, 10, 11, 12):
+                i += 5
+            elif t in (5, 6):
+                i += 9
+                k += 1
+            elif t == 7:
+                cp[k] = struct.unpack('>H', d[i + 1:i + 3])[0]
+                i += 3
+            elif t == 8:
+                i += 3
+            else:
+                return None
+            k += 1
+        return cp[cp[struct.unpack('>H', d[i + 4:i + 6])[0]]]
+    except Exception:
+        return None
 
 
 def find_doja(args):
@@ -271,15 +305,23 @@ def run_game(game, opt, used, lock, counter):
 
     log_path = os.path.join(out, 'log.txt')
     t_start = time.time()
-    if jar is None:  # a .jam without its jar
+    skip = None
+    if jam and jar is None:
+        skip = ('no jar', 'no .jar for this .jam')
+    elif jam:
+        sup = super_class(jar, jam_value(jam, 'AppClass')) or ''
+        if sup.startswith('com/docomostar/'):
+            # docomo STAR, the API after DoJa: not implemented
+            skip = ('STAR app', 'docomo STAR application (%s), not supported' % sup)
+    if skip:
         with open(log_path, 'w') as log:
-            log.write('# %s\nno .jar for this .jam\n' % jam)
+            log.write('# %s\n%s\n' % (jam, skip[1]))
         with lock:
             counter[0] += 1
             n = counter[0]
-        print('[%d/%d] SKIP   0.0s  %s  no jar' % (n, counter[1], name), flush=True)
+        print('[%d/%d] SKIP   0.0s  %s  %s' % (n, counter[1], name, skip[0]), flush=True)
         return {'name': name, 'jar': jam, 'status': 'SKIP', 'seconds': 0, 'exit_code': '',
-                'problems': 'no jar', 'first_error': 'no .jar for this .jam',
+                'problems': skip[0], 'first_error': skip[1],
                 'screenshots': 0, 'last': '', 'shots': []}
     with open(log_path, 'wb') as log:
         log.write(('# %s\n' % (jam or jar)).encode())
