@@ -256,12 +256,16 @@ def run_game(game, opt, used, lock, counter):
     if jam:
         # the game's own scratchpad is copied: test runs never write to it
         os.makedirs(data, exist_ok=True)
-        sp = os.path.join(data, 'scratchpad.sp')
+        # named after the result folder: the runtime names its /tmp files
+        # after the scratchpad, and parallel games must not share them
+        sp = os.path.join(data, name + '.sp')
         stem = os.path.splitext(jar or jam)[0]
         for src in (stem + '.sp', stem + '.SP', os.path.splitext(jam)[0] + '.sp'):
             if os.path.isfile(src):
                 shutil.copyfile(src, sp)
                 break
+        else:
+            open(sp, 'wb').close()  # a new game: the runtime fills in the header
         env['JAM'] = jam
         env['SP'] = sp
 

@@ -176,6 +176,13 @@ public class JarInflater {
         byte[] buf = new byte[4096];
         int got;
 
+        /* the stream does not truncate: a longer jar left by an earlier
+         * run (another game or an older scratchpad) kept its tail, end
+         * record included, and the new jar read as the old one */
+        try {
+            new com.sun.midp.io.j2me.storage.File().delete(path);
+        } catch (Throwable ignored) {
+        }
         out.connect(path, javax.microedition.io.Connector.READ_WRITE);
         try {
             while ((got = in.read(buf)) >= 0) {

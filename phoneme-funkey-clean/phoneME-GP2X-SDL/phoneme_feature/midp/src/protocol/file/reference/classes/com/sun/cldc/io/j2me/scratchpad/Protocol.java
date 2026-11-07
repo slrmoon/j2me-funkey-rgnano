@@ -127,11 +127,21 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
                     hdr[k * 4 + 2] = (byte) (v >> 16);
                     hdr[k * 4 + 3] = (byte) (v >> 24);
                 }
-                if (mode != Connector.READ) {
-                    stream.setPosition(0);
-                    stream.writeBytes(hdr, 0, SP_HEADER_SIZE);
-                    stream.commitWrite();
+                /* A phone's scratchpad exists from install on, all zeros:
+                 * games read their save area before ever writing it
+                 * (readInt -> EOFException otherwise). Create it full
+                 * size, also when this first open is read-only. */
+                if (mode == Connector.READ) {
+                    stream.disconnect();
+                    stream.connect(path, Connector.READ_WRITE);
                 }
+                stream.setPosition(0);
+                stream.writeBytes(hdr, 0, SP_HEADER_SIZE);
+                byte[] zeros = new byte[4096];
+                for (int left = declTotal; left > 0; left -= zeros.length) {
+                    stream.writeBytes(zeros, 0, left < zeros.length ? left : zeros.length);
+                }
+                stream.commitWrite();
                 sizes = declared;
             } else {
                 /* nothing known: keep the historical headered layout */

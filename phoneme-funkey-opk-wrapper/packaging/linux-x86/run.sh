@@ -123,6 +123,9 @@ if [ -n "$APP_CLASS" ]; then
         SP=$BASE.sp
         [ ! -f "$SP" ] && [ -f "$BASE.SP" ] && SP=$BASE.SP
     fi
+    # no scratchpad yet (a game without data): an empty one, as the FunKey
+    # launcher does; the runtime writes its header
+    [ -e "$SP" ] || : > "$SP" 2>/dev/null || true
     pics=""
     if [ -d "$DIR/mypicture" ]; then pics=$DIR/mypicture
     elif [ -d "$BASE.pictures" ]; then pics=$BASE.pictures; fi

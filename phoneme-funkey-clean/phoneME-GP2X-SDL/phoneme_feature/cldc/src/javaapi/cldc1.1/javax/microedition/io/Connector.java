@@ -303,10 +303,21 @@ public class Connector {
 
             /* Use the platform and protocol names to look up */
             /* a class to implement the connection */
-            Class clazz =
-                Class.forName(classRoot +
-                              "." + platform +
-                              "." + protocol + ".Protocol");
+            /* MIDP keeps http, socket, ... in com.sun.midp.io (the
+             * protocolpath property), the DoJa resource: and scratchpad:
+             * protocols are in com.sun.cldc.io: look in both */
+            Class clazz;
+            try {
+                clazz = Class.forName(classRoot +
+                                      "." + platform +
+                                      "." + protocol + ".Protocol");
+            } catch (ClassNotFoundException e) {
+                String other = classRoot.equals("com.sun.cldc.io")
+                    ? "com.sun.midp.io" : "com.sun.cldc.io";
+                clazz = Class.forName(other +
+                                      "." + platform +
+                                      "." + protocol + ".Protocol");
+            }
 
             /* Construct a new instance of the protocol */
             ConnectionBaseInterface uc =
