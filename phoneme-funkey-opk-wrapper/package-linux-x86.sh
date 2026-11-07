@@ -56,6 +56,7 @@ cp "$ROOT/packaging/linux-x86/run.sh" "$STAGE/run.sh"
 cp "$ROOT/packaging/linux-x86/README.txt" "$STAGE/README.txt"
 cp "$ROOT/packaging/linux-x86/test-games.py" "$STAGE/test-games.py"
 cp "$ROOT/packaging/linux-x86/test-doja.py" "$STAGE/test-doja.py"
+cp "$ROOT/packaging/linux-x86/keys.conf" "$STAGE/keys.conf"
 # helper for test-games.py: scripted keys, screenshots, faster clock
 ${CC:-gcc} -m32 -O2 -shared -fPIC $(sdl-config --cflags) \
     "$ROOT/packaging/linux-x86/fktest.c" -o "$STAGE/lib/fktest.so" -ldl

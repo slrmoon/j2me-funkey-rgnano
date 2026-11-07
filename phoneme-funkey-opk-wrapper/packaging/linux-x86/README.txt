@@ -31,6 +31,13 @@ Running
     LCD=240x320 ./run.sh game.jar      screen size the game sees
     MODE=integer FILTER=pixel ./run.sh game.jar
 
+Keys: the games get the keys of keys.conf (next to the scripts) in turn;
+edit "keys = ok, 5, soft1" (names: ok 0-9 * # up down left right soft1
+soft2, "down x3" repeats) and "first" / "every" (game seconds), or pass
+--keys "down x2,ok" for one run. The report and every log.txt say which
+keys were pressed and how often; games are listed by their own name
+(MIDlet-Name / AppName) with the file below it.
+
 i-appli (DoJa) games: put game.jam (and game.sp, if any) next to game.jar.
 Saves are kept in ~/.local/share/funkey-j2me/rms/<game>.
 

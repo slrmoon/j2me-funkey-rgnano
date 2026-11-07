@@ -50,6 +50,102 @@ KEYS = {
 }
 for d in range(10):
     KEYS[str(d)] = 48 + d
+KEY_NAMES = {13: 'OK', 32: 'Space', 9: 'Left soft', 27: 'Right soft', 273: 'Up', 274: 'Down',
+             275: 'Right', 276: 'Left', 42: '*', 35: '#'}
+for d in range(10):
+    KEY_NAMES[48 + d] = str(d)
+
+KEYS_FILE = os.path.join(HERE, 'keys.conf')
+KEYS_FILE_TEXT = """# Keys test-games.py / test-doja.py press, in turn, during each game.
+# Edit and rerun; command line options (--keys, --first-key, --key-every)
+# win over this file.
+#
+# names: ok 0-9 * # up down left right soft1 (left soft) soft2 (right soft)
+# a key can repeat: "down x3" = down, down, down
+
+keys = ok, 5, soft1
+
+# game seconds before the first press, and between presses
+first = 3
+every = 1.5
+"""
+
+
+def read_keys_file(path):
+    """keys / first / every from keys.conf; writes the default file if
+    there is none"""
+    if not os.path.exists(path):
+        try:
+            with open(path, 'w') as f:
+                f.write(KEYS_FILE_TEXT)
+        except OSError:
+            pass
+    conf = {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                line = line.split('#', 1)[0] if not line.lstrip().startswith('keys') else line
+                k, _, v = line.partition('=')
+                if v.strip():
+                    conf[k.strip().lower()] = v.strip()
+    except OSError:
+        pass
+    return conf
+
+
+def parse_keys(text):
+    """'ok, down x3, 5' -> [13, 274, 274, 274, 53]"""
+    out = []
+    for item in text.split(','):
+        item = item.strip().lower()
+        if not item:
+            continue
+        n = 1
+        m = re.match(r'^(.*?)\s*[x*]\s*(\d+)$', item)
+        if m and m.group(1):
+            item, n = m.group(1).strip(), int(m.group(2))
+        if item not in KEYS:
+            raise KeyError(item)
+        out += [KEYS[item]] * n
+    return out
+
+
+def keys_text(opt):
+    """'OK -> 5 -> Left soft, from 3 s, every 1.5 s (game time)'"""
+    names = ' -> '.join(KEY_NAMES.get(k, str(k)) for k in opt.keys)
+    real = opt.key_every / opt.speed
+    return '%s, first at %g s, then every %g s of game time (%.2g s real at x%g)' % (
+        names, opt.first_key, opt.key_every, real, opt.speed)
+
+
+def game_title(jar, jam):
+    """the game's own name: AppName of the .jam, MIDlet-Name of the jar"""
+    if jam:
+        return jam_value(jam, 'AppName')
+    try:
+        z = zipfile.ZipFile(jar)
+        n = [i for i in z.namelist() if i.upper() == 'META-INF/MANIFEST.MF']
+        data = z.read(n[0]) if n else b''
+    except Exception:
+        return ''
+    for enc in ('utf-8', 'shift_jis', 'latin-1'):
+        try:
+            text = data.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    text = text.lstrip('\ufeff').replace('\r', '')
+    lines = []
+    for line in text.split('\n'):  # continuation lines start with a space
+        if line.startswith(' ') and lines:
+            lines[-1] += line[1:]
+        else:
+            lines.append(line)
+    props = {}
+    for line in lines:
+        k, _, v = line.partition(':')
+        props.setdefault(k.strip().lower(), v.strip())
+    return props.get('midlet-name') or props.get('midlet-1', '').split(',')[0].strip()
 
 ERROR_PATTERNS = [
     ('missing class', re.compile(r'NoClassDefFoundError|ClassNotFoundException')),
@@ -59,7 +155,7 @@ ERROR_PATTERNS = [
     ('exception', re.compile(r'(\w+\.)*\w+(Exception|Error)\b')),
     ('m3g error', re.compile(r'\[native\] Error')),
 ]
-IGNORE = re.compile(r'\[inject\]|ld\.so|ERROR: ld\.so')
+IGNORE = re.compile(r'\[inject\]|ld\.so|ERROR: ld\.so|no network for i-appli|HttpConnection err')
 
 
 def find_games(args):
@@ -96,7 +192,7 @@ def jam_value(jam, key):
     """one key of a .jam (Shift_JIS text, key = value)"""
     try:
         with open(jam, 'rb') as f:
-            for line in f.read().decode('shift_jis', 'replace').splitlines():
+            for line in f.read().decode('cp932', 'replace').splitlines():
                 k, _, v = line.partition('=')
                 if k.strip().lower() == key.lower():
                     return v.strip()
@@ -264,6 +360,7 @@ def blank_image(path):
 def run_game(game, opt, used, lock, counter):
     jar, jam, label = game
     name = result_name(jar or jam, used, lock, label)
+    title = game_title(jar, jam) if jar else jam_value(jam, 'AppName')
     out = os.path.join(opt.output, name)
     if os.path.exists(out):
         shutil.rmtree(out)
@@ -324,12 +421,12 @@ def run_game(game, opt, used, lock, counter):
         with lock:
             counter[0] += 1
             n = counter[0]
-        print('[%d/%d] SKIP   0.0s  %s  %s' % (n, counter[1], name, skip[0]), flush=True)
-        return {'name': name, 'jar': jam, 'status': 'SKIP', 'seconds': 0, 'exit_code': '',
+        print('[%d/%d] SKIP   0.0s  %s  %s' % (n, counter[1], title or name, skip[0]), flush=True)
+        return {'name': name, 'title': title, 'jar': jam, 'status': 'SKIP', 'seconds': 0, 'exit_code': '',
                 'problems': skip[0], 'first_error': skip[1],
                 'screenshots': 0, 'last': '', 'shots': []}
     with open(log_path, 'wb') as log:
-        log.write(('# %s\n' % (jam or jar)).encode())
+        log.write(('# %s\n# title: %s\n# keys: %s\n' % (jam or jar, title, keys_text(opt))).encode())
         log.flush()
         p = subprocess.Popen([opt.run_sh, jar], cwd=os.path.dirname(opt.run_sh), env=env,
                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -384,10 +481,11 @@ def run_game(game, opt, used, lock, counter):
     with lock:
         counter[0] += 1
         n = counter[0]
-    print('[%d/%d] %-4s %5.1fs  %s  %s' % (n, counter[1], status, seconds, name,
+    print('[%d/%d] %-4s %5.1fs  %s  %s' % (n, counter[1], status, seconds,
+                                         '%s (%s)' % (title, name) if title else name,
                                          ', '.join(problems)), flush=True)
     return {
-        'name': name, 'jar': jam or jar, 'status': status, 'seconds': round(seconds, 1),
+        'name': name, 'title': title, 'jar': jam or jar, 'status': status, 'seconds': round(seconds, 1),
         'exit_code': rc if stopped else '', 'problems': ', '.join(problems),
         'first_error': first_error, 'screenshots': len(shots), 'last': last,
         'shots': shots,
@@ -396,10 +494,13 @@ def run_game(game, opt, used, lock, counter):
 
 def write_report(opt, results):
     order = {'FAIL': 0, 'WARN': 1, 'OK': 2, 'SKIP': 3}
-    results.sort(key=lambda r: (order[r['status']], r['name'].lower()))
+    results.sort(key=lambda r: (order[r['status']], (r.get('title') or r['name']).lower()))
+    for r in results:
+        r.setdefault('title', '')
     with open(os.path.join(opt.output, 'summary.csv'), 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
-        cols = ['name', 'status', 'seconds', 'exit_code', 'problems', 'first_error', 'screenshots', 'jar']
+        cols = ['title', 'name', 'status', 'seconds', 'exit_code', 'problems', 'first_error',
+                'screenshots', 'jar']
         w.writerow(cols)
         for r in results:
             w.writerow([r[c] for c in cols])
@@ -414,10 +515,12 @@ def write_report(opt, results):
                 if r['last'] else '<div class="none">no picture</div>')
         cards.append(
             '<div class="card %s" data-s="%s"><div class="hd"><b>%s</b><span>%s</span></div>'
+            '<div class="fn">%s</div>'
             '%s<div class="th">%s</div><div class="pr">%s</div><div class="er">%s</div>'
             '<a href="%s/log.txt">log</a></div>' % (
-                r['status'].lower(), r['status'], e(r['name']), r['status'], last, thumbs,
-                e(r['problems']), e(r['first_error']), e(r['name'])))
+                r['status'].lower(), r['status'], e(r['title'] or r['name']), r['status'],
+                e(os.path.relpath(r['jar'], os.path.dirname(os.path.dirname(r['jar'])))),
+                last, thumbs, e(r['problems']), e(r['first_error']), e(r['name'])))
     page = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Game test results</title><style>
 body{font:14px system-ui,sans-serif;margin:16px;background:#f4f4f2;color:#222}
@@ -428,11 +531,13 @@ body{font:14px system-ui,sans-serif;margin:16px;background:#f4f4f2;color:#222}
 .hd{display:flex;justify-content:space-between;gap:6px;word-break:break-all}
 .big{width:100%;image-rendering:pixelated;background:#000;margin:6px 0}
 .th img{width:32%;margin-right:1%;image-rendering:pixelated}
+.fn{font-size:12px;color:#777;word-break:break-all}.keys{margin:6px 0 4px;color:#444}
 .pr{color:#a60}.er{font:12px monospace;color:#c33;word-break:break-all}
 .none{height:120px;background:#000;color:#888;display:flex;align-items:center;justify-content:center;margin:6px 0}
 </style></head><body><h2>Game test results</h2>
 <div class="bar">@N@ games: <b style="color:#3a3">@OK@ OK</b>, <b style="color:#d90">@WARN@ WARN</b>,
 <b style="color:#c33">@FAIL@ FAIL</b>, @SKIP@ SKIP &nbsp; @TIME@ s per game, speed x@SPEED@ &nbsp;
+<div class="keys">Keys pressed: @KEYS@</div>
 <button onclick="f('')">all</button><button onclick="f('FAIL')">FAIL</button>
 <button onclick="f('WARN')">WARN</button><button onclick="f('OK')">OK</button><button onclick="f('SKIP')">SKIP</button></div>
 <div class="grid">@CARDS@</div><script>
@@ -440,7 +545,8 @@ function f(s){document.querySelectorAll('.card').forEach(c=>c.style.display=!s||
 </script></body></html>"""
     for k, v in (('@N@', len(results)), ('@OK@', counts['OK']), ('@WARN@', counts['WARN']),
                  ('@FAIL@', counts['FAIL']), ('@SKIP@', counts['SKIP']), ('@TIME@', '%g' % opt.time),
-                 ('@SPEED@', '%g' % opt.speed), ('@CARDS@', '\n'.join(cards))):
+                 ('@SPEED@', '%g' % opt.speed), ('@KEYS@', html.escape(keys_text(opt))),
+                 ('@CARDS@', '\n'.join(cards))):
         page = page.replace(k, str(v))
     with open(os.path.join(opt.output, 'index.html'), 'w', encoding='utf-8') as f:
         f.write(page)
@@ -457,11 +563,13 @@ def main():
     ap.add_argument('-t', '--time', type=float, default=15, help='seconds per game, 5..120 (default 15)')
     ap.add_argument('--speed', type=float, default=2,
                     help='game clock speed-up, 1 = real time (default 2)')
-    ap.add_argument('--keys', default='ok,5,soft1',
-                    help='keys pressed in turn: ok 0-9 * # up down left right soft1 soft2 '
-                         '(default ok,5,soft1: soft1 answers "sound on?" screens)')
-    ap.add_argument('--first-key', type=float, default=3, help='game seconds before the first press (default 3)')
-    ap.add_argument('--key-every', type=float, default=1.5, help='game seconds between presses (default 1.5)')
+    ap.add_argument('--keys',
+                    help='keys pressed in turn, e.g. "ok,5,soft1" or "down x3,ok": ok 0-9 * # up '
+                         'down left right soft1 soft2 (default: keys.conf, else ok,5,soft1)')
+    ap.add_argument('--first-key', type=float, help='game seconds before the first press (default: keys.conf, else 3)')
+    ap.add_argument('--key-every', type=float, help='game seconds between presses (default: keys.conf, else 1.5)')
+    ap.add_argument('--keys-file', default=KEYS_FILE,
+                    help='key settings file (default keys.conf next to the script; made if missing)')
     ap.add_argument('--shots', type=int, default=6, help='screenshots per game (default 6)')
     ap.add_argument('--scale', type=int, default=1, help='screenshot size: 240 x N (default 1)')
     ap.add_argument('--lcd', help='screen size the games see, e.g. 240x320')
@@ -479,8 +587,16 @@ def main():
     for f in (opt.run_sh, opt.shim):
         if not os.path.isfile(f):
             sys.exit('missing %s (use --runtime <runtime folder>)' % f)
+    conf = read_keys_file(opt.keys_file)
     try:
-        opt.keys = [KEYS[k.strip().lower()] for k in opt.keys.split(',') if k.strip()]
+        if opt.first_key is None:
+            opt.first_key = float(conf.get('first', 3))
+        if opt.key_every is None:
+            opt.key_every = float(conf.get('every', 1.5))
+    except ValueError as e:
+        sys.exit('%s: %s' % (opt.keys_file, e))
+    try:
+        opt.keys = parse_keys(opt.keys if opt.keys is not None else conf.get('keys', 'ok,5,soft1'))
     except KeyError as e:
         sys.exit('unknown key %s; known: %s' % (e, ' '.join(sorted(KEYS))))
     if not opt.keys:
@@ -498,6 +614,7 @@ def main():
             sys.exit('no .jar files found')
     print('%d games, %d at a time, %gs each (speed x%g) -> %s' % (
         len(games), opt.jobs, opt.time, opt.speed, opt.output), flush=True)
+    print('keys: %s' % keys_text(opt), flush=True)
 
     used = set()
     lock = threading.Lock()
