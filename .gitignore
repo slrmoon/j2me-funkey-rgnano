@@ -22,3 +22,4 @@ phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/preverifier/build/linux/pr
 phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/tools/output/
 *~
 out.raw
+__pycache__/
