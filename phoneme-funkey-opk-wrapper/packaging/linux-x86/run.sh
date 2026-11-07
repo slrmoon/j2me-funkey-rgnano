@@ -42,6 +42,20 @@ jar_entry() {  # jar_entry <jar> <entry>: print one entry
         python3 -c 'import sys,zipfile; sys.stdout.buffer.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]))' "$1" "$2" 2>/dev/null
     fi
 }
+manifest() {  # manifest <jar>: the manifest with continuation lines joined
+    # name in any letter case (Meta-inf/Manifest.mf works on phones), no
+    # CR, no UTF-8 BOM; a line starting with a space continues the last one
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -Cp "$1" META-INF/MANIFEST.MF 2>/dev/null
+    else
+        python3 -c 'import sys,zipfile
+z=zipfile.ZipFile(sys.argv[1])
+n=[i for i in z.namelist() if i.upper()=="META-INF/MANIFEST.MF"]
+n and sys.stdout.buffer.write(z.read(n[0]))' "$1" 2>/dev/null
+    fi | tr -d '\r' | sed '1s/^\xef\xbb\xbf//' |
+        LC_ALL=C awk 'NR > 1 && /^ / { line = line substr($0, 2); next }
+             NR > 1 { print line } { line = $0 } END { if (NR) print line }'
+}
 jar_has() {  # jar_has <jar> <entry>
     if command -v unzip >/dev/null 2>&1; then
         unzip -l "$1" "$2" >/dev/null 2>&1
@@ -117,17 +131,17 @@ export PHONEME_HEAP_MB=${HEAP_MB:-16}
 # getAppProperty() reads a .jad next to the jar: use the game's own one,
 # otherwise make one from the manifest beside a link to the jar.
 RUNJAR=$JAR
-if [ -f "$BASE.jad" ]; then
+if [ -f "$BASE.jad" ] && tr -d '\r' < "$BASE.jad" | grep -aq '^MIDlet-1:'; then
     DESC=$BASE.jad
 else
-    jar_entry "$JAR" META-INF/MANIFEST.MF > "$DATA/run/$NAME/game.jad"
+    manifest "$JAR" > "$DATA/run/$NAME/game.jad"
     ln -sf "$JAR" "$DATA/run/$NAME/game.jar"
     RUNJAR=$DATA/run/$NAME/game.jar
     DESC=$DATA/run/$NAME/game.jad
 fi
 MAIN=$(tr -d '\r' < "$DESC" | grep -a '^MIDlet-1:' | head -n 1 | awk -F, '{print $3}' | tr -d ' ')
 if [ -z "$MAIN" ]; then
-    MAIN=$(jar_entry "$JAR" META-INF/MANIFEST.MF | tr -d '\r' | grep -a '^MIDlet-1:' |
+    MAIN=$(manifest "$JAR" | grep -a '^MIDlet-1:' |
            head -n 1 | awk -F, '{print $3}' | tr -d ' ')
 fi
 if [ -z "$MAIN" ]; then
