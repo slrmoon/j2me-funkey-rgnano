@@ -65,11 +65,19 @@ def find_games(args):
             for root, _, files in os.walk(a):
                 jars += [os.path.join(root, f) for f in files if f.lower().endswith('.jar')]
         elif any(c in a for c in '*?['):
-            jars += [p for p in glob.glob(a, recursive=True) if p.lower().endswith('.jar')]
+            # .jar in any letter case: game dumps often have .JAR
+            pat = re.sub(r'\.jar$', '.[jJ][aA][rR]', a, flags=re.I)
+            found = [p for p in glob.glob(pat, recursive=True) if p.lower().endswith('.jar')]
+            if not found:
+                top = a.split('*')[0].split('?')[0].split('[')[0]
+                top = top if os.path.isdir(top) else os.path.dirname(top)
+                print('nothing matches %s%s' % (a, '' if not top or os.path.isdir(top)
+                                                else ' (no folder %s)' % top), file=sys.stderr)
+            jars += found
         elif os.path.isfile(a):
             jars.append(a)
         else:
-            print('not found: ' + a, file=sys.stderr)
+            print('not found: %s (Windows D:\\games is /mnt/d/games in WSL)' % a, file=sys.stderr)
     seen = set()
     out = []
     for j in sorted(jars):
