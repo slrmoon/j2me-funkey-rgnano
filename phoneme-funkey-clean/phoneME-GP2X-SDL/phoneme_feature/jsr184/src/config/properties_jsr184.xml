@@ -6,5 +6,28 @@
               Value="1.1"
               Scope="system"
               Comment="M3G version number."/>
+    <!-- MMAPI properties: the runtime's media player is not the jsr135
+         subsystem, so nothing else declares them; games check
+         microedition.media.version before playing sound -->
+    <property Key="microedition.media.version"
+              Value="1.1"
+              Scope="system"
+              Comment="MMAPI version number."/>
+    <property Key="supports.mixing"
+              Value="false"
+              Scope="system"
+              Comment="Several players at once."/>
+    <property Key="supports.audio.capture"
+              Value="false"
+              Scope="system"
+              Comment="No recording."/>
+    <property Key="supports.video.capture"
+              Value="false"
+              Scope="system"
+              Comment="No camera."/>
+    <property Key="supports.recording"
+              Value="false"
+              Scope="system"
+              Comment="No recording."/>
   </properties>
 </configuration>

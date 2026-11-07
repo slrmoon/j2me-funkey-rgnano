@@ -133,7 +133,6 @@ static CALLOUTPTR calloutFunction[] = {
 <!-- template parameter: properties with Callout attribute -->
 <xsl:param name="nodes"/>
 <xsl:for-each select="$nodes">
-<xsl:sort select="@Key"/>
 <xsl:text>    </xsl:text>
 <xsl:value-of select="@Callout"/>
 <xsl:text>,
@@ -141,11 +140,14 @@ static CALLOUTPTR calloutFunction[] = {
 </xsl:for-each>
 </xsl:template>
 
+<!-- No xsl:sort in these loops: JDK 7's XSLTC then outputs nothing for a
+     node-set parameter, which left every property out of the static table
+     (System.getProperty("microedition.profiles") was empty). The lookup is
+     linear, so document order is fine as long as keys and values agree. -->
 <!-- output properties keys, one key per line, separated by comma -->
 <xsl:template name="outputKeys">
 <xsl:param name="nodes"/>
 <xsl:for-each select="$nodes">
-<xsl:sort select="@Key"/>
 <xsl:text>    </xsl:text>
 <xsl:text>"</xsl:text><xsl:value-of select="@Key"/><xsl:text>"</xsl:text>
 <xsl:text>,
@@ -157,7 +159,6 @@ static CALLOUTPTR calloutFunction[] = {
 <xsl:template name="outputValues">
 <xsl:param name="nodes"/>
 <xsl:for-each select="$nodes">
-<xsl:sort select="@Key"/>
 <xsl:text>    </xsl:text>
 <xsl:choose>
     <xsl:when test="@Value = ''">NULL</xsl:when>

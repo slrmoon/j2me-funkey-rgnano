@@ -15,6 +15,8 @@
 #   FILTER=sharp    sharp | smooth | pixel
 #   FPS=30          frame limit;  HEAP_MB=16 (DoJa 32)
 #   MUTE=1          no sound;     VMARGS="-int" extra VM options
+#   VERIFY=1        check bytecode like a phone does (off by default:
+#                   modded games often fail it but run fine)
 # Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/funkey-j2me/rms/<game>.
 #
 # Keys: arrows, Enter/Space = fire, F1/Tab = left soft key,
@@ -88,6 +90,7 @@ else
 fi
 
 export MIDP_HOME=$HERE
+[ "${VERIFY:-0}" = 1 ] || VMARGS="-UseVerifier ${VMARGS:-}"
 export PHONEME_RMS_HOME=$DATA/rms/$NAME
 export PHONEME_WINDOW_SCALE=${SCALE:-3}
 export PHONEME_SCALE_MODE=${MODE:-fit}
