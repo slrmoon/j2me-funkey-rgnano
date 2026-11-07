@@ -390,6 +390,15 @@ public class SoftButtonLayer extends CLayer implements CommandListener {
         // isSoft1Active() and isSoft2Active() methods.
 
         boolean ret = false;
+        /* Phones (Nokia, Sony Ericsson, Motorola, ...) put Back / Exit on
+         * the RIGHT soft key and OK / the menu on the left; the reference
+         * layout has it the other way round, so the left key quit games
+         * whose title screen has an Exit command. Swap the keys. */
+        if (keyCode == EventConstants.SOFT_BUTTON1) {
+            keyCode = EventConstants.SOFT_BUTTON2;
+        } else if (keyCode == EventConstants.SOFT_BUTTON2) {
+            keyCode = EventConstants.SOFT_BUTTON1;
+        }
         if (keyCode == EventConstants.SOFT_BUTTON1) {
             if (isSoft1Active()) {
                 if (type == EventConstants.PRESSED) {
@@ -698,13 +707,15 @@ public class SoftButtonLayer extends CLayer implements CommandListener {
 
         // Port me : If a port had more than 2 soft buttons, adjust
         // the behavior here for extra buttons
-        labels[0] = (soft1 == null) ? null : soft1.getLabel();
+        // soft1 (Back / Exit) on the right, soft2 (OK / menu) on the left:
+        // see keyInput
+        labels[1] = (soft1 == null) ? null : soft1.getLabel();
         if (soft2 == null) {
-            labels[1] = null;
+            labels[0] = null;
         } else if (soft2.length == 1) {
-            labels[1] = soft2[0].getLabel();
+            labels[0] = soft2[0].getLabel();
         } else {
-            labels[1] = SoftButtonSkin.TEXT_MENUCMD;
+            labels[0] = SoftButtonSkin.TEXT_MENUCMD;
         }
         addDirtyRegion();
         requestRepaint();

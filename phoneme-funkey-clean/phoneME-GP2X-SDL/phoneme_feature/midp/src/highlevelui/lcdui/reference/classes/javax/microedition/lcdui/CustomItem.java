@@ -478,11 +478,11 @@ abstract public class CustomItem extends Item {
     public int getGameAction(int keyCode) {
         int n = KeyConverter.getGameAction(keyCode);
 
-        if (n == -1) {
-            throw new IllegalArgumentException();
-        }
-
-        return n;
+        /* The spec allows IllegalArgumentException for a code that is
+         * not a key, but phones answer 0 (no game action) for soft keys
+         * and games call this for every key they get; throwing killed
+         * them on the left soft key. */
+        return n == -1 ? 0 : n;
     }
 
     // JAVADOC COMMENT ELIDED
