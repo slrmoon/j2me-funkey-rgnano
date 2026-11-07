@@ -225,7 +225,8 @@ public class AffineTrans {
     }
 
     /**
-     * View transformation for a camera at pos looking at the point look:
+     * View transformation for a camera at pos looking in the direction
+     * look (a direction, not a target point: games pass target - pos):
      * right-handed, the line of sight is +z (rows: x right, y down, z
      * forward). The up vector is corrected when not perpendicular.
      */
@@ -233,7 +234,7 @@ public class AffineTrans {
         if (pos == null || look == null || up == null) {
             throw new NullPointerException();
         }
-        Vector3D f = new Vector3D(look.x - pos.x, look.y - pos.y, look.z - pos.z);
+        Vector3D f = new Vector3D(look.x, look.y, look.z);
         if (f.x == 0 && f.y == 0 && f.z == 0) {
             f.z = 4096;
         }

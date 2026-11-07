@@ -60,7 +60,7 @@ public class MC3Test extends MIDlet implements Runnable {
             return;
         }
         /* camera 2500 units in front, slightly above (y down) */
-        view.lookAt(new Vector3D(0, -900, -2500), new Vector3D(0, -200, 0), new Vector3D(0, -4096, 0));
+        view.lookAt(new Vector3D(0, -900, -2500), new Vector3D(0, 700, 2500), new Vector3D(0, -4096, 0));
         world.setIdentity();
         world.rotationY(angle);
         tmp.mul(view, world);
