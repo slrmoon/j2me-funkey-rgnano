@@ -55,10 +55,11 @@ find "$DOJA_STUB_SRC" -maxdepth 1 -name 'NOTICE-*' -exec cp {} "$STAGE/lib/" \;
 cp "$ROOT/packaging/linux-x86/run.sh" "$STAGE/run.sh"
 cp "$ROOT/packaging/linux-x86/README.txt" "$STAGE/README.txt"
 cp "$ROOT/packaging/linux-x86/test-games.py" "$STAGE/test-games.py"
+cp "$ROOT/packaging/linux-x86/test-doja.py" "$STAGE/test-doja.py"
 # helper for test-games.py: scripted keys, screenshots, faster clock
 ${CC:-gcc} -m32 -O2 -shared -fPIC $(sdl-config --cflags) \
     "$ROOT/packaging/linux-x86/fktest.c" -o "$STAGE/lib/fktest.so" -ldl
-chmod +x "$STAGE/run.sh" "$STAGE/bin/runMidlet" "$STAGE/test-games.py"
+chmod +x "$STAGE/run.sh" "$STAGE/bin/runMidlet" "$STAGE/test-games.py" "$STAGE/test-doja.py"
 
 (cd "$OUT" && tar czf "$NAME.tar.gz" "$NAME")
 echo "Done: $STAGE"

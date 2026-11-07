@@ -48,3 +48,10 @@ the console log and screenshots. results/index.html shows all games with
 their last frame (OK / WARN / FAIL), results/summary.csv lists them.
 Screenshots are PNG with python3-pil (sudo apt install python3-pil),
 BMP otherwise. ./test-games.py -h lists all options.
+
+i-appli (DoJa) games:
+    ./test-doja.py /mnt/d/j2me-x86/appli -o results-doja -j 6 -t 15 --speed 3
+runs every .jam with its jar (same name, PackageURL, or the only jar of
+the folder that holds its AppClass); a .jam without a jar is SKIP. The
+.sp scratchpad is copied for each run, the game folders stay untouched.
+run.sh takes JAM=file.jam and SP=file.sp for the same purpose.

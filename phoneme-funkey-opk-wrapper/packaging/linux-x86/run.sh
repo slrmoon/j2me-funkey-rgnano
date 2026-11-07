@@ -4,7 +4,7 @@
 #   ./run.sh game.jar
 #
 # MIDP: the main class comes from MIDlet-1 in the manifest (or a .jad next
-# to the jar). DoJa: a .jam next to the jar (game.jam, or the only .jam in
+# to the jar). DoJa: a .jam next to the jar (JAM=file.jam, game.jam, or the only .jam in
 # the folder if its AppClass is in the jar); the scratchpad is game.sp.
 #
 # Environment (all optional):
@@ -15,6 +15,7 @@
 #   FILTER=sharp    sharp | smooth | pixel
 #   FPS=30          frame limit;  HEAP_MB=16 (DoJa 32)
 #   MUTE=1          no sound;     VMARGS="-int" extra VM options
+#   SP=save.sp      DoJa scratchpad file (default: game.sp by the jar)
 #   VERIFY=1        check bytecode like a phone does (off by default:
 #                   modded games often fail it but run fine)
 # Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/funkey-j2me/rms/<game>.
@@ -69,14 +70,18 @@ jam_value() {  # jam_value <jam> <key>
     tr -d '\r' < "$1" | grep -a "^$2 *=" | head -n 1 | sed "s/^$2 *= *//; s/ *\$//"
 }
 
-# DoJa: game.jam, or the only .jam of the folder when its AppClass is in
+# DoJa: $JAM, game.jam, or the only .jam of the folder when its AppClass is in
 # this jar (dumps often name the two differently); MIDP otherwise
-JAM=""
 APP_CLASS=""
-if [ -f "$BASE.jam" ]; then
+if [ -n "${JAM:-}" ]; then        # JAM=path/game.jam ./run.sh game.jar
+    [ -f "$JAM" ] || { echo "No such .jam: $JAM" >&2; exit 1; }
+    APP_CLASS=$(jam_value "$JAM" AppClass)
+elif [ -f "$BASE.jam" ] || [ -f "$BASE.JAM" ]; then
     JAM=$BASE.jam
+    [ -f "$JAM" ] || JAM=$BASE.JAM
     APP_CLASS=$(jam_value "$JAM" AppClass)
 else
+    JAM=""
     shopt -s nullglob
     jams=("$DIR"/*.jam)
     shopt -u nullglob
@@ -113,17 +118,25 @@ if [ -n "$APP_CLASS" ]; then
         export PHONEME_LCD_SIZE=$area PHONEME_SOURCE_SIZE=$area
     fi
     hex=$(od -An -tx1 -v "$JAM" | tr -d ' \n')
+    # scratchpad: SP=file, else game.sp (or .SP) next to the jar
+    if [ -z "${SP:-}" ]; then
+        SP=$BASE.sp
+        [ ! -f "$SP" ] && [ -f "$BASE.SP" ] && SP=$BASE.SP
+    fi
     pics=""
     if [ -d "$DIR/mypicture" ]; then pics=$DIR/mypicture
     elif [ -d "$BASE.pictures" ]; then pics=$BASE.pictures; fi
+    param=$(jam_value "$JAM" AppParam)
+    ver=$(jam_value "$JAM" AppVer)
+    spsize=$(jam_value "$JAM" SPsize)
     [ -n "${FKT_PRELOAD:-}" ] && export LD_PRELOAD=$FKT_PRELOAD
     exec ./runMidlet $VMARGS =MaxMethodToCompile3000 \
         "-Ddoja.app.class=$APP_CLASS" \
-        "-Ddoja.app.param=$(jam_value "$JAM" AppParam)" \
-        "-Ddoja.app.ver=$(jam_value "$JAM" AppVer)" \
+        "-Ddoja.app.param=$param" \
+        "-Ddoja.app.ver=$ver" \
         -Dmicroedition.encoding=SJIS \
-        "-Ddoja.scratchpad.path=$BASE.sp" \
-        "-Ddoja.spsize=$(jam_value "$JAM" SPsize)" \
+        "-Ddoja.scratchpad.path=$SP" \
+        "-Ddoja.spsize=$spsize" \
         "-Ddoja.jam.hex=$hex" \
         "-Ddoja.pictures=$pics" \
         -classpathext "$JAR:$HERE/lib/doja-support.jar" \

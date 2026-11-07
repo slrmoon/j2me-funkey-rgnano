@@ -34,6 +34,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,11 +89,78 @@ def find_games(args):
     return out
 
 
-def result_name(jar, used, lock):
-    """folder name: <parent>_<jar>, unique"""
-    parent = os.path.basename(os.path.dirname(jar))
-    stem = os.path.splitext(os.path.basename(jar))[0]
-    base = re.sub(r'[^\w.-]+', '_', (parent + '_' + stem) if parent else stem).strip('_') or 'game'
+def jam_value(jam, key):
+    """one key of a .jam (Shift_JIS text, key = value)"""
+    try:
+        with open(jam, 'rb') as f:
+            for line in f.read().decode('shift_jis', 'replace').splitlines():
+                k, _, v = line.partition('=')
+                if k.strip().lower() == key.lower():
+                    return v.strip()
+    except OSError:
+        pass
+    return ''
+
+
+def jar_for_jam(jam):
+    """the jar of an i-appli: same name (any case), PackageURL, or the only
+    jar of the folder"""
+    d = os.path.dirname(jam)
+    stem = os.path.splitext(os.path.basename(jam))[0].lower()
+    jars = [f for f in os.listdir(d) if f.lower().endswith('.jar')]
+    for f in jars:
+        if os.path.splitext(f)[0].lower() == stem:
+            return os.path.join(d, f)
+    url = jam_value(jam, 'PackageURL').replace('\\', '/').split('/')[-1].lower()
+    for f in jars:
+        if url and f.lower() == url:
+            return os.path.join(d, f)
+    if len(jars) == 1:  # only when it holds the AppClass of this .jam
+        cls = jam_value(jam, 'AppClass').replace('.', '/') + '.class'
+        try:
+            if cls in zipfile.ZipFile(os.path.join(d, jars[0])).namelist():
+                return os.path.join(d, jars[0])
+        except Exception:
+            pass
+    return None
+
+
+def find_doja(args):
+    """(jar, jam, name) for every .jam under the arguments"""
+    out = []
+    seen = set()
+    for a in args:
+        if os.path.isdir(a):
+            top = os.path.abspath(a)
+            jams = [os.path.join(r, f) for r, _, fs in os.walk(a) for f in fs
+                    if f.lower().endswith('.jam')]
+        else:
+            jams = [p for p in glob.glob(a, recursive=True) if p.lower().endswith('.jam')]
+            if os.path.isfile(a) and a.lower().endswith('.jam'):
+                jams = [a]
+            top = None
+            if not jams:
+                print('nothing matches %s' % a, file=sys.stderr)
+        for jam in sorted(jams):
+            jam = os.path.abspath(jam)
+            if jam in seen:
+                continue
+            seen.add(jam)
+            rel = os.path.relpath(jam, top) if top else os.path.join(
+                os.path.basename(os.path.dirname(jam)), os.path.basename(jam))
+            out.append((jar_for_jam(jam), jam, os.path.splitext(rel)[0]))
+    return out
+
+
+def result_name(jar, used, lock, label=None):
+    """folder name: <parent>_<jar> (DoJa: the .jam path), unique"""
+    if label:
+        base = label.replace(os.sep, '_')
+    else:
+        parent = os.path.basename(os.path.dirname(jar))
+        stem = os.path.splitext(os.path.basename(jar))[0]
+        base = (parent + '_' + stem) if parent else stem
+    base = re.sub(r'[^\w.-]+', '_', base).strip('_')[:120] or 'game'
     with lock:
         name = base
         n = 2
@@ -154,8 +222,9 @@ def blank_image(path):
         return None
 
 
-def run_game(jar, opt, used, lock, counter):
-    name = result_name(jar, used, lock)
+def run_game(game, opt, used, lock, counter):
+    jar, jam, label = game
+    name = result_name(jar or jam, used, lock, label)
     out = os.path.join(opt.output, name)
     if os.path.exists(out):
         shutil.rmtree(out)
@@ -182,11 +251,34 @@ def run_game(jar, opt, used, lock, counter):
         env['LCD'] = opt.lcd
     if opt.fps:
         env['FPS'] = str(opt.fps)
+    env.pop('JAM', None)
+    env.pop('SP', None)
+    if jam:
+        # the game's own scratchpad is copied: test runs never write to it
+        os.makedirs(data, exist_ok=True)
+        sp = os.path.join(data, 'scratchpad.sp')
+        stem = os.path.splitext(jar or jam)[0]
+        for src in (stem + '.sp', stem + '.SP', os.path.splitext(jam)[0] + '.sp'):
+            if os.path.isfile(src):
+                shutil.copyfile(src, sp)
+                break
+        env['JAM'] = jam
+        env['SP'] = sp
 
     log_path = os.path.join(out, 'log.txt')
     t_start = time.time()
+    if jar is None:  # a .jam without its jar
+        with open(log_path, 'w') as log:
+            log.write('# %s\nno .jar for this .jam\n' % jam)
+        with lock:
+            counter[0] += 1
+            n = counter[0]
+        print('[%d/%d] SKIP   0.0s  %s  no jar' % (n, counter[1], name), flush=True)
+        return {'name': name, 'jar': jam, 'status': 'SKIP', 'seconds': 0, 'exit_code': '',
+                'problems': 'no jar', 'first_error': 'no .jar for this .jam',
+                'screenshots': 0, 'last': '', 'shots': []}
     with open(log_path, 'wb') as log:
-        log.write(('# %s\n' % jar).encode())
+        log.write(('# %s\n' % (jam or jar)).encode())
         log.flush()
         p = subprocess.Popen([opt.run_sh, jar], cwd=os.path.dirname(opt.run_sh), env=env,
                              stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -244,7 +336,7 @@ def run_game(jar, opt, used, lock, counter):
     print('[%d/%d] %-4s %5.1fs  %s  %s' % (n, counter[1], status, seconds, name,
                                          ', '.join(problems)), flush=True)
     return {
-        'name': name, 'jar': jar, 'status': status, 'seconds': round(seconds, 1),
+        'name': name, 'jar': jam or jar, 'status': status, 'seconds': round(seconds, 1),
         'exit_code': rc if stopped else '', 'problems': ', '.join(problems),
         'first_error': first_error, 'screenshots': len(shots), 'last': last,
         'shots': shots,
@@ -252,7 +344,7 @@ def run_game(jar, opt, used, lock, counter):
 
 
 def write_report(opt, results):
-    order = {'FAIL': 0, 'WARN': 1, 'OK': 2}
+    order = {'FAIL': 0, 'WARN': 1, 'OK': 2, 'SKIP': 3}
     results.sort(key=lambda r: (order[r['status']], r['name'].lower()))
     with open(os.path.join(opt.output, 'summary.csv'), 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
@@ -281,7 +373,7 @@ body{font:14px system-ui,sans-serif;margin:16px;background:#f4f4f2;color:#222}
 .bar button{margin-right:6px;padding:4px 10px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-top:12px}
 .card{background:#fff;border-radius:6px;padding:8px;border-top:4px solid #999;overflow:hidden}
-.card.ok{border-color:#3a3}.card.warn{border-color:#d90}.card.fail{border-color:#c33}
+.card.skip{border-color:#888}.card.ok{border-color:#3a3}.card.warn{border-color:#d90}.card.fail{border-color:#c33}
 .hd{display:flex;justify-content:space-between;gap:6px;word-break:break-all}
 .big{width:100%;image-rendering:pixelated;background:#000;margin:6px 0}
 .th img{width:32%;margin-right:1%;image-rendering:pixelated}
@@ -289,14 +381,14 @@ body{font:14px system-ui,sans-serif;margin:16px;background:#f4f4f2;color:#222}
 .none{height:120px;background:#000;color:#888;display:flex;align-items:center;justify-content:center;margin:6px 0}
 </style></head><body><h2>Game test results</h2>
 <div class="bar">@N@ games: <b style="color:#3a3">@OK@ OK</b>, <b style="color:#d90">@WARN@ WARN</b>,
-<b style="color:#c33">@FAIL@ FAIL</b> &nbsp; @TIME@ s per game, speed x@SPEED@ &nbsp;
+<b style="color:#c33">@FAIL@ FAIL</b>, @SKIP@ SKIP &nbsp; @TIME@ s per game, speed x@SPEED@ &nbsp;
 <button onclick="f('')">all</button><button onclick="f('FAIL')">FAIL</button>
-<button onclick="f('WARN')">WARN</button><button onclick="f('OK')">OK</button></div>
+<button onclick="f('WARN')">WARN</button><button onclick="f('OK')">OK</button><button onclick="f('SKIP')">SKIP</button></div>
 <div class="grid">@CARDS@</div><script>
 function f(s){document.querySelectorAll('.card').forEach(c=>c.style.display=!s||c.dataset.s==s?'':'none')}
 </script></body></html>"""
     for k, v in (('@N@', len(results)), ('@OK@', counts['OK']), ('@WARN@', counts['WARN']),
-                 ('@FAIL@', counts['FAIL']), ('@TIME@', '%g' % opt.time),
+                 ('@FAIL@', counts['FAIL']), ('@SKIP@', counts['SKIP']), ('@TIME@', '%g' % opt.time),
                  ('@SPEED@', '%g' % opt.speed), ('@CARDS@', '\n'.join(cards))):
         page = page.replace(k, str(v))
     with open(os.path.join(opt.output, 'index.html'), 'w', encoding='utf-8') as f:
@@ -325,6 +417,8 @@ def main():
     ap.add_argument('--fps', type=int, help='frame limit')
     ap.add_argument('--show', action='store_true', help='open windows instead of running hidden')
     ap.add_argument('--keep-data', action='store_true', help='keep the saves (data/) of each run')
+    ap.add_argument('--doja', action='store_true',
+                    help='i-appli (DoJa) games: every .jam with its jar (test-doja.py sets this)')
     ap.add_argument('--runtime', default=HERE, help='runtime folder with run.sh (default: this folder)')
     opt = ap.parse_args()
 
@@ -343,9 +437,14 @@ def main():
     opt.output = os.path.abspath(opt.output)
     os.makedirs(opt.output, exist_ok=True)
 
-    games = find_games(opt.games)
-    if not games:
-        sys.exit('no .jar files found')
+    if opt.doja:
+        games = find_doja(opt.games)
+        if not games:
+            sys.exit('no .jam files found')
+    else:
+        games = [(j, None, None) for j in find_games(opt.games)]
+        if not games:
+            sys.exit('no .jar files found')
     print('%d games, %d at a time, %gs each (speed x%g) -> %s' % (
         len(games), opt.jobs, opt.time, opt.speed, opt.output), flush=True)
 
@@ -364,8 +463,8 @@ def main():
     except KeyboardInterrupt:
         print('interrupted, writing the report for finished games', file=sys.stderr)
     write_report(opt, results)
-    counts = {s: sum(1 for r in results if r['status'] == s) for s in ('OK', 'WARN', 'FAIL')}
-    print('OK %(OK)d  WARN %(WARN)d  FAIL %(FAIL)d' % counts)
+    counts = {s: sum(1 for r in results if r['status'] == s) for s in ('OK', 'WARN', 'FAIL', 'SKIP')}
+    print('OK %(OK)d  WARN %(WARN)d  FAIL %(FAIL)d  SKIP %(SKIP)d' % counts)
     print('report: ' + os.path.join(opt.output, 'index.html'))
 
 
