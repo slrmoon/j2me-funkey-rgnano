@@ -42,7 +42,7 @@ Testing many games at once
     ./test-games.py '/games/*/*.jar' -o results -j 6 -t 15 --speed 3
 
 Runs every jar (DoJa: with its .jam) for -t seconds, several at a time,
-without windows; presses OK and 5 every 1.5 s of game time (--keys,
+without windows; presses OK, 5 and the left soft key in turn every 1.5 s of game time (--keys,
 --key-every), speeds the game clock up (--speed) and saves for each game
 the console log and screenshots. results/index.html shows all games with
 their last frame (OK / WARN / FAIL), results/summary.csv lists them.

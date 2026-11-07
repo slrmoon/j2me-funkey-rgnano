@@ -314,8 +314,9 @@ def main():
     ap.add_argument('-t', '--time', type=float, default=15, help='seconds per game, 5..120 (default 15)')
     ap.add_argument('--speed', type=float, default=2,
                     help='game clock speed-up, 1 = real time (default 2)')
-    ap.add_argument('--keys', default='ok,5',
-                    help='keys pressed in turn: ok 0-9 * # up down left right soft1 soft2 (default ok,5)')
+    ap.add_argument('--keys', default='ok,5,soft1',
+                    help='keys pressed in turn: ok 0-9 * # up down left right soft1 soft2 '
+                         '(default ok,5,soft1: soft1 answers "sound on?" screens)')
     ap.add_argument('--first-key', type=float, default=3, help='game seconds before the first press (default 3)')
     ap.add_argument('--key-every', type=float, default=1.5, help='game seconds between presses (default 1.5)')
     ap.add_argument('--shots', type=int, default=6, help='screenshots per game (default 6)')
