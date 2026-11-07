@@ -75,7 +75,8 @@ on the number of games in a folder.
 - **3D: JSR 184 (M3G)** on a software OpenGL ES 1.x renderer written for the
   FunKey (single Cortex-A7, RGB565): integer rasterizer with a NEON span
   loop, texture cache, fog, lighting, sprites, render-to-texture.
-  See [3D (M3G)](#3d-m3g).
+  **MascotCapsule Micro3D v3** (`com.mascotcapsule.micro3d.v3`, Sony Ericsson
+  and many other 3D games) on the same renderer. See [3D (M3G)](#3d-m3g).
 - **Sound: MMAPI (JSR 135)** on a new audio engine with the handset MIDI synth
   (Sonivox EAS), all common phone formats and the vendor sound APIs.
   See [Sound](#sound).
@@ -324,9 +325,9 @@ run out of memory.
 Speed. The FunKey has one Cortex-A7 core and no GPU, so every pixel is
 drawn by the CPU. The renderer is tuned for that:
 
-- a span fast path for the common states (one nearest texture,
-  replace/modulate, alpha blending, depth test), with a NEON loop that
-  draws 4 pixels at a time;
+- a span fast path for nearly every state (up to two textures, mipmaps,
+  nearest/bilinear, all texture modes, fog, alpha blending, depth test),
+  with a NEON loop that draws 4 pixels at a time for the simplest one;
 - vertex cache, combined model-view-projection per draw, clip codes per
   vertex, off-screen triangles rejected early;
 - built for Cortex-A7 (`-march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4`,
@@ -336,6 +337,23 @@ In Rally Master Pro (240×320) these changes raised the frame rate in races
 by about 1.5–2×. Heavy scenes are still CPU-bound: if a game is slow, use the
 *Pixel* filter (cheapest scaling) and send a [profiler](#profiler-output)
 report.
+
+### MascotCapsule Micro3D v3
+
+The MIDP MascotCapsule API (`com.mascotcapsule.micro3d.v3`: Graphics3D,
+Figure, ActionTable, Texture, FigureLayout, Effect3D, Light, AffineTrans,
+Vector3D, Util3D, including the deprecated names older games call) is built
+in. It shares its engine (`com.funkey.mc3`) with the i-appli MascotCapsule
+support: MBAC models v2–5 with bones and patterns, MTRA animations, 8-bit BMP
+textures with the color key, lighting, toon shading, sphere maps,
+semi-transparent / additive / subtractive materials, primitives, point sprites
+and command lists, all drawn through the M3G renderer above.
+
+- The 3D screen is the clip rectangle of the bound `Graphics`.
+- `renderFigure`, `renderPrimitives` and `drawCommandList` are drawn at once
+  and share one depth buffer until `flush()`; 2D drawn between them and
+  `flush()` therefore ends up under the 3D instead of over it.
+- Test: `tools/mc3-test` (generated model, animation and textures).
 
 ## Repository structure
 
