@@ -40,9 +40,16 @@ static long long g_trpos;
  * The libm of the FunKey SDK musl cannot be trusted (its floor() returns
  * the argument unchanged for |x| >= 1), and results must match Java's
  * StrictMath (fdlibm) bit for bit anyway: floor, log and pow are done here.
- * log/pow follow fdlibm 5.3 (Copyright (C) 1993-2004 Sun Microsystems,
- * Inc.: "Permission to use, copy, modify, and distribute this software is
- * freely granted, provided that this notice is preserved.").
+ * log/pow follow fdlibm 5.3, whose notice is kept here as it requires:
+ *
+ * ====================================================
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
+ * ====================================================
  */
 typedef union {
     double d;
