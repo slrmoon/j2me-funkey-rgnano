@@ -15,7 +15,7 @@ JSR_184_M3GCORE_EMBEDDED_FILES := \
     $(wildcard $(JSR_184_FUNKEY_NATIVE_DIR)/*.h)
 
 JSR_184_SOURCEPATH += $(JSR_184_JAVA_DIR)
-JSR_184_PACKAGES += javax.microedition.m3g
+JSR_184_PACKAGES += javax.microedition.m3g com.mascotcapsule.micro3d.v3
 
 JAVADOC_ALL_SOURCEPATH += $(JSR_184_SOURCEPATH)
 JAVADOC_ALL_PACKAGES += $(JSR_184_PACKAGES)
@@ -26,8 +26,15 @@ SUBSYSTEM_CONFIGURATION_INPUT_FILES += \
 MODULE_JSR_184_API_JAVA_FILES := \
     $(wildcard $(JSR_184_JAVA_DIR)/javax/microedition/m3g/*.java)
 
+# MascotCapsule Micro3D v3 (com.mascotcapsule.micro3d.v3), drawn through
+# M3G by the engine shared with the DoJa runtime (com.funkey.mc3)
+MODULE_JSR_184_MC3_JAVA_FILES := \
+    $(wildcard $(JSR_184_JAVA_DIR)/com/funkey/mc3/*.java) \
+    $(wildcard $(JSR_184_JAVA_DIR)/com/mascotcapsule/micro3d/v3/*.java)
+
 SUBSYSTEM_JSR_184_JAVA_FILES += \
-    $(MODULE_JSR_184_API_JAVA_FILES)
+    $(MODULE_JSR_184_API_JAVA_FILES) \
+    $(MODULE_JSR_184_MC3_JAVA_FILES)
 
 vpath % $(JSR_184_FUNKEY_NATIVE_DIR)
 vpath % $(JSR_184_M3GCORE_NATIVE_DIR)/src
