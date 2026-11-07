@@ -49,6 +49,9 @@
 #include <string.h>
 #include <SDL.h>
 #include <SDL_image.h>
+#ifndef ARM
+#include <dlfcn.h>
+#endif
 #endif
 
 #define CT_PALETTE  0x01
@@ -299,8 +302,30 @@ decode_jpeg
      * on the device and the desktop build alike; i-appli load JPEG
      * pictures (photos, illustrations) */
     {
-        SDL_RWops *rw = SDL_RWFromConstMem(srcBuffer, length);
-        SDL_Surface *s = rw != NULL ? IMG_LoadTyped_RW(rw, 1, "JPG") : NULL;
+        SDL_RWops *rw;
+        SDL_Surface *s;
+#ifdef ARM
+        SDL_Surface *(*load)(SDL_RWops *, int, char *) = IMG_LoadTyped_RW;
+#else
+        /* desktop: SDL_image is optional (libsdl-image1.2:i386); without
+         * it JPEG stays unsupported instead of the runtime not starting */
+        static SDL_Surface *(*load)(SDL_RWops *, int, char *);
+        static int tried;
+        if (!tried) {
+            void *h = dlopen("libSDL_image-1.2.so.0", RTLD_NOW);
+            tried = 1;
+            if (h != NULL) {
+                load = (SDL_Surface *(*)(SDL_RWops *, int, char *))
+                    dlsym(h, "IMG_LoadTyped_RW");
+            }
+        }
+        if (load == NULL) {
+            *creationErrorPtr = GXUTL_NATIVE_IMAGE_UNSUPPORTED_FORMAT_ERROR;
+            return;
+        }
+#endif
+        rw = SDL_RWFromConstMem(srcBuffer, length);
+        s = rw != NULL ? load(rw, 1, "JPG") : NULL;
         SDL_Surface *c = NULL;
         *creationErrorPtr = GXUTL_NATIVE_IMAGE_DECODING_ERROR;
         if (s != NULL) {

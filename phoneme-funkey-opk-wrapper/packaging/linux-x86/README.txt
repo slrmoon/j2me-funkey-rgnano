@@ -14,6 +14,12 @@ i386 libraries once:
     sudo apt install libc6:i386 libstdc++6:i386 zlib1g:i386 \
         libsdl1.2debian:i386 libsdl-gfx1.2-5:i386
 
+JPEG pictures (many i-appli) also need, optionally:
+
+    sudo apt install libsdl-image1.2:i386
+
+without it the runtime still starts, only JPEG images fail to load.
+
 (On newer Ubuntu libsdl1.2debian is provided by sdl12-compat.)
 unzip or python3 is used to read jar manifests.
 

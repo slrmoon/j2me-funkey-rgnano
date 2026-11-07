@@ -60,5 +60,6 @@ ifeq ($(TARGET_CPU), arm)
 else
   # SDL_gfx: in-game menu text (characterColor). -ldl -lrt: the profiler's
   # dladdr/timer_* live there before glibc 2.34
-  LIBS	+= $(SDL_LIBS) -lSDL_image -lSDL_gfx -lm -ldl -lrt
+  # SDL_image: loaded at run time for JPEG (gxj_image.c), not a link dependency
+  LIBS	+= $(SDL_LIBS) -lSDL_gfx -lm -ldl -lrt
 endif
