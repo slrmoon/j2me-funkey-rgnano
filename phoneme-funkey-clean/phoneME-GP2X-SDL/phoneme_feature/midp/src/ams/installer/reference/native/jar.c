@@ -284,7 +284,9 @@ getJarInfo(FileObj* fileObj) {
                  * length.
                  */
                 int endpos = currentOffset + (bp - buffer);
-                if (endpos + ENDHDRSIZ + ENDCOM(bp) == length) {
+                /* <= rather than ==: some game jars carry junk after the end
+                 * record (a CRLF from a text-mode transfer); unzip accepts them */
+                if (endpos + ENDHDRSIZ + ENDCOM(bp) <= length) {
                     unsigned long cenOffset = endpos - ENDSIZ(bp);
                     unsigned long locOffset = cenOffset - ENDOFF(bp);
 

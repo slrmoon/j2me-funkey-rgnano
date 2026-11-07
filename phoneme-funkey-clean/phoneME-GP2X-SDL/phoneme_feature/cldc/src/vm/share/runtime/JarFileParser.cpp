@@ -459,7 +459,9 @@ bool JarFileParser::find_end_of_central_header() {
          * length.
          */
         int endpos = (int) currentOffset + (bp - buffer);
-        if (endpos + ENDHDRSIZ + ENDCOM(bp) == length) {
+        /* <= rather than ==: some game jars carry junk after the end
+         * record (a CRLF from a text-mode transfer); unzip accepts them */
+        if (endpos + ENDHDRSIZ + ENDCOM(bp) <= length) {
           juint cenOffset = endpos - ENDSIZ(bp);
           juint locOffset = cenOffset - ENDOFF(bp);
           unsigned char sig[4];
