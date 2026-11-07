@@ -375,6 +375,16 @@ include $(SUBSYSTEM_DIR)/media-sdl/$(LIB_MAKE_FILE)
 endif
 
 #####################################################################
+# FunKey: optional JSRs as "not available" stubs (JSR 75, 82, 179,
+# 226, 239), see optional-stubs/lib.gmk
+#####################################################################
+ifneq ($(USE_OPTIONAL_STUBS), false)
+ifneq ($(USE_JSR_239), true)
+include $(SUBSYSTEM_DIR)/optional-stubs/$(LIB_MAKE_FILE)
+endif
+endif
+
+#####################################################################
 # (Extra) Mobile I18N Subsystem
 # Description: JSR 238
 #####################################################################

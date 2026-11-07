@@ -1,0 +1,21 @@
+#
+# FunKey: optional JSRs the handsets had but this device does not, as
+# "not available" implementations so that games referring to them still
+# load (a missing class is a NoClassDefFoundError at startup):
+#   JSR 75  FileConnection / PIM         javax.microedition.io.file, .pim
+#   JSR 82  Bluetooth / OBEX             javax.bluetooth, javax.obex
+#   JSR 179 Location                     javax.microedition.location
+#   JSR 226 Scalable 2D Vector Graphics  javax.microedition.m2g, org.w3c.dom.*
+#   JSR 239 OpenGL ES (EGL fails)        javax.microedition.khronos.*, java.nio
+# Their version properties stay unset, so games that check them skip the
+# feature; entry points report it as unavailable the way the specs allow.
+#
+
+SUBSYSTEMS += optional-stubs
+
+OPTIONAL_STUBS_CLASSES_DIR = $(SUBSYSTEM_DIR)/optional-stubs/classes
+
+SUBSYSTEM_OPTIONAL_STUBS_JAVA_FILES := \
+    $(shell find $(OPTIONAL_STUBS_CLASSES_DIR) -name '*.java' | sort)
+
+$(MIDP_OUTPUT_DIR)/classes.zip:: $(SUBSYSTEM_OPTIONAL_STUBS_JAVA_FILES)
