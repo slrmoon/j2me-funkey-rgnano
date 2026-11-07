@@ -99,6 +99,7 @@ if [ -n "$APP_CLASS" ]; then
     pics=""
     if [ -d "$DIR/mypicture" ]; then pics=$DIR/mypicture
     elif [ -d "$BASE.pictures" ]; then pics=$BASE.pictures; fi
+    [ -n "${FKT_PRELOAD:-}" ] && export LD_PRELOAD=$FKT_PRELOAD
     exec ./runMidlet $VMARGS =MaxMethodToCompile3000 \
         "-Ddoja.app.class=$APP_CLASS" \
         "-Ddoja.app.param=$(jam_value "$JAM" AppParam)" \
@@ -133,4 +134,5 @@ if [ -z "$MAIN" ]; then
     echo "No MIDlet-1 entry in $JAR" >&2
     exit 1
 fi
+[ -n "${FKT_PRELOAD:-}" ] && export LD_PRELOAD=$FKT_PRELOAD
 exec ./runMidlet $VMARGS -classpathext "$RUNJAR" internal "$MAIN"

@@ -36,3 +36,15 @@ Keys
     F2 / Esc / Backspace        right soft key
     0-9, numpad, * #            phone keys
     Close the window to quit.
+
+Testing many games at once
+--------------------------
+    ./test-games.py '/games/*/*.jar' -o results -j 6 -t 15 --speed 3
+
+Runs every jar (DoJa: with its .jam) for -t seconds, several at a time,
+without windows; presses OK and 5 every 1.5 s of game time (--keys,
+--key-every), speeds the game clock up (--speed) and saves for each game
+the console log and screenshots. results/index.html shows all games with
+their last frame (OK / WARN / FAIL), results/summary.csv lists them.
+Screenshots are PNG with python3-pil (sudo apt install python3-pil),
+BMP otherwise. ./test-games.py -h lists all options.
