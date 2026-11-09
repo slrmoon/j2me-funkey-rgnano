@@ -1,0 +1,61 @@
+# Builds the browser version (./build.sh web) and publishes it to the
+# gh-pages branch, which GitHub Pages serves:
+#   https://<owner>.github.io/<repo>/
+# The demo game behind the page's "MotherLoad (demo)" button is taken from
+# the gh-pages branch as it is.
+name: Web build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'runtime/**'
+      - 'java/**'
+      - 'launchers/web/**'
+      - 'scripts/build-web.sh'
+      - 'scripts/build-doja-support.sh'
+      - 'scripts/publish-web.sh'
+      - '.github/workflows/web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Host packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends emscripten gcc-multilib g++-multilib
+
+      - name: JDK 7 (the runtime's Java is built with it)
+        run: |
+          curl -sSfL https://cdn.azul.com/zulu/bin/zulu7.24.0.1-ca-jdk7.0.191-linux_x64.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "JDK_DIR=$(ls -d "$RUNNER_TEMP"/zulu7*-linux_x64)" >> "$GITHUB_ENV"
+
+      - name: fmod for the 32-bit host tools (Ubuntu 24.04's static i386 libm lacks it)
+        run: |
+          gcc -m32 -O2 -c tools/cloud-test/fmodshim.c -o "$RUNNER_TEMP/fmodshim.o"
+          echo "HOST_LINK_EXTRA=$RUNNER_TEMP/fmodshim.o" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./build.sh web
+
+      - name: Publish to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch -q origin +gh-pages:refs/remotes/origin/gh-pages
+          git show origin/gh-pages:MotherLoad.jar > out/web/site/MotherLoad.jar || true
+          scripts/publish-web.sh

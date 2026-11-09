@@ -10,6 +10,7 @@ Each target is built by one script in `scripts/`, called by `./build.sh`:
 | `scripts/build-armv7.sh` | generic ARMv7 hard-float Linux (any cross compiler in `CROSS_CC`) | `out/armv7` |
 | `scripts/build-linux-x86.sh` | 32-bit x86 Linux, SDL window | `out/linux-x86` |
 | `scripts/build-win32.sh` | 32-bit Windows, MinGW-w64 | `out/win32` |
+| `scripts/build-web.sh` | the browser (WebAssembly, Emscripten 3.1.6 from Debian/Ubuntu; C interpreter, VM in slave mode) | `out/web/site` |
 
 Every script builds PCSL, then the CLDC VM (`runtime/cldc/build/<platform>`),
 then MIDP (`runtime/midp/build/<platform>`). `BUILD_OUTPUT_DIR` overrides the
@@ -21,6 +22,13 @@ looked up in the repository root when not set.
 | FunKey | `linux_arm_gcc` | `linux_arm_vfp` | `linux_sdl_gcc`, `TARGET_CPU=arm` |
 | Linux x86 | `linux_i386_gcc` | `linux_i386` | `linux_sdl_gcc`, `TARGET_CPU=i386` |
 | Windows | `win32_i386_mingw` | `mingw_i386` | `win32_sdl_mingw` |
+
+The browser build (`./build.sh web`) needs the `emscripten` package and the
+32-bit host compiler (`gcc-multilib`) for the VM's build tools; on Ubuntu
+24.04 also `tools/cloud-test/fmodshim.c` compiled with `gcc -m32` and passed
+as `HOST_LINK_EXTRA`. `scripts/publish-web.sh` puts `out/web/site` on the
+`gh-pages` branch; `.github/workflows/web.yml` does both on every push to
+`main` that touches the runtime or the page.
 
 Main FunKey artifacts:
 
