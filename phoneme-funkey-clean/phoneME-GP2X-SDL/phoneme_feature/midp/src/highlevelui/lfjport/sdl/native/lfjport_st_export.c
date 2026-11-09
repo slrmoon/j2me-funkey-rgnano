@@ -1943,7 +1943,9 @@ int PhoneMEFatalPoll(void) {
         if (now - FatalExitTicks > 6000) {
             fprintf(stderr, "phoneME: game error screen: forced exit\n");
             fflush(stderr);
+#ifndef _WIN32
             sync();
+#endif
             _exit(1);
         }
         return 0;

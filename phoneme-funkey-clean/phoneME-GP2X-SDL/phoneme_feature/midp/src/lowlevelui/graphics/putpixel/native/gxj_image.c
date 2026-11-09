@@ -48,9 +48,18 @@
 #else
 #include <string.h>
 #include <SDL.h>
+#ifdef _WIN32
+/* Windows build: JPEG through stb_image (public domain), no SDL_image/libjpeg */
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#define STBI_ONLY_JPEG
+#define STBI_NO_STDIO
+#include "stb_image_win32.h"
+#else
 #include <SDL_image.h>
 #ifndef ARM
 #include <dlfcn.h>
+#endif
 #endif
 #endif
 
@@ -304,7 +313,14 @@ decode_jpeg
     {
         SDL_RWops *rw;
         SDL_Surface *s;
-#ifdef ARM
+#if defined(_WIN32)
+        int jw = 0, jh = 0, jn = 0;
+        unsigned char *rgb = stbi_load_from_memory(
+            (const unsigned char *) srcBuffer, length, &jw, &jh, &jn, 3);
+        (void) rw;
+        s = rgb == NULL ? NULL : SDL_CreateRGBSurfaceFrom(rgb, jw, jh, 24,
+                jw * 3, 0x0000FF, 0x00FF00, 0xFF0000, 0);
+#elif defined(ARM)
         SDL_Surface *(*load)(SDL_RWops *, int, char *) = IMG_LoadTyped_RW;
 #else
         /* desktop: SDL_image is optional (libsdl-image1.2:i386); without
@@ -324,8 +340,10 @@ decode_jpeg
             return;
         }
 #endif
+#ifndef _WIN32
         rw = SDL_RWFromConstMem(srcBuffer, length);
         s = rw != NULL ? load(rw, 1, "JPG") : NULL;
+#endif
         SDL_Surface *c = NULL;
         *creationErrorPtr = GXUTL_NATIVE_IMAGE_DECODING_ERROR;
         if (s != NULL) {
@@ -352,6 +370,9 @@ decode_jpeg
         }
         if (c != NULL) SDL_FreeSurface(c);
         if (s != NULL) SDL_FreeSurface(s);
+#ifdef _WIN32
+        if (rgb != NULL) stbi_image_free(rgb);
+#endif
     }
 #endif
 }

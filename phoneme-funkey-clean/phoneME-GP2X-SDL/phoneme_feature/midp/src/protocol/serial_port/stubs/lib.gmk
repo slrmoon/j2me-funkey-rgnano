@@ -31,7 +31,7 @@
 
 # vpath for ( serial_port ) subsystem
 #
-vpath % $(SUBSYSTEM_DIR)/serial_port/stubs/native
+vpath % $(SUBSYSTEM_DIR)/protocol/serial_port/stubs/native
 
 # Native files for the ( protocol ) module
 #

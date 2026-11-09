@@ -56,6 +56,10 @@ endef
 # SPECIAL CASE for ads build only
 # cldc uses ads as the target_os whereas midp uses armsd
 cldc_target_os = $(TARGET_OS)
+ifeq ($(FUNKEY_WIN32), true)
+    # sources build as TARGET_OS=linux, the VM is the Win32 one (mingw_i386)
+    cldc_target_os = win32
+endif
 
 ifeq ($(TARGET_OS), armsd)
     cldc_target_os = ads

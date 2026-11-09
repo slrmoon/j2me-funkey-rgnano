@@ -44,7 +44,9 @@ SUBSYSTEM_SERIAL_PORT_EXTRA_INCLUDES += \
 # Platform
 #
 #IMPL_NOTE - build subsystem on linux and javacall only
-ifneq ($(findstring $(TARGET_OS),linux javacall),)
+ifeq ($(FUNKEY_WIN32),true)
+include $(SUBSYSTEM_DIR)/protocol/serial_port/stubs/lib.gmk
+else ifneq ($(findstring $(TARGET_OS),linux javacall),)
 
 include $(SUBSYSTEM_DIR)/protocol/serial_port/$(TARGET_OS)/lib.gmk
 else

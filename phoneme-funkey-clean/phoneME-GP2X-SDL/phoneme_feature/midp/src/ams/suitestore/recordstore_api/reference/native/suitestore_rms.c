@@ -75,6 +75,13 @@
  *     SUITE_CORRUPTED_ERROR, BAD_PARAMS
  * </pre>
  */
+#ifdef _WIN32
+#include <direct.h>
+#define RMS_MKDIR(path) _mkdir(path)
+#else
+#define RMS_MKDIR(path) mkdir((path), 0777)
+#endif
+
 MIDPError
 midp_suite_get_rms_filename(SuiteIdType suiteId,
                             StorageIdType storageId,
@@ -105,17 +112,21 @@ midp_suite_get_rms_filename(SuiteIdType suiteId,
             return OUT_OF_MEMORY;
         }
         strcpy(envRmsRootPath, envRmsRoot);
-        if (envRmsRootPath[envRmsRootLen - 1] != '/') {
+        if (envRmsRootPath[envRmsRootLen - 1] != '/'
+#ifdef _WIN32
+            && envRmsRootPath[envRmsRootLen - 1] != '\\'
+#endif
+           ) {
             envRmsRootPath[envRmsRootLen] = '/';
             envRmsRootPath[envRmsRootLen + 1] = '\0';
         }
-        mkdir(envRmsRootPath, 0777);
+        RMS_MKDIR(envRmsRootPath);
         if (snprintf(envRmsSuitePath, sizeof(envRmsSuitePath), "%s%08lX",
                      envRmsRootPath, (unsigned long)suiteId) >=
                 (int)sizeof(envRmsSuitePath)) {
             return OUT_OF_MEMORY;
         }
-        mkdir(envRmsSuitePath, 0777);
+        RMS_MKDIR(envRmsSuitePath);
         if (pcsl_string_from_chars(envRmsRootPath, &rmsRoot) !=
                 PCSL_STRING_OK) {
             return OUT_OF_MEMORY;

@@ -1,0 +1,26 @@
+#
+# Win32 (i686) cross build with the MinGW-w64 GCC toolchain from Linux.
+#
+PCSL_OS=win32
+PCSL_CPU=i386
+
+# Executable (JIT code lives in the Java heap), VirtualAlloc-backed
+PCSL_CHUNKMEM_IMPL=pcsl_chunkvirtual_win32
+PCSL_CHUNKMEM_DIR=$(PCSL_DIR)/memory/malloc
+
+FILE_MODULE=win32
+# winsock posts async socket events to the phoneME win32 window, which the
+# SDL event loop does not have; networking is stubbed (IOException) for now.
+NETWORK_MODULE=stubs
+
+USE_CYGWIN=false
+include $(PCSL_DIR)/makefiles/share/gcc.gmk
+
+MINGW_PREFIX ?= i686-w64-mingw32-
+CC  = $(MINGW_PREFIX)gcc
+CPP = $(MINGW_PREFIX)g++
+LD  = $(MINGW_PREFIX)g++
+AR  = $(MINGW_PREFIX)ar -rc
+
+EXE=.exe
+LIBS=-lws2_32

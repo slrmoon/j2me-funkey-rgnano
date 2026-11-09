@@ -137,6 +137,9 @@ endif
 MakeDepsMain_win32    = WinGammaPlatform
 MakeDepsMain_wince    = WinCEGammaPlatform
 MakeDepsMain_linux    = UnixPlatform
+ifneq ($(host_os), cygwin)
+MakeDepsMain_win32_gcc = UnixPlatform
+endif
 ifneq ($(MakeDepsMain_$(os_family)_$(compiler)),)
 MakeDepsMain          = $(MakeDepsMain_$(os_family)_$(compiler))
 else
@@ -308,6 +311,9 @@ EXE_SUFFIX_visCPP    = .exe
 EXE_SUFFIX_evc       = .exe
 EXE_SUFFIX_gcc       =
 ifeq ($(host_os), cygwin)
+EXE_SUFFIX_gcc       = .exe
+endif
+ifeq ($(IsTarget)+$(os_family), true+win32)
 EXE_SUFFIX_gcc       = .exe
 endif
 
@@ -1445,6 +1451,11 @@ GCC_PREFIX_sparc   =
 GCC_PREFIX_powerpc =
 GCC_PREFIX_c       = $(GCC_PREFIX_$(target_arch))
 GCC_PREFIX         = $(GCC_PREFIX_$(gcc_arch))
+
+# Win32 target cross-built with MinGW-w64 (see build/mingw_i386)
+ifeq ($(IsTarget)+$(os_family), true+win32)
+GCC_PREFIX         = $(MINGW_PREFIX)
+endif
 
 # for now GCC_VERSION is relevant only on i386
 GCC_POSTFIX_i386   = $(GCC_VERSION)

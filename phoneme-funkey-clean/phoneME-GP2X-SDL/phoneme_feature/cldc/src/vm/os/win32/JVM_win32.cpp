@@ -37,7 +37,7 @@
 #include "incls/_precompiled.incl"
 #include "incls/_JVM_win32.cpp.incl"
 
-#ifdef CYGWIN
+#if defined(CYGWIN) || defined(__MINGW32__)
 #define __try
 #define __except(e)
 // IMPL_NOTE: consider whether it is needed here 
@@ -150,9 +150,20 @@ int CheckException(int n_except, LPEXCEPTION_POINTERS exptr) {
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+#ifdef __MINGW32__
+// GCC has no __try/__except: report crashes from the unhandled-exception
+// filter instead (CheckException only prints diagnostics).
+static LONG WINAPI MingwUnhandledFilter(LPEXCEPTION_POINTERS exptr) {
+  return CheckException(exptr->ExceptionRecord->ExceptionCode, exptr);
+}
+#endif
+
 static int executeVM() {
 #ifndef PRODUCT
   signal(SIGBREAK, SigBreakHandler);
+#endif
+#ifdef __MINGW32__
+  SetUnhandledExceptionFilter(MingwUnhandledFilter);
 #endif
   
   int result = 0;

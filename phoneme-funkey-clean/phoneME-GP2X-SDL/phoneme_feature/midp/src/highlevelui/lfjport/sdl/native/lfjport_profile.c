@@ -17,6 +17,19 @@
  * C++ names demangled), dladdr() for shared libraries, and the VM for
  * JIT code. Sampling costs one store per 10 ms; the report a few ms.
  */
+#ifdef _WIN32
+/* Windows: no SIGPROF/thread CPU timers/ELF symbols; profiler disabled. */
+#include <stdio.h>
+#include <stdlib.h>
+void PhoneMEProfileInit(void) {
+    const char *e = getenv("PHONEME_PROFILE");
+    if (e != NULL && e[0] == '1') {
+        fprintf(stderr, "phoneME: profiler is not available on Windows\n");
+    }
+}
+void PhoneMEProfileThread(void) {}
+void PhoneMEProfileTick(void) {}
+#else
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -403,3 +416,5 @@ void PhoneMEProfileTick(void) {
     prof_last_report = now;
     prof_last_usage = usage;
 }
+
+#endif /* !_WIN32 */
