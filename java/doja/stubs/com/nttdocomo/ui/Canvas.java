@@ -25,20 +25,27 @@ public abstract class Canvas extends Frame {
     private javax.microedition.lcdui.Image front;
     private javax.microedition.lcdui.Graphics frontG;
     private final Object frontLock = new Object();
+    private final Object surfaceLock = new Object();
 
     public Canvas() {
     }
 
     javax.microedition.lcdui.Image surface() {
-        if (surface == null) {
-            int w = Display.getWidth();
-            int h = Display.getHeight();
-            surface = javax.microedition.lcdui.Image.createImage(w, h);
-            javax.microedition.lcdui.Graphics g = surface.getGraphics();
-            g.setColor(background & 0xffffff);
-            g.fillRect(0, 0, w, h);
+        /* the host's paint thread and the DoJa event thread both get here
+         * first: unguarded, each made its own surface and the game drew
+         * into one while the other (blank) was shown */
+        synchronized (surfaceLock) {
+            if (surface == null) {
+                int w = Display.getWidth();
+                int h = Display.getHeight();
+                javax.microedition.lcdui.Image s = javax.microedition.lcdui.Image.createImage(w, h);
+                javax.microedition.lcdui.Graphics g = s.getGraphics();
+                g.setColor(background & 0xffffff);
+                g.fillRect(0, 0, w, h);
+                surface = s;
+            }
+            return surface;
         }
-        return surface;
     }
 
     public Graphics getGraphics() {

@@ -118,6 +118,10 @@ make -C "$MEHOME/midp/build/emscripten_sdl" -j1 \
     EMSCRIPTEN_LINK_FLAGS="$EMSCRIPTEN_MIDP_LINK_FLAGS" \
     USE_LIBFLOAT=false
 
+echo "=== DoJa support (lib/doja-support.jar)"
+"$ROOT/scripts/build-doja-support.sh" "$BUILD_OUTPUT_DIR/midp" "$CLDC_DIST_DIR" \
+    "$BUILD_OUTPUT_DIR/midp/lib/doja-support.jar"
+
 # the page: launchers/web/index.html, runMidlet.js/.wasm and the runtime
 # files (lib/, appdb/ as /midp in the browser's file system)
 SITE=$BUILD_OUTPUT_DIR/site
