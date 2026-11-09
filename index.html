@@ -171,6 +171,59 @@ $('demo').addEventListener('click', () => fetchJar('MotherLoad.jar').catch(e => 
 if (params.get('jar')) fetchJar(params.get('jar')).catch(e => status(e.message));
 
 $('reload').addEventListener('click', () => location.href = location.pathname);
+
+// --- start again: the runtime cannot run twice in one page, so the game is
+// kept in IndexedDB and the page reloads with ?restart=1
+function stashDb() {
+  return new Promise((ok, fail) => {
+    const r = indexedDB.open('phoneme-web', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('stash');
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => fail(r.error);
+  });
+}
+async function stash(value) {
+  const db = await stashDb();
+  await new Promise((ok, fail) => {
+    const t = db.transaction('stash', 'readwrite');
+    if (value) t.objectStore('stash').put(value, 'game');
+    else t.objectStore('stash').delete('game');
+    t.oncomplete = ok; t.onerror = () => fail(t.error);
+  });
+}
+async function unstash() {
+  const db = await stashDb();
+  return new Promise(ok => {
+    const r = db.transaction('stash').objectStore('stash').get('game');
+    r.onsuccess = () => ok(r.result); r.onerror = () => ok(null);
+  });
+}
+async function startAgain(auto) {
+  await stash({ name: game.name, main: game.main, bytes: game.bytes, auto });
+  location.href = location.pathname + '?restart=1' + (params.get('fps') ? '&fps=1' : '');
+}
+if (params.get('restart')) {
+  unstash().then(async g => {
+    await stash(null);
+    if (!g) return;
+    game = { name: g.name, bytes: g.bytes, main: g.main };
+    $('picked').textContent = g.name + '.jar — ' + g.main;
+    $('start').disabled = false;
+    status('Ready: ' + g.name);
+    if (g.auto) $('start').click();
+  }).catch(e => log('cannot restart: ' + e));
+}
+
+// browsers keep sound off until a key or click: resume it on the first one
+function resumeAudio() {
+  try {
+    if (typeof SDL !== 'undefined' && SDL.audioContext && SDL.audioContext.state === 'suspended') {
+      SDL.audioContext.resume();
+    }
+  } catch (e) {}
+}
+document.addEventListener('keydown', resumeAudio);
+document.addEventListener('pointerdown', resumeAudio);
 $('full').addEventListener('click', () => $('stage').requestFullscreen && $('stage').requestFullscreen());
 
 // --- the runtime ---------------------------------------------------------
@@ -189,8 +242,11 @@ function saveRms() {
   FS.syncfs(false, err => { syncing = false; if (err) log('saving failed: ' + err); });
 }
 
+let started = false;
 $('start').addEventListener('click', async () => {
   if (!game) return;
+  if (started) { startAgain(true); return; }   // after the game ended
+  started = true;
   $('start').disabled = true;
   status('Starting ' + game.name + '…');
   const rmsDir = '/rms/' + game.name.replace(/[^A-Za-z0-9_.-]/g, '_');
@@ -217,6 +273,7 @@ $('start').addEventListener('click', async () => {
         PHONEME_HEAP_MB: params.get('heap') || '16',
         PHONEME_LCD_SIZE: params.get('lcd') || '240x240',
         PHONEME_ENABLE_AUDIO: '1',
+        PHONEME_RESTART_FLAG: '/tmp/restart-request',
       });
       if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
     }],
@@ -229,7 +286,22 @@ $('start').addEventListener('click', async () => {
       document.addEventListener('visibilitychange', saveRms);
       window.addEventListener('pagehide', saveRms);
     },
-    onExit(code) { saveRms(); status(game.name + ' ended (' + code + ')'); },
+    // runMidlet returned: Exit or "Restart game" in the runtime menu
+    fkGameEnded(code) {
+      saveRms();
+      let restart = false;
+      try { restart = FS.analyzePath('/tmp/restart-request').exists; } catch (e) {}
+      if (restart) {
+        status('Restarting ' + game.name + '…');
+        setTimeout(() => startAgain(true), 300);   // let the saves reach IndexedDB
+        return;
+      }
+      status(game.name + ' ended');
+      $('picked').textContent = game.name + ' ended.';
+      $('start').textContent = 'Start again';
+      $('start').disabled = false;
+      ov.style.display = '';
+    },
   };
   try {
     // the runtime reads its own module bytes (emscripten_sig.js)
