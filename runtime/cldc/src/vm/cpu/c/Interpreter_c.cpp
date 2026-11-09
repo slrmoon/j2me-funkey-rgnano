@@ -4602,9 +4602,304 @@ static void Interpret() {
       interpreter_dispatch_table[*g_jpc]();
     }
   } else {
+#if defined(__EMSCRIPTEN__)
+    // WebAssembly: an indirect call per bytecode is the slowest part of the
+    // interpreter there; a switch lets the compiler inline the handlers
+    // into this loop (a jump table instead of a call).
+    for (;;) {
+      switch (*g_jpc) {
+        case Bytecodes::_nop: bc_impl_nop(); break;
+        case Bytecodes::_aconst_null: bc_impl_aconst_null(); break;
+        case Bytecodes::_iconst_m1: bc_impl_iconst_m1(); break;
+        case Bytecodes::_iconst_0: bc_impl_iconst_0(); break;
+        case Bytecodes::_iconst_1: bc_impl_iconst_1(); break;
+        case Bytecodes::_iconst_2: bc_impl_iconst_2(); break;
+        case Bytecodes::_iconst_3: bc_impl_iconst_3(); break;
+        case Bytecodes::_iconst_4: bc_impl_iconst_4(); break;
+        case Bytecodes::_iconst_5: bc_impl_iconst_5(); break;
+        case Bytecodes::_lconst_0: bc_impl_lconst_0(); break;
+        case Bytecodes::_lconst_1: bc_impl_lconst_1(); break;
+        case Bytecodes::_fconst_0: bc_impl_fconst_0(); break;
+        case Bytecodes::_fconst_1: bc_impl_fconst_1(); break;
+        case Bytecodes::_fconst_2: bc_impl_fconst_2(); break;
+        case Bytecodes::_dconst_0: bc_impl_dconst_0(); break;
+        case Bytecodes::_dconst_1: bc_impl_dconst_1(); break;
+        case Bytecodes::_bipush: bc_impl_bipush(); break;
+        case Bytecodes::_sipush: bc_impl_sipush(); break;
+        case Bytecodes::_ldc: bc_impl_ldc(); break;
+        case Bytecodes::_ldc_w: bc_impl_ldc_w(); break;
+        case Bytecodes::_ldc2_w: bc_impl_ldc2_w(); break;
+        case Bytecodes::_iload: bc_impl_iload(); break;
+        case Bytecodes::_lload: bc_impl_lload(); break;
+        case Bytecodes::_fload: bc_impl_fload(); break;
+        case Bytecodes::_dload: bc_impl_dload(); break;
+        case Bytecodes::_aload: bc_impl_aload(); break;
+        case Bytecodes::_iload_0: bc_impl_iload_0(); break;
+        case Bytecodes::_iload_1: bc_impl_iload_1(); break;
+        case Bytecodes::_iload_2: bc_impl_iload_2(); break;
+        case Bytecodes::_iload_3: bc_impl_iload_3(); break;
+        case Bytecodes::_lload_0: bc_impl_lload_0(); break;
+        case Bytecodes::_lload_1: bc_impl_lload_1(); break;
+        case Bytecodes::_lload_2: bc_impl_lload_2(); break;
+        case Bytecodes::_lload_3: bc_impl_lload_3(); break;
+        case Bytecodes::_fload_0: bc_impl_fload_0(); break;
+        case Bytecodes::_fload_1: bc_impl_fload_1(); break;
+        case Bytecodes::_fload_2: bc_impl_fload_2(); break;
+        case Bytecodes::_fload_3: bc_impl_fload_3(); break;
+        case Bytecodes::_dload_0: bc_impl_dload_0(); break;
+        case Bytecodes::_dload_1: bc_impl_dload_1(); break;
+        case Bytecodes::_dload_2: bc_impl_dload_2(); break;
+        case Bytecodes::_dload_3: bc_impl_dload_3(); break;
+        case Bytecodes::_aload_0: bc_impl_aload_0(); break;
+        case Bytecodes::_aload_1: bc_impl_aload_1(); break;
+        case Bytecodes::_aload_2: bc_impl_aload_2(); break;
+        case Bytecodes::_aload_3: bc_impl_aload_3(); break;
+        case Bytecodes::_iaload: bc_impl_iaload(); break;
+        case Bytecodes::_laload: bc_impl_laload(); break;
+        case Bytecodes::_faload: bc_impl_faload(); break;
+        case Bytecodes::_daload: bc_impl_daload(); break;
+        case Bytecodes::_aaload: bc_impl_aaload(); break;
+        case Bytecodes::_baload: bc_impl_baload(); break;
+        case Bytecodes::_caload: bc_impl_caload(); break;
+        case Bytecodes::_saload: bc_impl_saload(); break;
+        case Bytecodes::_istore: bc_impl_istore(); break;
+        case Bytecodes::_lstore: bc_impl_lstore(); break;
+        case Bytecodes::_fstore: bc_impl_fstore(); break;
+        case Bytecodes::_dstore: bc_impl_dstore(); break;
+        case Bytecodes::_astore: bc_impl_astore(); break;
+        case Bytecodes::_istore_0: bc_impl_istore_0(); break;
+        case Bytecodes::_istore_1: bc_impl_istore_1(); break;
+        case Bytecodes::_istore_2: bc_impl_istore_2(); break;
+        case Bytecodes::_istore_3: bc_impl_istore_3(); break;
+        case Bytecodes::_lstore_0: bc_impl_lstore_0(); break;
+        case Bytecodes::_lstore_1: bc_impl_lstore_1(); break;
+        case Bytecodes::_lstore_2: bc_impl_lstore_2(); break;
+        case Bytecodes::_lstore_3: bc_impl_lstore_3(); break;
+        case Bytecodes::_fstore_0: bc_impl_fstore_0(); break;
+        case Bytecodes::_fstore_1: bc_impl_fstore_1(); break;
+        case Bytecodes::_fstore_2: bc_impl_fstore_2(); break;
+        case Bytecodes::_fstore_3: bc_impl_fstore_3(); break;
+        case Bytecodes::_dstore_0: bc_impl_dstore_0(); break;
+        case Bytecodes::_dstore_1: bc_impl_dstore_1(); break;
+        case Bytecodes::_dstore_2: bc_impl_dstore_2(); break;
+        case Bytecodes::_dstore_3: bc_impl_dstore_3(); break;
+        case Bytecodes::_astore_0: bc_impl_astore_0(); break;
+        case Bytecodes::_astore_1: bc_impl_astore_1(); break;
+        case Bytecodes::_astore_2: bc_impl_astore_2(); break;
+        case Bytecodes::_astore_3: bc_impl_astore_3(); break;
+        case Bytecodes::_iastore: bc_impl_iastore(); break;
+        case Bytecodes::_lastore: bc_impl_lastore(); break;
+        case Bytecodes::_fastore: bc_impl_fastore(); break;
+        case Bytecodes::_dastore: bc_impl_dastore(); break;
+        case Bytecodes::_aastore: bc_impl_aastore(); break;
+        case Bytecodes::_bastore: bc_impl_bastore(); break;
+        case Bytecodes::_castore: bc_impl_castore(); break;
+        case Bytecodes::_sastore: bc_impl_sastore(); break;
+        case Bytecodes::_pop: bc_impl_pop(); break;
+        case Bytecodes::_pop2: bc_impl_pop2(); break;
+        case Bytecodes::_dup: bc_impl_dup(); break;
+        case Bytecodes::_dup_x1: bc_impl_dup_x1(); break;
+        case Bytecodes::_dup_x2: bc_impl_dup_x2(); break;
+        case Bytecodes::_dup2: bc_impl_dup2(); break;
+        case Bytecodes::_dup2_x1: bc_impl_dup2_x1(); break;
+        case Bytecodes::_dup2_x2: bc_impl_dup2_x2(); break;
+        case Bytecodes::_swap: bc_impl_swap(); break;
+        case Bytecodes::_iadd: bc_impl_iadd(); break;
+        case Bytecodes::_ladd: bc_impl_ladd(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_fadd: bc_impl_fadd(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_dadd: bc_impl_dadd(); break;
+#endif
+        case Bytecodes::_isub: bc_impl_isub(); break;
+        case Bytecodes::_lsub: bc_impl_lsub(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_fsub: bc_impl_fsub(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_dsub: bc_impl_dsub(); break;
+#endif
+        case Bytecodes::_imul: bc_impl_imul(); break;
+        case Bytecodes::_lmul: bc_impl_lmul(); break;
+        case Bytecodes::_fmul: bc_impl_fmul(); break;
+        case Bytecodes::_dmul: bc_impl_dmul(); break;
+        case Bytecodes::_idiv: bc_impl_idiv(); break;
+        case Bytecodes::_ldiv: bc_impl_ldiv(); break;
+        case Bytecodes::_fdiv: bc_impl_fdiv(); break;
+        case Bytecodes::_ddiv: bc_impl_ddiv(); break;
+        case Bytecodes::_irem: bc_impl_irem(); break;
+        case Bytecodes::_lrem: bc_impl_lrem(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_frem: bc_impl_frem(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_drem: bc_impl_drem(); break;
+#endif
+        case Bytecodes::_ineg: bc_impl_ineg(); break;
+        case Bytecodes::_lneg: bc_impl_lneg(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_fneg: bc_impl_fneg(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_dneg: bc_impl_dneg(); break;
+#endif
+        case Bytecodes::_ishl: bc_impl_ishl(); break;
+        case Bytecodes::_lshl: bc_impl_lshl(); break;
+        case Bytecodes::_ishr: bc_impl_ishr(); break;
+        case Bytecodes::_lshr: bc_impl_lshr(); break;
+        case Bytecodes::_iushr: bc_impl_iushr(); break;
+        case Bytecodes::_lushr: bc_impl_lushr(); break;
+        case Bytecodes::_iand: bc_impl_iand(); break;
+        case Bytecodes::_land: bc_impl_land(); break;
+        case Bytecodes::_ior: bc_impl_ior(); break;
+        case Bytecodes::_lor: bc_impl_lor(); break;
+        case Bytecodes::_ixor: bc_impl_ixor(); break;
+        case Bytecodes::_lxor: bc_impl_lxor(); break;
+        case Bytecodes::_iinc: bc_impl_iinc(); break;
+        case Bytecodes::_i2l: bc_impl_i2l(); break;
+        case Bytecodes::_i2f: bc_impl_i2f(); break;
+        case Bytecodes::_i2d: bc_impl_i2d(); break;
+        case Bytecodes::_l2i: bc_impl_l2i(); break;
+        case Bytecodes::_l2f: bc_impl_l2f(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_l2d: bc_impl_l2d(); break;
+#endif
+        case Bytecodes::_f2i: bc_impl_f2i(); break;
+        case Bytecodes::_f2l: bc_impl_f2l(); break;
+        case Bytecodes::_f2d: bc_impl_f2d(); break;
+        case Bytecodes::_d2i: bc_impl_d2i(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_d2l: bc_impl_d2l(); break;
+#endif
+        case Bytecodes::_d2f: bc_impl_d2f(); break;
+        case Bytecodes::_i2b: bc_impl_i2b(); break;
+        case Bytecodes::_i2c: bc_impl_i2c(); break;
+        case Bytecodes::_i2s: bc_impl_i2s(); break;
+        case Bytecodes::_lcmp: bc_impl_lcmp(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_fcmpl: bc_impl_fcmpl(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_fcmpg: bc_impl_fcmpg(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_dcmpl: bc_impl_dcmpl(); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_dcmpg: bc_impl_dcmpg(); break;
+#endif
+        case Bytecodes::_ifeq: bc_impl_ifeq(); break;
+        case Bytecodes::_ifne: bc_impl_ifne(); break;
+        case Bytecodes::_iflt: bc_impl_iflt(); break;
+        case Bytecodes::_ifge: bc_impl_ifge(); break;
+        case Bytecodes::_ifgt: bc_impl_ifgt(); break;
+        case Bytecodes::_ifle: bc_impl_ifle(); break;
+        case Bytecodes::_if_icmpeq: bc_impl_if_icmpeq(); break;
+        case Bytecodes::_if_icmpne: bc_impl_if_icmpne(); break;
+        case Bytecodes::_if_icmplt: bc_impl_if_icmplt(); break;
+        case Bytecodes::_if_icmpge: bc_impl_if_icmpge(); break;
+        case Bytecodes::_if_icmpgt: bc_impl_if_icmpgt(); break;
+        case Bytecodes::_if_icmple: bc_impl_if_icmple(); break;
+        case Bytecodes::_if_acmpeq: bc_impl_if_acmpeq(); break;
+        case Bytecodes::_if_acmpne: bc_impl_if_acmpne(); break;
+        case Bytecodes::_goto: bc_impl_goto(); break;
+        case Bytecodes::_tableswitch: bc_impl_tableswitch(); break;
+        case Bytecodes::_lookupswitch: bc_impl_lookupswitch(); break;
+        case Bytecodes::_ireturn: bc_impl_ireturn(); break;
+        case Bytecodes::_lreturn: bc_impl_lreturn(); break;
+        case Bytecodes::_freturn: bc_impl_freturn(); break;
+        case Bytecodes::_dreturn: bc_impl_dreturn(); break;
+        case Bytecodes::_areturn: bc_impl_areturn(); break;
+        case Bytecodes::_return: bc_impl_return(); break;
+        case Bytecodes::_getstatic: bc_impl_getstatic(); break;
+        case Bytecodes::_putstatic: bc_impl_putstatic(); break;
+        case Bytecodes::_getfield: bc_impl_getfield(); break;
+        case Bytecodes::_putfield: bc_impl_putfield(); break;
+        case Bytecodes::_invokevirtual: bc_impl_invokevirtual(); break;
+        case Bytecodes::_invokespecial: bc_impl_invokespecial(); break;
+        case Bytecodes::_invokestatic: bc_impl_invokestatic(); break;
+        case Bytecodes::_invokeinterface: bc_impl_invokeinterface(); break;
+        case Bytecodes::_new: bc_impl_new(); break;
+        case Bytecodes::_newarray: bc_impl_newarray(); break;
+        case Bytecodes::_arraylength: bc_impl_arraylength(); break;
+        case Bytecodes::_athrow: bc_impl_athrow(); break;
+        case Bytecodes::_checkcast: bc_impl_checkcast(); break;
+        case Bytecodes::_instanceof: bc_impl_instanceof(); break;
+        case Bytecodes::_monitorenter: bc_impl_monitorenter(); break;
+        case Bytecodes::_monitorexit: bc_impl_monitorexit(); break;
+        case Bytecodes::_wide: bc_impl_wide(); break;
+        case Bytecodes::_anewarray: bc_impl_anewarray(); break;
+        case Bytecodes::_multianewarray: bc_impl_multianewarray(); break;
+        case Bytecodes::_ifnull: bc_impl_ifnull(); break;
+        case Bytecodes::_ifnonnull: bc_impl_ifnonnull(); break;
+        case Bytecodes::_goto_w: bc_impl_goto_w(); break;
+        case Bytecodes::_breakpoint: bc_impl_breakpoint(); break;
+        case Bytecodes::_fast_1_ldc: bc_impl_fast_1_ldc(); break;
+        case Bytecodes::_fast_1_ldc_w: bc_impl_fast_1_ldc_w(); break;
+        case Bytecodes::_fast_2_ldc_w: bc_impl_fast_2_ldc_w(); break;
+        case Bytecodes::_fast_1_putstatic: bc_impl_fast_1_putstatic(); break;
+        case Bytecodes::_fast_2_putstatic: bc_impl_fast_2_putstatic(); break;
+        case Bytecodes::_fast_a_putstatic: bc_impl_fast_a_putstatic(); break;
+        case Bytecodes::_fast_1_getstatic: bc_impl_fast_1_getstatic(); break;
+        case Bytecodes::_fast_2_getstatic: bc_impl_fast_2_getstatic(); break;
+        case Bytecodes::_fast_bputfield: bc_impl_fast_bputfield(); break;
+        case Bytecodes::_fast_sputfield: bc_impl_fast_sputfield(); break;
+        case Bytecodes::_fast_iputfield: bc_impl_fast_iputfield(); break;
+        case Bytecodes::_fast_lputfield: bc_impl_fast_lputfield(); break;
+        case Bytecodes::_fast_fputfield: bc_impl_fast_fputfield(); break;
+        case Bytecodes::_fast_dputfield: bc_impl_fast_dputfield(); break;
+        case Bytecodes::_fast_aputfield: bc_impl_fast_aputfield(); break;
+        case Bytecodes::_fast_bgetfield: bc_impl_fast_bgetfield(); break;
+        case Bytecodes::_fast_sgetfield: bc_impl_fast_sgetfield(); break;
+        case Bytecodes::_fast_igetfield: bc_impl_fast_igetfield(); break;
+        case Bytecodes::_fast_lgetfield: bc_impl_fast_lgetfield(); break;
+        case Bytecodes::_fast_fgetfield: bc_impl_fast_fgetfield(); break;
+        case Bytecodes::_fast_dgetfield: bc_impl_fast_dgetfield(); break;
+        case Bytecodes::_fast_agetfield: bc_impl_fast_agetfield(); break;
+        case Bytecodes::_fast_cgetfield: bc_impl_fast_cgetfield(); break;
+        case Bytecodes::_fast_invokevirtual: bc_impl_fast_invokevirtual(); break;
+        case Bytecodes::_fast_invokestatic: bc_impl_fast_invokestatic(); break;
+        case Bytecodes::_fast_invokeinterface: bc_impl_fast_invokeinterface(); break;
+        case Bytecodes::_fast_invokenative: bc_impl_fast_invokenative(); break;
+        case Bytecodes::_fast_new: bc_impl_fast_new(); break;
+        case Bytecodes::_fast_anewarray: bc_impl_fast_anewarray(); break;
+        case Bytecodes::_fast_checkcast: bc_impl_fast_checkcast(); break;
+        case Bytecodes::_fast_instanceof: bc_impl_fast_instanceof(); break;
+        case Bytecodes::_fast_invokevirtual_final: bc_impl_fast_invokevirtual_final(); break;
+        case Bytecodes::_fast_invokespecial: bc_impl_fast_invokespecial(); break;
+        case Bytecodes::_fast_igetfield_1: bc_impl_fast_igetfield_1(); break;
+        case Bytecodes::_fast_agetfield_1: bc_impl_fast_agetfield_1(); break;
+#if !ENABLE_CPU_VARIANT
+        case Bytecodes::_aload_0_fast_igetfield_1: bc_impl_aload_0_fast_igetfield_1(); break;
+        case Bytecodes::_aload_0_fast_igetfield_4: bc_impl_aload_0_fast_igetfield_4(); break;
+        case Bytecodes::_aload_0_fast_igetfield_8: bc_impl_aload_0_fast_igetfield_8(); break;
+        case Bytecodes::_aload_0_fast_agetfield_1: bc_impl_aload_0_fast_agetfield_1(); break;
+        case Bytecodes::_aload_0_fast_agetfield_4: bc_impl_aload_0_fast_agetfield_4(); break;
+        case Bytecodes::_aload_0_fast_agetfield_8: bc_impl_aload_0_fast_agetfield_8(); break;
+        case Bytecodes::_init_static_array: bc_impl_init_static_array(); break;
+#elif ENABLE_ARM11_JAZELLE_DLOAD_BUG_WORKAROUND
+        case Bytecodes::_lload_safe: bc_impl_lload_safe(); break;
+        case Bytecodes::_lstore_safe: bc_impl_lstore_safe(); break;
+        case Bytecodes::_dload_safe: bc_impl_dload_safe(); break;
+        case Bytecodes::_dstore_safe: bc_impl_dstore_safe(); break;
+#endif
+        case Bytecodes::_pop_and_npe_if_null: bc_impl_pop_and_npe_if_null(); break;
+        case Bytecodes::_fast_init_1_putstatic: bc_impl_fast_init_1_putstatic(); break;
+        case Bytecodes::_fast_init_2_putstatic: bc_impl_fast_init_2_putstatic(); break;
+        case Bytecodes::_fast_init_a_putstatic: bc_impl_fast_init_a_putstatic(); break;
+        case Bytecodes::_fast_init_1_getstatic: bc_impl_fast_init_1_getstatic(); break;
+        case Bytecodes::_fast_init_2_getstatic: bc_impl_fast_init_2_getstatic(); break;
+        case Bytecodes::_fast_init_invokestatic: bc_impl_fast_init_invokestatic(); break;
+        case Bytecodes::_fast_init_new: bc_impl_fast_init_new(); break;
+        default: interpreter_dispatch_table[*g_jpc](); break;
+      }
+    }
+#else
     for (;;) {
       interpreter_dispatch_table[*g_jpc]();
     }
+#endif
   }
 }
 
