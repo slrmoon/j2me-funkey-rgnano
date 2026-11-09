@@ -1,23 +1,25 @@
 /*
  * FunKeyJ2ME.exe: Windows launcher of the desktop runtime (bin\runMidlet.exe).
- * The Windows counterpart of packaging/linux-x86/run.sh.
  *
- *   FunKeyJ2ME.exe game.jar      (or drop a .jar / .jam on the exe;
- *                                 without arguments a file dialog opens)
+ *   FunKeyJ2ME.exe               settings window: game list, display,
+ *                                controls (PC key map), sound and logs
+ *   FunKeyJ2ME.exe game.jar      start the game right away (also: drop a
+ *                                .jar / .jam on the exe)
+ *
+ * Settings live in settings.ini next to the exe; a game can have its own
+ * full copy in data\games\<game>.ini ("Own settings for the selected game").
+ * Environment variables of the same name still win (SCALE, LCD, MODE, ...).
  *
  * MIDP: the main class comes from MIDlet-1 of a .jad next to the jar or of
- * the manifest. DoJa (i-appli): a .jam next to the jar (game.jam, JAM=..., or
- * the only .jam of the folder whose AppClass is in the jar), scratchpad
- * game.sp. Settings: settings.ini next to the exe, environment variables of
- * the same name win (SCALE, LCD, MODE, FILTER, FPS, HEAP_MB, MUTE, VMARGS,
- * VERIFY, JAM, SP, CONSOLE).
+ * the manifest. DoJa (i-appli): a .jam next to the jar (game.jam, or the only
+ * .jam of the folder whose AppClass is in the jar), scratchpad game.sp.
  *
  * The VM opens files through the ANSI C library, so every path it gets is
  * ASCII: 8.3 short names where Windows has them, otherwise copies in the
  * data folder (the scratchpad is copied back when the game ends).
  *
- * Build: i686-w64-mingw32-gcc -O2 -municode -mwindows launcher.c -o
- *        FunKeyJ2ME.exe -lz -lcomdlg32 -lshlwapi (static zlib)
+ * Build: see package-win32.sh (windres launcher.rc; gcc -municode -mwindows
+ *        launcher.c -lz -lcomctl32 -lcomdlg32 -lshlwapi -lole32 -lshell32)
  */
 #define WIN32_LEAN_AND_MEAN
 #ifndef UNICODE
@@ -26,20 +28,25 @@
 #ifndef _UNICODE
 #define _UNICODE
 #endif
+#define _WIN32_IE 0x0600
 #include <windows.h>
+#include <commctrl.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shlwapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 #include <zlib.h>
+#include "launcher_res.h"
 
 #define APP_TITLE L"FunKey J2ME"
 #define WBUF 2048
+#define WM_APP_GAME_ENDED (WM_APP + 1)
 
-/* ---------------------------------------------------------------- utils */
+/* ================================================================ utils */
 
 static void fail(const wchar_t *fmt, ...) {
     wchar_t msg[4096];
@@ -49,12 +56,14 @@ static void fail(const wchar_t *fmt, ...) {
     msg[4095] = 0;
     va_end(ap);
     MessageBoxW(NULL, msg, APP_TITLE, MB_OK | MB_ICONERROR);
-    ExitProcess(1);
 }
 
 static void *xmalloc(size_t n) {
     void *p = malloc(n ? n : 1);
-    if (p == NULL) fail(L"Out of memory");
+    if (p == NULL) {
+        MessageBoxW(NULL, L"Out of memory", APP_TITLE, MB_OK | MB_ICONERROR);
+        ExitProcess(1);
+    }
     return p;
 }
 
@@ -68,19 +77,27 @@ static int is_ascii_a(const char *s) {
     return 1;
 }
 
-/* ASCII wide string -> char (caller checked is_ascii_w) */
-static char *narrow(const wchar_t *w) {
+static char *narrow(const wchar_t *w) {        /* ASCII only */
     size_t n = wcslen(w), i;
     char *a = xmalloc(n + 1);
     for (i = 0; i <= n; i++) a[i] = (char)w[i];
     return a;
 }
 
-static wchar_t *widen_utf8(const char *s) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+static wchar_t *widen_cp(const char *s, UINT cp) {
+    int n = MultiByteToWideChar(cp, 0, s, -1, NULL, 0);
     wchar_t *w = xmalloc((size_t)(n > 0 ? n : 1) * sizeof(wchar_t));
-    if (n <= 0 || !MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n)) w[0] = 0;
+    if (n <= 0 || !MultiByteToWideChar(cp, 0, s, -1, w, n)) w[0] = 0;
     return w;
+}
+
+static wchar_t *widen_utf8(const char *s) { return widen_cp(s, CP_UTF8); }
+
+static char *utf8_of(const wchar_t *w) {
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    char *a = xmalloc((size_t)(n > 0 ? n : 1));
+    if (n <= 0 || !WideCharToMultiByte(CP_UTF8, 0, w, -1, a, n, NULL, NULL)) a[0] = 0;
+    return a;
 }
 
 static int file_exists(const wchar_t *p) {
@@ -110,7 +127,7 @@ static void mkdirs(const wchar_t *path) {
 }
 
 static int read_file(const wchar_t *path, unsigned char **data, DWORD *size) {
-    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            NULL, OPEN_EXISTING, 0, NULL);
     DWORD sz, got = 0;
     if (h == INVALID_HANDLE_VALUE) return 0;
@@ -146,8 +163,15 @@ static char *ascii_alias(const wchar_t *path) {
     return NULL;
 }
 
-/* copy (hard link if possible) src to dst; dst replaced */
+/* dst = src: an existing identical copy (in use by a running game) is kept */
 static int link_or_copy(const wchar_t *src, const wchar_t *dst) {
+    WIN32_FILE_ATTRIBUTE_DATA a, b;
+    if (GetFileAttributesExW(src, GetFileExInfoStandard, &a) &&
+        GetFileAttributesExW(dst, GetFileExInfoStandard, &b) &&
+        a.nFileSizeLow == b.nFileSizeLow && a.nFileSizeHigh == b.nFileSizeHigh &&
+        CompareFileTime(&a.ftLastWriteTime, &b.ftLastWriteTime) == 0) {
+        return 1;
+    }
     DeleteFileW(dst);
     if (CreateHardLinkW(dst, src, NULL)) return 1;
     return CopyFileW(src, dst, FALSE);
@@ -168,43 +192,7 @@ static const wchar_t *basename_w(const wchar_t *p) {
     return a ? a + 1 : p;
 }
 
-/* ------------------------------------------------------------- settings */
-
-static wchar_t ini_path[WBUF];
-
-/* environment variable, else settings.ini value, else def */
-static void setting(const char *key, const char *def, char *out, size_t size) {
-    char line[1024];
-    FILE *f;
-    DWORD n = GetEnvironmentVariableA(key, out, (DWORD)size);
-    if (n > 0 && n < size) return;
-    f = _wfopen(ini_path, L"rb");
-    if (f != NULL) {
-        size_t klen = strlen(key);
-        while (fgets(line, sizeof(line), f)) {
-            char *p = line, *e;
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p == '#' || *p == ';' || _strnicmp(p, key, klen) != 0) continue;
-            p += klen;
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p != '=') continue;
-            p++;
-            while (*p == ' ' || *p == '\t') p++;
-            e = p + strlen(p);
-            while (e > p && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t')) *--e = 0;
-            if (*p == '"' && e > p + 1 && e[-1] == '"') { p++; *--e = 0; }
-            fclose(f);
-            strncpy(out, p, size - 1);
-            out[size - 1] = 0;
-            return;
-        }
-        fclose(f);
-    }
-    strncpy(out, def, size - 1);
-    out[size - 1] = 0;
-}
-
-/* ------------------------------------------------------------------ jar */
+/* ================================================================== jar */
 
 typedef struct {
     unsigned char *data;
@@ -226,14 +214,20 @@ static int zip_open(Zip *z, const wchar_t *path) {
         if (u32(z->data + i) == 0x06054b50) {
             z->entries = u16(z->data + i + 10);
             z->cd_offset = u32(z->data + i + 16);
-            return z->cd_offset < z->size;
+            if (z->cd_offset < z->size) return 1;
+            break;
         }
     }
+    free(z->data);
+    z->data = NULL;
     return 0;
 }
 
-/* entry name compared case-insensitively when nocase; returns malloc'ed
- * contents (NUL-terminated) or NULL */
+static void zip_close(Zip *z) {
+    free(z->data);
+    z->data = NULL;
+}
+
 static unsigned char *zip_read(Zip *z, const char *name, int nocase, DWORD *outlen) {
     DWORD p = z->cd_offset;
     size_t nlen = strlen(name);
@@ -296,8 +290,7 @@ static int zip_has(Zip *z, const char *name) {
     return 0;
 }
 
-/* manifest/jad text: CR removed, UTF-8 BOM removed, continuation lines
- * (starting with a space) joined */
+/* manifest/jad/jam text: CR and UTF-8 BOM removed, continuation lines joined */
 static char *normalize_descriptor(const unsigned char *in) {
     size_t n = strlen((const char *)in), i, o = 0;
     char *out = xmalloc(n + 2);
@@ -312,13 +305,12 @@ static char *normalize_descriptor(const unsigned char *in) {
     return out;
 }
 
-/* value of "Key:" (descriptor) or "Key =" (jam) into out */
 static int desc_value(const char *text, const char *key, char sep, char *out, size_t size) {
     const char *p = text;
     size_t klen = strlen(key);
     while (p && *p) {
         const char *e = strchr(p, '\n');
-        const char *q = p;
+        const char *q;
         if (e == NULL) e = p + strlen(p);
         if ((size_t)(e - p) > klen && strncmp(p, key, klen) == 0) {
             q = p + klen;
@@ -341,7 +333,6 @@ static int desc_value(const char *text, const char *key, char sep, char *out, si
     return 0;
 }
 
-/* third field of MIDlet-1: "name, icon, class" */
 static int midlet_class(const char *desc, char *out, size_t size) {
     char v[1024], *c;
     if (!desc_value(desc, "MIDlet-1", ':', v, sizeof(v))) return 0;
@@ -356,115 +347,101 @@ static int midlet_class(const char *desc, char *out, size_t size) {
     return out[0] != 0;
 }
 
-/* ----------------------------------------------------------- command line */
+/* ======================================================== paths / games */
 
-static wchar_t *cmd;
-static size_t cmd_len, cmd_cap;
+static wchar_t g_home[WBUF];      /* folder of the exe */
+static wchar_t g_data[WBUF];      /* data folder */
+static wchar_t g_ini[WBUF];       /* global settings.ini */
+static char   *g_home_a;          /* ASCII form of g_home */
 
-static void cmd_raw(const wchar_t *s) {
-    size_t n = wcslen(s);
-    if (cmd_len + n + 1 > cmd_cap) {
-        cmd_cap = (cmd_len + n + 1) * 2 + 1024;
-        cmd = realloc(cmd, cmd_cap * sizeof(wchar_t));
-        if (cmd == NULL) fail(L"Out of memory");
+/* data\run, data\rms, data\games use a file-system-safe, ASCII name */
+static void game_id(const wchar_t *jar, char *out, size_t size) {
+    wchar_t base[WBUF], *dot;
+    const wchar_t *b;
+    size_t i;
+    wcscpy(base, jar);
+    dot = wcsrchr(base, L'.');
+    if (dot && dot > wcsrchr(base, L'\\')) *dot = 0;
+    b = basename_w(base);
+    if (is_ascii_w(b)) {
+        for (i = 0; b[i] && i < size - 1; i++) {
+            wchar_t c = b[i];
+            out[i] = (c == L':' || c == L'*' || c == L'?' || c == L'"' || c == L'<' ||
+                      c == L'>' || c == L'|') ? '_' : (char)c;
+        }
+        out[i] = 0;
+    } else {
+        DWORD h = 5381;
+        for (i = 0; jar[i]; i++) h = h * 33 + jar[i];
+        for (i = 0; b[i] && i < 40 && i < size - 20; i++) {
+            wchar_t c = b[i];
+            out[i] = (c < 128 && (iswalnum(c) || c == L'.' || c == L'-')) ? (char)c : '_';
+        }
+        out[i] = 0;
+        snprintf(out + strlen(out), 20, "_%lu", (unsigned long)h);
     }
-    memcpy(cmd + cmd_len, s, (n + 1) * sizeof(wchar_t));
-    cmd_len += n;
 }
 
-/* one argument, quoted for CommandLineToArgv / the C runtime */
-static void cmd_arg_w(const wchar_t *a) {
-    const wchar_t *p;
-    int quote = *a == 0 || wcspbrk(a, L" \t\"") != NULL;
-    if (cmd_len) cmd_raw(L" ");
-    if (!quote) { cmd_raw(a); return; }
-    cmd_raw(L"\"");
-    for (p = a; ; p++) {
-        unsigned bs = 0;
-        while (*p == L'\\') { bs++; p++; }
-        if (*p == 0) {
-            while (bs--) cmd_raw(L"\\\\");
-            break;
-        }
-        if (*p == L'"') {
-            while (bs--) cmd_raw(L"\\\\");
-            cmd_raw(L"\\\"");
-        } else {
-            wchar_t one[2] = { *p, 0 };
-            while (bs--) cmd_raw(L"\\");
-            cmd_raw(one);
-        }
-    }
-    cmd_raw(L"\"");
-}
-
-static void cmd_arg(const char *a) {
-    wchar_t *w = widen_utf8(a);
-    cmd_arg_w(w);
+static void game_ini_path(const wchar_t *jar, wchar_t *out) {
+    char id[260];
+    wchar_t *w;
+    game_id(jar, id, sizeof(id));
+    w = widen_utf8(id);
+    _snwprintf(out, WBUF, L"%ls\\games\\%ls.ini", g_data, w);
     free(w);
 }
 
-static void cmd_argf(const char *fmt, const char *v) {
-    size_t n = strlen(fmt) + strlen(v) + 1;
-    char *s = xmalloc(n);
-    snprintf(s, n, fmt, v);
-    cmd_arg(s);
-    free(s);
+static void game_log_path(const wchar_t *jar, wchar_t *out) {
+    char id[260];
+    wchar_t *w;
+    game_id(jar, id, sizeof(id));
+    w = widen_utf8(id);
+    _snwprintf(out, WBUF, L"%ls\\logs\\%ls.log", g_data, w);
+    free(w);
 }
 
-/* split VMARGS on spaces */
-static void cmd_args_split(const char *s) {
-    char buf[1024];
-    while (*s) {
-        size_t n = 0;
-        while (*s == ' ' || *s == '\t') s++;
-        while (*s && *s != ' ' && *s != '\t' && n < sizeof(buf) - 1) buf[n++] = *s++;
-        buf[n] = 0;
-        if (n) cmd_arg(buf);
+/* .jam belonging to a jar: game.jam, or the only .jam of the folder whose
+ * AppClass is in the jar; jam[0] = 0 when it is a MIDP game */
+static void find_jam(const wchar_t *jar, Zip *zip, wchar_t *jam) {
+    wchar_t base[WBUF], dir[WBUF], tmp[WBUF], *dot;
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    int count = 0;
+    jam[0] = 0;
+    wcscpy(base, jar);
+    dot = wcsrchr(base, L'.');
+    if (dot && dot > wcsrchr(base, L'\\')) *dot = 0;
+    _snwprintf(tmp, WBUF, L"%ls.jam", base);
+    if (file_exists(tmp)) { wcscpy(jam, tmp); return; }
+    _snwprintf(tmp, WBUF, L"%ls.JAM", base);
+    if (file_exists(tmp)) { wcscpy(jam, tmp); return; }
+    dirname_w(jar, dir);
+    _snwprintf(tmp, WBUF, L"%ls\\*.jam", dir);
+    h = FindFirstFileW(tmp, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            _snwprintf(tmp, WBUF, L"%ls\\%ls", dir, fd.cFileName);
+            count++;
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    if (count == 1) {
+        unsigned char *d;
+        DWORD n;
+        if (read_file(tmp, &d, &n)) {
+            char *t = normalize_descriptor(d), cls[512], path[600], *c;
+            if (desc_value(t, "AppClass", '=', cls, sizeof(cls)) && cls[0]) {
+                for (c = cls; *c; c++) if (*c == '.') *c = '/';
+                snprintf(path, sizeof(path), "%s.class", cls);
+                if (zip_has(zip, path)) wcscpy(jam, tmp);
+            }
+            free(t);
+            free(d);
+        }
     }
 }
 
-/* -------------------------------------------------------------------- run */
-
-static void set_env(const char *k, const char *v) {
-    SetEnvironmentVariableA(k, v);
-}
-
-static void show_log_tail(const wchar_t *log, DWORD code) {
-    unsigned char *d;
-    DWORD n;
-    wchar_t msg[6000];
-    if (read_file(log, &d, &n)) {
-        DWORD start = n > 1800 ? n - 1800 : 0;
-        wchar_t *w;
-        while (start > 0 && start < n && d[start - 1] != '\n') start++;
-        w = widen_utf8((char *)d + start);
-        _snwprintf(msg, 5999, L"The game stopped with an error (code %lu).\n\n"
-                   L"End of the log (%ls):\n\n%ls", (unsigned long)code, log, w);
-        free(w);
-        free(d);
-    } else {
-        _snwprintf(msg, 5999, L"The game stopped with an error (code %lu).", (unsigned long)code);
-    }
-    msg[5999] = 0;
-    MessageBoxW(NULL, msg, APP_TITLE, MB_OK | MB_ICONWARNING);
-}
-
-static int pick_file(wchar_t *out) {
-    OPENFILENAMEW of;
-    memset(&of, 0, sizeof(of));
-    out[0] = 0;
-    of.lStructSize = sizeof(of);
-    of.lpstrFilter = L"J2ME / i-appli games (*.jar, *.jam)\0*.jar;*.jam\0All files\0*.*\0";
-    of.lpstrFile = out;
-    of.nMaxFile = WBUF;
-    of.lpstrTitle = L"Open a J2ME game";
-    of.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
-    return GetOpenFileNameW(&of);
-}
-
-/* a .jam given instead of the jar: the jar with the same name, the
- * PackageURL file, or the only jar of the folder */
+/* a .jam given instead of the jar: same name, PackageURL, or the only jar */
 static int jar_for_jam(const wchar_t *jam, wchar_t *jar) {
     wchar_t dir[WBUF], pat[WBUF], base[WBUF], *dot;
     unsigned char *d;
@@ -507,221 +484,664 @@ static int jar_for_jam(const wchar_t *jam, wchar_t *jar) {
     return count == 1;
 }
 
-int wmain(int argc, wchar_t **argv) {
-    wchar_t exe[WBUF], home[WBUF], data[WBUF], jar[WBUF], dir[WBUF], base[WBUF];
-    wchar_t rundir[WBUF], rmsdir[WBUF], logdir[WBUF], logpath[WBUF], tmp[WBUF];
-    wchar_t jam[WBUF], name_w[260], *dot;
-    char name[260], s[1024], app_class[512] = "";
-    char *home_a, *data_a, *jar_a = NULL;
+/* ============================================================ key names */
+
+/* SDL 1.2 key symbols (what the runtime sees) */
+enum {
+    K_BACKSPACE = 8, K_TAB = 9, K_RETURN = 13, K_ESCAPE = 27, K_SPACE = 32,
+    K_DELETE = 127, K_KP0 = 256, K_KP_PERIOD = 266, K_KP_DIVIDE = 267,
+    K_KP_MULTIPLY = 268, K_KP_MINUS = 269, K_KP_PLUS = 270, K_KP_ENTER = 271,
+    K_UP = 273, K_DOWN = 274, K_RIGHT = 275, K_LEFT = 276, K_INSERT = 277,
+    K_HOME = 278, K_END = 279, K_PAGEUP = 280, K_PAGEDOWN = 281, K_F1 = 282,
+    K_NUMLOCK = 300, K_CAPSLOCK = 301, K_SCROLLOCK = 302, K_RSHIFT = 303,
+    K_LSHIFT = 304, K_RCTRL = 305, K_LCTRL = 306, K_RALT = 307, K_LALT = 308,
+    K_LSUPER = 311, K_RSUPER = 312, K_MENU = 319, K_LESS = 60, K_LAST = 323
+};
+
+/* PC scan code (set 1) -> SDL symbol, as SDL's Windows driver maps keys
+ * (by position, US layout); [0x80 + code] = extended (E0) keys */
+static int sdl_sym_of_scancode(unsigned sc, int extended) {
+    static const unsigned short base[0x59] = {
+        0, K_ESCAPE, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', K_BACKSPACE, K_TAB,
+        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', K_RETURN, K_LCTRL, 'a', 's',
+        'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', K_LSHIFT, '\\', 'z', 'x', 'c', 'v',
+        'b', 'n', 'm', ',', '.', '/', K_RSHIFT, K_KP_MULTIPLY, K_LALT, K_SPACE, K_CAPSLOCK,
+        K_F1, K_F1 + 1, K_F1 + 2, K_F1 + 3, K_F1 + 4,
+        K_F1 + 5, K_F1 + 6, K_F1 + 7, K_F1 + 8, K_F1 + 9, K_NUMLOCK, K_SCROLLOCK,
+        K_KP0 + 7, K_KP0 + 8, K_KP0 + 9, K_KP_MINUS,
+        K_KP0 + 4, K_KP0 + 5, K_KP0 + 6, K_KP_PLUS, K_KP0 + 1, K_KP0 + 2, K_KP0 + 3, K_KP0,
+        K_KP_PERIOD, 0, 0, K_LESS, K_F1 + 10, K_F1 + 11
+    };
+    if (extended) {
+        switch (sc) {
+        case 0x1C: return K_KP_ENTER;
+        case 0x1D: return K_RCTRL;
+        case 0x35: return K_KP_DIVIDE;
+        case 0x38: return K_RALT;
+        case 0x47: return K_HOME;
+        case 0x48: return K_UP;
+        case 0x49: return K_PAGEUP;
+        case 0x4B: return K_LEFT;
+        case 0x4D: return K_RIGHT;
+        case 0x4F: return K_END;
+        case 0x50: return K_DOWN;
+        case 0x51: return K_PAGEDOWN;
+        case 0x52: return K_INSERT;
+        case 0x53: return K_DELETE;
+        case 0x5B: return K_LSUPER;
+        case 0x5C: return K_RSUPER;
+        case 0x5D: return K_MENU;
+        default: return 0;
+        }
+    }
+    return sc < sizeof(base) / sizeof(base[0]) ? base[sc] : 0;
+}
+
+static void sym_name(int sym, wchar_t *out, size_t n) {
+    const wchar_t *s = NULL;
+    switch (sym) {
+    case K_BACKSPACE: s = L"Backspace"; break;
+    case K_TAB: s = L"Tab"; break;
+    case K_RETURN: s = L"Enter"; break;
+    case K_ESCAPE: s = L"Esc"; break;
+    case K_SPACE: s = L"Space"; break;
+    case K_DELETE: s = L"Delete"; break;
+    case K_KP_PERIOD: s = L"Num ."; break;
+    case K_KP_DIVIDE: s = L"Num /"; break;
+    case K_KP_MULTIPLY: s = L"Num *"; break;
+    case K_KP_MINUS: s = L"Num -"; break;
+    case K_KP_PLUS: s = L"Num +"; break;
+    case K_KP_ENTER: s = L"Num Enter"; break;
+    case K_UP: s = L"Up"; break;
+    case K_DOWN: s = L"Down"; break;
+    case K_RIGHT: s = L"Right"; break;
+    case K_LEFT: s = L"Left"; break;
+    case K_INSERT: s = L"Insert"; break;
+    case K_HOME: s = L"Home"; break;
+    case K_END: s = L"End"; break;
+    case K_PAGEUP: s = L"Page Up"; break;
+    case K_PAGEDOWN: s = L"Page Down"; break;
+    case K_NUMLOCK: s = L"Num Lock"; break;
+    case K_CAPSLOCK: s = L"Caps Lock"; break;
+    case K_SCROLLOCK: s = L"Scroll Lock"; break;
+    case K_RSHIFT: s = L"Right Shift"; break;
+    case K_LSHIFT: s = L"Left Shift"; break;
+    case K_RCTRL: s = L"Right Ctrl"; break;
+    case K_LCTRL: s = L"Left Ctrl"; break;
+    case K_RALT: s = L"Right Alt"; break;
+    case K_LALT: s = L"Left Alt"; break;
+    case K_LSUPER: s = L"Left Win"; break;
+    case K_RSUPER: s = L"Right Win"; break;
+    case K_MENU: s = L"Menu"; break;
+    case K_LESS: s = L"<"; break;
+    }
+    if (s) { wcsncpy(out, s, n - 1); out[n - 1] = 0; return; }
+    if (sym >= K_KP0 && sym <= K_KP0 + 9) { _snwprintf(out, n, L"Num %d", sym - K_KP0); return; }
+    if (sym >= K_F1 && sym <= K_F1 + 14) { _snwprintf(out, n, L"F%d", sym - K_F1 + 1); return; }
+    if (sym > 32 && sym < 127) {
+        _snwprintf(out, n, L"%lc", (wchar_t)(sym >= 'a' && sym <= 'z' ? sym - 32 : sym));
+        return;
+    }
+    _snwprintf(out, n, L"#%d", sym);
+}
+
+/* ======================================================== phone actions */
+
+#define ACT_SOFT1 -1001   /* resolved through the soft key type */
+#define ACT_SOFT2 -1002
+#define ACT_MENU  1000    /* runtime: open the runtime menu */
+#define ACT_FULL  1001    /* runtime: full screen */
+#define MAX_BIND  3
+
+typedef struct {
+    const char *id;
+    const wchar_t *label;
+    int code;
+    int defaults[MAX_BIND];
+} Action;
+
+static const Action Actions[] = {
+    { "up",     L"Up",                      -1,  { K_UP, 'w', 0 } },
+    { "down",   L"Down",                    -2,  { K_DOWN, 's', 0 } },
+    { "left",   L"Left",                    -3,  { K_LEFT, 'a', 0 } },
+    { "right",  L"Right",                   -4,  { K_RIGHT, 'd', 0 } },
+    { "fire",   L"Fire / OK",               -5,  { K_RETURN, K_SPACE, 0 } },
+    { "soft1",  L"Left soft key",           ACT_SOFT1, { K_F1, K_TAB, 'q' } },
+    { "soft2",  L"Right soft key",          ACT_SOFT2, { K_F1 + 1, K_BACKSPACE, 'e' } },
+    { "1",      L"1",                       '1', { '1', K_KP0 + 7, 0 } },
+    { "2",      L"2",                       '2', { '2', K_KP0 + 8, 0 } },
+    { "3",      L"3",                       '3', { '3', K_KP0 + 9, 0 } },
+    { "4",      L"4",                       '4', { '4', K_KP0 + 4, 0 } },
+    { "5",      L"5",                       '5', { '5', K_KP0 + 5, 0 } },
+    { "6",      L"6",                       '6', { '6', K_KP0 + 6, 0 } },
+    { "7",      L"7",                       '7', { '7', K_KP0 + 1, 0 } },
+    { "8",      L"8",                       '8', { '8', K_KP0 + 2, 0 } },
+    { "9",      L"9",                       '9', { '9', K_KP0 + 3, 0 } },
+    { "0",      L"0",                       '0', { '0', K_KP0, 0 } },
+    { "star",   L"*",                       '*', { K_KP_MULTIPLY, 'z', 0 } },
+    { "pound",  L"#",                       '#', { K_KP_PLUS, 'x', 0 } },
+    { "clear",  L"Clear (C)",               -8,  { K_DELETE, 0, 0 } },
+    { "send",   L"Call (green)",            -10, { K_HOME, 0, 0 } },
+    { "end",    L"Hang up (red)",           -11, { K_END, 0, 0 } },
+    { "gamea",  L"Game A",                  -13, { K_F1 + 8, 0, 0 } },
+    { "gameb",  L"Game B",                  -14, { K_F1 + 9, 0, 0 } },
+    { "gamec",  L"Game C",                  -15, { K_PAGEUP, 0, 0 } },
+    { "gamed",  L"Game D",                  -16, { K_PAGEDOWN, K_F1 + 11, 0 } },
+    { "menu",   L"[Runtime menu]",          ACT_MENU, { K_ESCAPE, 0, 0 } },
+    { "full",   L"[Full screen]",           ACT_FULL, { K_F1 + 10, 0, 0 } }
+};
+#define ACTION_COUNT ((int)(sizeof(Actions) / sizeof(Actions[0])))
+
+static const struct { const char *id; const wchar_t *label; int soft1, soft2; } Phones[] = {
+    { "standard",  L"Nokia / SE / Samsung (-6/-7)", -6, -7 },
+    { "motorola",  L"Motorola (-21/-22)", -21, -22 },
+    { "moto-old",  L"Motorola old (21/22)", 21, 22 },
+    { "siemens",   L"Siemens (-1/-4)", -1, -4 }
+};
+#define PHONE_COUNT ((int)(sizeof(Phones) / sizeof(Phones[0])))
+
+/* ============================================================= settings */
+
+typedef struct {
+    int scale;            /* 1..8 */
+    int fullscreen;
+    char mode[16];        /* auto fit integer crop fill center */
+    char filter[16];      /* sharp smooth pixel scale2x */
+    char lcd[32];         /* "" = auto, or WxH */
+    char fps[8];          /* off 20 25 30 50 60 */
+    int heap;             /* MB, 0 = default */
+    int jit, verify;
+    char vmargs[256];
+    int mute, volume;
+    char synth[16];
+    int log, console, log_keys, log_events, log_display, show_fps;
+    char phone[16];
+    int keys[ACTION_COUNT][MAX_BIND];
+    wchar_t games_dir[WBUF];   /* global only */
+} Settings;
+
+static void settings_default(Settings *s) {
+    int i, j;
+    memset(s, 0, sizeof(*s));
+    s->scale = 3;
+    strcpy(s->mode, "fit");
+    strcpy(s->filter, "sharp");
+    strcpy(s->fps, "30");
+    s->jit = 1;
+    s->volume = 100;
+    strcpy(s->synth, "hybrid");
+    s->log = 1;
+    strcpy(s->phone, "standard");
+    for (i = 0; i < ACTION_COUNT; i++)
+        for (j = 0; j < MAX_BIND; j++) s->keys[i][j] = Actions[i].defaults[j];
+    _snwprintf(s->games_dir, WBUF, L"%ls\\games", g_home);
+}
+
+static void copy_str(char *dst, size_t n, const char *v) {
+    strncpy(dst, v, n - 1);
+    dst[n - 1] = 0;
+}
+
+static void keys_parse(Settings *s, const char *v) {
+    /* "up=273,119;down=274;..." : listed actions are replaced */
+    while (*v) {
+        char id[32];
+        size_t n = 0;
+        int i, a = -1, k = 0;
+        while (*v == ' ' || *v == ';') v++;
+        while (*v && *v != '=' && *v != ';' && n < sizeof(id) - 1) id[n++] = *v++;
+        id[n] = 0;
+        if (*v != '=') { while (*v && *v != ';') v++; continue; }
+        v++;
+        for (i = 0; i < ACTION_COUNT; i++) if (strcmp(Actions[i].id, id) == 0) a = i;
+        if (a >= 0) for (i = 0; i < MAX_BIND; i++) s->keys[a][i] = 0;
+        while (*v && *v != ';') {
+            char *end;
+            long sym = strtol(v, &end, 10);
+            if (end == v) { v++; continue; }
+            v = end;
+            if (*v == ',') v++;
+            if (a >= 0 && sym > 0 && sym < K_LAST && k < MAX_BIND) s->keys[a][k++] = (int)sym;
+        }
+    }
+}
+
+static void settings_apply(Settings *s, const char *key, const char *v) {
+    if (!_stricmp(key, "SCALE")) { s->scale = atoi(v); if (s->scale < 1) s->scale = 1; if (s->scale > 8) s->scale = 8; }
+    else if (!_stricmp(key, "FULLSCREEN")) s->fullscreen = atoi(v) != 0;
+    else if (!_stricmp(key, "MODE")) copy_str(s->mode, sizeof(s->mode), v);
+    else if (!_stricmp(key, "FILTER")) copy_str(s->filter, sizeof(s->filter), v);
+    else if (!_stricmp(key, "LCD")) copy_str(s->lcd, sizeof(s->lcd), v);
+    else if (!_stricmp(key, "FPS")) copy_str(s->fps, sizeof(s->fps), v);
+    else if (!_stricmp(key, "HEAP_MB")) s->heap = atoi(v);
+    else if (!_stricmp(key, "JIT")) s->jit = atoi(v) != 0;
+    else if (!_stricmp(key, "VERIFY")) s->verify = atoi(v) != 0;
+    else if (!_stricmp(key, "VMARGS")) copy_str(s->vmargs, sizeof(s->vmargs), v);
+    else if (!_stricmp(key, "MUTE")) s->mute = atoi(v) != 0;
+    else if (!_stricmp(key, "VOLUME")) { s->volume = atoi(v); if (s->volume < 0) s->volume = 0; if (s->volume > 100) s->volume = 100; }
+    else if (!_stricmp(key, "SYNTH")) copy_str(s->synth, sizeof(s->synth), v);
+    else if (!_stricmp(key, "LOG")) s->log = atoi(v) != 0;
+    else if (!_stricmp(key, "CONSOLE")) s->console = atoi(v) != 0;
+    else if (!_stricmp(key, "LOG_KEYS")) s->log_keys = atoi(v) != 0;
+    else if (!_stricmp(key, "LOG_EVENTS")) s->log_events = atoi(v) != 0;
+    else if (!_stricmp(key, "LOG_DISPLAY")) s->log_display = atoi(v) != 0;
+    else if (!_stricmp(key, "SHOW_FPS")) s->show_fps = atoi(v) != 0;
+    else if (!_stricmp(key, "PHONE")) copy_str(s->phone, sizeof(s->phone), v);
+    else if (!_stricmp(key, "KEYS")) keys_parse(s, v);
+    else if (!_stricmp(key, "GAMES_DIR") && v[0]) {
+        wchar_t *w = widen_utf8(v);
+        wcsncpy(s->games_dir, w, WBUF - 1);
+        free(w);
+    }
+}
+
+static int settings_load_file(Settings *s, const wchar_t *path) {
+    unsigned char *d;
+    DWORD n;
+    char *p;
+    if (!read_file(path, &d, &n)) return 0;
+    p = (char *)d;
+    if (n >= 3 && (unsigned char)p[0] == 0xef && (unsigned char)p[1] == 0xbb) p += 3;
+    while (*p) {
+        char *e = strchr(p, '\n'), *eq, *k, *v, *t;
+        if (e) *e = 0;
+        k = p;
+        while (*k == ' ' || *k == '\t') k++;
+        eq = strchr(k, '=');
+        if (*k != '#' && *k != ';' && *k != '[' && eq) {
+            *eq = 0;
+            for (t = eq; t > k && (t[-1] == ' ' || t[-1] == '\t'); ) *--t = 0;
+            v = eq + 1;
+            while (*v == ' ' || *v == '\t') v++;
+            t = v + strlen(v);
+            while (t > v && (t[-1] == '\r' || t[-1] == ' ' || t[-1] == '\t')) *--t = 0;
+            if (*v == '"' && t > v + 1 && t[-1] == '"') { v++; t[-1] = 0; }
+            settings_apply(s, k, v);
+        }
+        if (!e) break;
+        p = e + 1;
+    }
+    free(d);
+    return 1;
+}
+
+/* environment variables of the same name win (old settings.ini keys) */
+static void settings_env(Settings *s) {
+    static const char *keys[] = { "SCALE", "FULLSCREEN", "MODE", "FILTER", "LCD", "FPS",
+        "HEAP_MB", "JIT", "VERIFY", "VMARGS", "MUTE", "VOLUME", "SYNTH", "CONSOLE", "PHONE" };
+    char v[512];
+    size_t i;
+    for (i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        DWORD n = GetEnvironmentVariableA(keys[i], v, sizeof(v));
+        if (n > 0 && n < sizeof(v)) settings_apply(s, keys[i], v);
+    }
+}
+
+/* effective settings of a game (jar may be NULL): defaults, settings.ini,
+ * data\games\<game>.ini */
+static void settings_for(Settings *s, const wchar_t *jar) {
+    settings_default(s);
+    settings_load_file(s, g_ini);
+    if (jar != NULL && jar[0]) {
+        wchar_t gi[WBUF];
+        game_ini_path(jar, gi);
+        settings_load_file(s, gi);
+    }
+}
+
+static void keys_format(const Settings *s, char *out, size_t size) {
+    size_t o = 0;
+    int i, j;
+    out[0] = 0;
+    for (i = 0; i < ACTION_COUNT && o + 64 < size; i++) {
+        o += (size_t)snprintf(out + o, size - o, "%s%s=", i ? ";" : "", Actions[i].id);
+        for (j = 0; j < MAX_BIND; j++) {
+            if (s->keys[i][j]) o += (size_t)snprintf(out + o, size - o, "%s%d",
+                                                     out[o - 1] == '=' ? "" : ",", s->keys[i][j]);
+        }
+    }
+}
+
+static int settings_save_file(const Settings *s, const wchar_t *path, int global) {
+    char buf[8192], keys[4096];
+    int n;
+    keys_format(s, keys, sizeof(keys));
+    n = snprintf(buf, sizeof(buf),
+        "# FunKey J2ME settings (written by FunKeyJ2ME.exe; edit with the launcher)\r\n"
+        "SCALE = %d\r\nFULLSCREEN = %d\r\nMODE = %s\r\nFILTER = %s\r\nLCD = %s\r\n"
+        "FPS = %s\r\nHEAP_MB = %d\r\nJIT = %d\r\nVERIFY = %d\r\nVMARGS = %s\r\n"
+        "MUTE = %d\r\nVOLUME = %d\r\nSYNTH = %s\r\n"
+        "LOG = %d\r\nCONSOLE = %d\r\nLOG_KEYS = %d\r\nLOG_EVENTS = %d\r\nLOG_DISPLAY = %d\r\n"
+        "SHOW_FPS = %d\r\nPHONE = %s\r\nKEYS = %s\r\n",
+        s->scale, s->fullscreen, s->mode, s->filter, s->lcd, s->fps, s->heap, s->jit,
+        s->verify, s->vmargs, s->mute, s->volume, s->synth, s->log, s->console,
+        s->log_keys, s->log_events, s->log_display, s->show_fps, s->phone, keys);
+    if (global && n > 0 && n < (int)sizeof(buf)) {
+        char *gd = utf8_of(s->games_dir);
+        n += snprintf(buf + n, sizeof(buf) - (size_t)n, "GAMES_DIR = %s\r\n", gd);
+        free(gd);
+    }
+    if (n <= 0 || n >= (int)sizeof(buf)) return 0;
+    {
+        wchar_t dir[WBUF];
+        dirname_w(path, dir);
+        mkdirs(dir);
+    }
+    return write_file(path, buf, (DWORD)n);
+}
+
+static int phone_index(const char *id) {
+    int i;
+    for (i = 0; i < PHONE_COUNT; i++) if (strcmp(Phones[i].id, id) == 0) return i;
+    return 0;
+}
+
+/* "sym=code;..." for PHONEME_PC_KEYS */
+static void pc_keys_env(const Settings *s, char *out, size_t size) {
+    size_t o = 0;
+    int i, j, p = phone_index(s->phone);
+    out[0] = 0;
+    for (i = 0; i < ACTION_COUNT; i++) {
+        int code = Actions[i].code;
+        if (code == ACT_SOFT1) code = Phones[p].soft1;
+        if (code == ACT_SOFT2) code = Phones[p].soft2;
+        for (j = 0; j < MAX_BIND; j++) {
+            if (s->keys[i][j] && o + 24 < size)
+                o += (size_t)snprintf(out + o, size - o, "%s%d=%d", o ? ";" : "", s->keys[i][j], code);
+        }
+    }
+}
+
+/* ================================================================= run */
+
+static wchar_t *cmd;
+static size_t cmd_len, cmd_cap;
+
+static void cmd_raw(const wchar_t *s) {
+    size_t n = wcslen(s);
+    if (cmd_len + n + 1 > cmd_cap) {
+        cmd_cap = (cmd_len + n + 1) * 2 + 1024;
+        cmd = realloc(cmd, cmd_cap * sizeof(wchar_t));
+        if (cmd == NULL) ExitProcess(1);
+    }
+    memcpy(cmd + cmd_len, s, (n + 1) * sizeof(wchar_t));
+    cmd_len += n;
+}
+
+static void cmd_arg_w(const wchar_t *a) {
+    const wchar_t *p;
+    int quote = *a == 0 || wcspbrk(a, L" \t\"") != NULL;
+    if (cmd_len) cmd_raw(L" ");
+    if (!quote) { cmd_raw(a); return; }
+    cmd_raw(L"\"");
+    for (p = a; ; p++) {
+        unsigned bs = 0;
+        while (*p == L'\\') { bs++; p++; }
+        if (*p == 0) {
+            while (bs--) cmd_raw(L"\\\\");
+            break;
+        }
+        if (*p == L'"') {
+            while (bs--) cmd_raw(L"\\\\");
+            cmd_raw(L"\\\"");
+        } else {
+            wchar_t one[2] = { *p, 0 };
+            while (bs--) cmd_raw(L"\\");
+            cmd_raw(one);
+        }
+    }
+    cmd_raw(L"\"");
+}
+
+static void cmd_arg(const char *a) {
+    wchar_t *w = widen_utf8(a);
+    cmd_arg_w(w);
+    free(w);
+}
+
+static void cmd_argf(const char *fmt, const char *v) {
+    size_t n = strlen(fmt) + strlen(v) + 1;
+    char *s = xmalloc(n);
+    snprintf(s, n, fmt, v);
+    cmd_arg(s);
+    free(s);
+}
+
+static void cmd_args_split(const char *s) {
+    char buf[1024];
+    while (*s) {
+        size_t n = 0;
+        while (*s == ' ' || *s == '\t') s++;
+        while (*s && *s != ' ' && *s != '\t' && n < sizeof(buf) - 1) buf[n++] = *s++;
+        buf[n] = 0;
+        if (n) cmd_arg(buf);
+    }
+}
+
+/* environment block for the game: ours plus the PHONEME_ variables */
+typedef struct { char *k, *v; } EnvVar;
+static EnvVar env_vars[64];
+static int env_count;
+
+static void env_set(const char *k, const char *v) {
+    int i;
+    for (i = 0; i < env_count; i++) {
+        if (strcmp(env_vars[i].k, k) == 0) {
+            free(env_vars[i].v);
+            env_vars[i].v = _strdup(v);
+            return;
+        }
+    }
+    if (env_count < 64) {
+        env_vars[env_count].k = _strdup(k);
+        env_vars[env_count].v = _strdup(v);
+        env_count++;
+    }
+}
+
+static void env_reset(void) {
+    int i;
+    for (i = 0; i < env_count; i++) { free(env_vars[i].k); free(env_vars[i].v); }
+    env_count = 0;
+}
+
+static wchar_t *env_block(void) {
+    wchar_t *cur = GetEnvironmentStringsW(), *p, *out;
+    size_t n = 0, o = 0;
+    int i;
+    for (p = cur; *p; p += wcslen(p) + 1) n += wcslen(p) + 1;
+    for (i = 0; i < env_count; i++) n += strlen(env_vars[i].k) + strlen(env_vars[i].v) * 2 + 4;
+    out = xmalloc((n + 2) * sizeof(wchar_t));
+    for (p = cur; *p; p += wcslen(p) + 1) {
+        int skip = 0;
+        for (i = 0; i < env_count; i++) {
+            size_t kl = strlen(env_vars[i].k);
+            if (wcslen(p) > kl && p[kl] == L'=') {
+                wchar_t kw[128];
+                size_t j;
+                for (j = 0; j < kl && j < 127; j++) kw[j] = (wchar_t)env_vars[i].k[j];
+                kw[j] = 0;
+                if (_wcsnicmp(p, kw, kl) == 0) skip = 1;
+            }
+        }
+        if (!skip) { wcscpy(out + o, p); o += wcslen(p) + 1; }
+    }
+    for (i = 0; i < env_count; i++) {
+        wchar_t *k = widen_utf8(env_vars[i].k), *v = widen_utf8(env_vars[i].v);
+        swprintf(out + o, n + 2 - o, L"%ls=%ls", k, v);
+        o += wcslen(out + o) + 1;
+        free(k);
+        free(v);
+    }
+    out[o] = 0;
+    FreeEnvironmentStringsW(cur);
+    return out;
+}
+
+typedef struct {
+    HANDLE process;
+    HWND notify;
+    wchar_t log[WBUF];
+    wchar_t sp_orig[WBUF], sp_copy[WBUF];
+    int show_errors;
+    DWORD code;
+} RunInfo;
+
+static void show_log_tail(HWND owner, const wchar_t *log, DWORD code) {
+    unsigned char *d;
+    DWORD n;
+    wchar_t msg[6000];
+    if (log[0] && read_file(log, &d, &n)) {
+        DWORD start = n > 1800 ? n - 1800 : 0;
+        wchar_t *w;
+        while (start > 0 && start < n && d[start - 1] != '\n') start++;
+        w = widen_utf8((char *)d + start);
+        _snwprintf(msg, 5999, L"The game stopped with an error (code %lu).\n\n"
+                   L"End of the log (%ls):\n\n%ls", (unsigned long)code, log, w);
+        free(w);
+        free(d);
+    } else {
+        _snwprintf(msg, 5999, L"The game stopped with an error (code %lu).", (unsigned long)code);
+    }
+    msg[5999] = 0;
+    MessageBoxW(owner, msg, APP_TITLE, MB_OK | MB_ICONWARNING);
+}
+
+static DWORD WINAPI run_waiter(LPVOID p) {
+    RunInfo *ri = (RunInfo *)p;
+    WaitForSingleObject(ri->process, INFINITE);
+    GetExitCodeProcess(ri->process, &ri->code);
+    CloseHandle(ri->process);
+    if (ri->sp_copy[0] && ri->sp_orig[0] && !CopyFileW(ri->sp_copy, ri->sp_orig, FALSE))
+        MessageBoxW(ri->notify, L"Could not write the scratchpad (save) back to the game folder.",
+                    APP_TITLE, MB_OK | MB_ICONWARNING);
+    /* 1 = MIDP_SHUTDOWN_STATUS: the window was closed or the game quit */
+    if (ri->code != 0 && ri->code != 1 && ri->show_errors) show_log_tail(ri->notify, ri->log, ri->code);
+    if (ri->notify) PostMessageW(ri->notify, WM_APP_GAME_ENDED, 0, 0);
+    free(ri);
+    return 0;
+}
+
+/* starts a game; wait = 1: returns when it ends (drag & drop mode) */
+static int run_game(HWND owner, const wchar_t *path, int wait) {
+    wchar_t jar[WBUF], jam[WBUF], dir[WBUF], base[WBUF], tmp[WBUF];
+    wchar_t rundir[WBUF], rmsdir[WBUF], logpath[WBUF], *dot, *envb;
+    char id[260], s[4096], *jar_a = NULL, *r;
+    Settings st;
     Zip zip;
-    int doja = 0, k;
-    wchar_t sp_orig[WBUF] = L"", sp_copy[WBUF] = L"";
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     SECURITY_ATTRIBUTES sa;
     HANDLE logh = INVALID_HANDLE_VALUE;
-    DWORD code = 0, started;
-    int console;
+    RunInfo *ri;
+    char title[600] = "";
 
-    GetModuleFileNameW(NULL, exe, WBUF);
-    dirname_w(exe, home);
-    _snwprintf(ini_path, WBUF, L"%ls\\settings.ini", home);
-    _snwprintf(tmp, WBUF, L"%ls\\bin\\runMidlet.exe", home);
-    if (!file_exists(tmp)) fail(L"bin\\runMidlet.exe is missing next to %ls.", exe);
-    home_a = ascii_alias(home);
-    if (home_a == NULL)
-        fail(L"The runtime folder\n%ls\nhas non-Latin characters and no short (8.3) name.\n"
-             L"Move it to a folder like C:\\j2me.", home);
-
-    /* data: next to the exe when writable (portable), else %LOCALAPPDATA% */
-    _snwprintf(data, WBUF, L"%ls\\data", home);
-    mkdirs(data);
-    _snwprintf(tmp, WBUF, L"%ls\\.write-test", data);
-    if (!write_file(tmp, "", 0)) {
-        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", tmp, WBUF);
-        if (n == 0 || n >= WBUF) fail(L"Cannot write to %ls", data);
-        _snwprintf(data, WBUF, L"%ls\\funkey-j2me", tmp);
-        mkdirs(data);
-    } else {
-        DeleteFileW(tmp);
-    }
-    data_a = ascii_alias(data);
-    if (data_a == NULL)
-        fail(L"The data folder\n%ls\nhas non-Latin characters and no short (8.3) name.\n"
-             L"Move the runtime to a folder like C:\\j2me.", data);
-
-    /* the game */
-    if (argc >= 2) {
-        wcsncpy(jar, argv[1], WBUF - 1);
-        jar[WBUF - 1] = 0;
-    } else if (!pick_file(jar)) {
-        return 0;
-    }
-    if (!GetFullPathNameW(jar, WBUF, tmp, NULL)) fail(L"Bad path: %ls", jar);
-    wcscpy(jar, tmp);
+    if (!GetFullPathNameW(path, WBUF, jar, NULL)) { fail(L"Bad path: %ls", path); return 0; }
     jam[0] = 0;
     dot = wcsrchr(jar, L'.');
     if (dot && _wcsicmp(dot, L".jam") == 0) {
         wcscpy(jam, jar);
-        if (!jar_for_jam(jam, jar)) fail(L"No jar found for %ls", jam);
+        if (!jar_for_jam(jam, jar)) { fail(L"No jar found for %ls", jam); return 0; }
     }
-    if (!file_exists(jar)) fail(L"No such file: %ls", jar);
-    if (!zip_open(&zip, jar)) fail(L"%ls is not a jar (zip) file.", jar);
+    if (!file_exists(jar)) { fail(L"No such file: %ls", jar); return 0; }
+    if (!zip_open(&zip, jar)) { fail(L"%ls is not a jar (zip) file.", jar); return 0; }
+    if (jam[0] == 0) find_jam(jar, &zip, jam);
+    settings_for(&st, jar);
+    settings_env(&st);
 
     dirname_w(jar, dir);
     wcscpy(base, jar);
     dot = wcsrchr(base, L'.');
     if (dot && dot > wcsrchr(base, L'\\')) *dot = 0;
-    wcsncpy(name_w, basename_w(base), 259);
-    name_w[259] = 0;
-    if (is_ascii_w(name_w)) {
-        char *n = narrow(name_w);
-        strcpy(name, n);
-        free(n);
-    } else {
-        DWORD h = 5381;
-        size_t i;
-        for (i = 0; jar[i]; i++) h = h * 33 + jar[i];
-        for (i = 0; name_w[i] && i < 200; i++) {
-            wchar_t c = name_w[i];
-            name[i] = (c < 128 && (iswalnum(c) || c == L'.' || c == L'-')) ? (char)c : '_';
-        }
-        name[i] = 0;
-        snprintf(name + strlen(name), 40, "_%lu", (unsigned long)h);
-    }
+    game_id(jar, id, sizeof(id));
     {
-        wchar_t *nw = widen_utf8(name);
-        _snwprintf(rundir, WBUF, L"%ls\\run\\%ls", data, nw);
-        _snwprintf(rmsdir, WBUF, L"%ls\\rms\\%ls", data, nw);
-        _snwprintf(logdir, WBUF, L"%ls\\logs", data);
-        _snwprintf(logpath, WBUF, L"%ls\\%ls.log", logdir, nw);
+        wchar_t *nw = widen_utf8(id);
+        _snwprintf(rundir, WBUF, L"%ls\\run\\%ls", g_data, nw);
+        _snwprintf(rmsdir, WBUF, L"%ls\\rms\\%ls", g_data, nw);
         free(nw);
     }
+    game_log_path(jar, logpath);
     mkdirs(rundir);
     mkdirs(rmsdir);
-    mkdirs(logdir);
+    _snwprintf(tmp, WBUF, L"%ls\\logs", g_data);
+    mkdirs(tmp);
 
-    /* DoJa? JAM setting, game.jam, or the only .jam holding the AppClass */
-    setting("JAM", "", s, sizeof(s));
-    if (jam[0] == 0 && s[0]) {
-        wchar_t *w = widen_utf8(s);
-        GetFullPathNameW(w, WBUF, jam, NULL);
-        free(w);
-        if (!file_exists(jam)) fail(L"No such .jam: %ls", jam);
-    }
-    if (jam[0] == 0) {
-        _snwprintf(tmp, WBUF, L"%ls.jam", base);
-        if (file_exists(tmp)) wcscpy(jam, tmp);
-        else {
-            _snwprintf(tmp, WBUF, L"%ls.JAM", base);
-            if (file_exists(tmp)) wcscpy(jam, tmp);
-        }
-    }
-    if (jam[0] == 0) {
-        WIN32_FIND_DATAW fd;
-        HANDLE h;
-        int count = 0;
-        _snwprintf(tmp, WBUF, L"%ls\\*.jam", dir);
-        h = FindFirstFileW(tmp, &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do {
-                _snwprintf(tmp, WBUF, L"%ls\\%ls", dir, fd.cFileName);
-                count++;
-            } while (FindNextFileW(h, &fd));
-            FindClose(h);
-        }
-        if (count == 1) {
-            unsigned char *d;
-            DWORD n;
-            if (read_file(tmp, &d, &n)) {
-                char *t = normalize_descriptor(d), cls[512], path[600];
-                if (desc_value(t, "AppClass", '=', cls, sizeof(cls)) && cls[0]) {
-                    char *c;
-                    for (c = cls; *c; c++) if (*c == '.') *c = '/';
-                    snprintf(path, sizeof(path), "%s.class", cls);
-                    if (zip_has(&zip, path)) wcscpy(jam, tmp);
-                }
-                free(t);
-                free(d);
-            }
-        }
-    }
+    env_reset();
+    env_set("MIDP_HOME", g_home_a);
+    r = ascii_alias(rmsdir);
+    if (r == NULL) { fail(L"Bad data folder %ls", rmsdir); zip_close(&zip); return 0; }
+    env_set("PHONEME_RMS_HOME", r);
+    free(r);
+    snprintf(s, sizeof(s), "%d", st.scale); env_set("PHONEME_WINDOW_SCALE", s);
+    env_set("PHONEME_DESKTOP", "1");
+    env_set("PHONEME_FULLSCREEN", st.fullscreen ? "1" : "0");
+    env_set("PHONEME_SCALE_MODE", st.mode);
+    env_set("PHONEME_SCALE_FILTER", st.filter);
+    env_set("PHONEME_FPS_LIMIT", st.fps);
+    if (!st.mute) env_set("PHONEME_ENABLE_AUDIO", "1");
+    snprintf(s, sizeof(s), "%d", st.volume); env_set("PHONEME_SOUND_VOLUME", s);
+    env_set("PHONEME_SYNTH", st.synth);
+    if (st.log_keys) env_set("PHONEME_KEY_DEBUG", "1");
+    if (st.log_events) env_set("PHONEME_EVENT_DEBUG", "1");
+    if (st.log_display) env_set("PHONEME_DISPLAY_DEBUG", "1");
+    if (st.show_fps) env_set("PHONEME_SHOW_FPS", "1");
+    pc_keys_env(&st, s, sizeof(s));
+    env_set("PHONEME_PC_KEYS", s);
+    if (st.lcd[0]) { env_set("PHONEME_LCD_SIZE", st.lcd); env_set("PHONEME_SOURCE_SIZE", st.lcd); }
 
-    /* common environment */
-    set_env("MIDP_HOME", home_a);
-    {
-        char *r = ascii_alias(rmsdir);
-        if (r == NULL) fail(L"Bad data folder %ls", rmsdir);
-        set_env("PHONEME_RMS_HOME", r);
-    }
-    setting("SCALE", "3", s, sizeof(s)); set_env("PHONEME_WINDOW_SCALE", s);
-    setting("MODE", "fit", s, sizeof(s)); set_env("PHONEME_SCALE_MODE", s);
-    setting("FILTER", "", s, sizeof(s)); if (s[0]) set_env("PHONEME_SCALE_FILTER", s);
-    setting("FPS", "", s, sizeof(s)); if (s[0]) set_env("PHONEME_FPS_LIMIT", s);
-    setting("MUTE", "", s, sizeof(s));
-    if (s[0] == 0 || s[0] == '0') set_env("PHONEME_ENABLE_AUDIO", "1");
-    {
-        char lcd[64];
-        setting("LCD", "", lcd, sizeof(lcd));
-        if (lcd[0]) { set_env("PHONEME_LCD_SIZE", lcd); set_env("PHONEME_SOURCE_SIZE", lcd); }
-    }
-
-    /* runtime command line */
-    _snwprintf(tmp, WBUF, L"%ls\\bin\\runMidlet.exe", home);
+    /* command line */
+    cmd_len = 0;
+    _snwprintf(tmp, WBUF, L"%ls\\bin\\runMidlet.exe", g_home);
     cmd_arg_w(tmp);
-    setting("VERIFY", "0", s, sizeof(s));
-    if (s[0] != '1') cmd_arg("-UseVerifier");
-    setting("VMARGS", "", s, sizeof(s));
-    cmd_args_split(s);
+    if (!st.verify) cmd_arg("-UseVerifier");
+    if (!st.jit) cmd_arg("-UseCompiler");
+    cmd_args_split(st.vmargs);
+
+    ri = (RunInfo *)calloc(1, sizeof(RunInfo));
+    if (ri == NULL) { zip_close(&zip); return 0; }
 
     if (jam[0]) {
         unsigned char *jd;
         DWORD jn, i;
         char *jt, area[64], param[1024], ver[256], spsize[64], *hex, *sp_a, *pics_a = NULL;
-        char lcd[64];
-        wchar_t pics[WBUF];
+        char app_class[512], name[512];
+        wchar_t pics[WBUF], sp_orig[WBUF];
 
-        doja = 1;
-        if (!read_file(jam, &jd, &jn)) fail(L"Cannot read %ls", jam);
+        if (!read_file(jam, &jd, &jn)) { fail(L"Cannot read %ls", jam); zip_close(&zip); free(ri); return 0; }
         jt = normalize_descriptor(jd);
         desc_value(jt, "AppClass", '=', app_class, sizeof(app_class));
-        if (!app_class[0]) fail(L"No AppClass in %ls", jam);
-        setting("HEAP_MB", "32", s, sizeof(s)); set_env("PHONEME_HEAP_MB", s);
+        if (!app_class[0]) { fail(L"No AppClass in %ls", jam); free(jt); free(jd); zip_close(&zip); free(ri); return 0; }
+        if (desc_value(jt, "AppName", '=', name, sizeof(name)) && name[0]) {
+            wchar_t *w = widen_cp(name, 932);    /* .jam files are Shift_JIS */
+            char *u = utf8_of(w);
+            copy_str(title, sizeof(title), u);
+            free(u);
+            free(w);
+        }
+        snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 32); env_set("PHONEME_HEAP_MB", s);
         desc_value(jt, "DrawArea", '=', area, sizeof(area));
         if (!(area[0] >= '0' && area[0] <= '9' && strchr(area, 'x'))) strcpy(area, "240x240");
-        setting("LCD", "", lcd, sizeof(lcd));
-        if (!lcd[0]) { set_env("PHONEME_LCD_SIZE", area); set_env("PHONEME_SOURCE_SIZE", area); }
+        if (!st.lcd[0]) { env_set("PHONEME_LCD_SIZE", area); env_set("PHONEME_SOURCE_SIZE", area); }
         hex = xmalloc((size_t)jn * 2 + 1);
         for (i = 0; i < jn; i++) sprintf(hex + i * 2, "%02x", jd[i]);
         hex[jn * 2] = 0;
 
-        /* scratchpad: SP setting, else game.sp / game.SP; created empty */
-        setting("SP", "", s, sizeof(s));
-        if (s[0]) {
-            wchar_t *w = widen_utf8(s);
-            GetFullPathNameW(w, WBUF, sp_orig, NULL);
-            free(w);
-        } else {
-            _snwprintf(sp_orig, WBUF, L"%ls.sp", base);
-            _snwprintf(tmp, WBUF, L"%ls.SP", base);
-            if (!file_exists(sp_orig) && file_exists(tmp)) wcscpy(sp_orig, tmp);
-        }
+        /* scratchpad: game.sp / game.SP; created empty */
+        _snwprintf(sp_orig, WBUF, L"%ls.sp", base);
+        _snwprintf(tmp, WBUF, L"%ls.SP", base);
+        if (!file_exists(sp_orig) && file_exists(tmp)) wcscpy(sp_orig, tmp);
         if (!file_exists(sp_orig)) write_file(sp_orig, "", 0);
         sp_a = file_exists(sp_orig) ? ascii_alias(sp_orig) : NULL;
-        if (sp_a != NULL && !is_ascii_w(basename_w(sp_orig))) {
-            /* temp files are named after the scratchpad: keep a plain name */
-            free(sp_a);
-            sp_a = NULL;
-        }
+        if (sp_a != NULL && !is_ascii_w(basename_w(sp_orig))) { free(sp_a); sp_a = NULL; }
         if (sp_a == NULL) {
-            char *nw = name;
-            wchar_t *w = widen_utf8(nw);
-            _snwprintf(sp_copy, WBUF, L"%ls\\%ls.sp", rundir, w);
+            wchar_t *w = widen_utf8(id);
+            _snwprintf(ri->sp_copy, WBUF, L"%ls\\%ls.sp", rundir, w);
             free(w);
-            if (file_exists(sp_orig)) CopyFileW(sp_orig, sp_copy, FALSE);
-            else write_file(sp_copy, "", 0);
-            sp_a = ascii_alias(sp_copy);
-            if (sp_a == NULL) fail(L"Bad data folder %ls", rundir);
+            if (file_exists(sp_orig)) CopyFileW(sp_orig, ri->sp_copy, FALSE);
+            else write_file(ri->sp_copy, "", 0);
+            wcscpy(ri->sp_orig, sp_orig);
+            sp_a = ascii_alias(ri->sp_copy);
+            if (sp_a == NULL) sp_a = _strdup("");
         }
 
         pics[0] = 0;
@@ -736,15 +1156,18 @@ int wmain(int argc, wchar_t **argv) {
         jar_a = ascii_alias(jar);
         if (jar_a == NULL) {
             _snwprintf(tmp, WBUF, L"%ls\\game.jar", rundir);
-            if (!link_or_copy(jar, tmp)) fail(L"Cannot copy %ls", jar);
+            if (!link_or_copy(jar, tmp)) {
+                fail(L"Cannot copy %ls\n(is the game still running?)", jar);
+                free(hex); free(sp_a); free(pics_a); free(jt); free(jd); zip_close(&zip); free(ri);
+                return 0;
+            }
             jar_a = ascii_alias(tmp);
         }
 
         desc_value(jt, "AppParam", '=', param, sizeof(param));
         desc_value(jt, "AppVer", '=', ver, sizeof(ver));
         desc_value(jt, "SPsize", '=', spsize, sizeof(spsize));
-        /* non-ASCII (SJIS) values travel in doja.jam.hex only */
-        if (!is_ascii_a(param)) param[0] = 0;
+        if (!is_ascii_a(param)) param[0] = 0;   /* SJIS values travel in doja.jam.hex */
         if (!is_ascii_a(ver)) ver[0] = 0;
 
         cmd_arg("=MaxMethodToCompile3000");
@@ -757,27 +1180,22 @@ int wmain(int argc, wchar_t **argv) {
         cmd_argf("-Ddoja.jam.hex=%s", hex);
         cmd_argf("-Ddoja.pictures=%s", pics_a ? pics_a : "");
         cmd_arg("-classpathext");
-        {
-            size_t n = strlen(jar_a) + strlen(home_a) + 64;
-            char *cp = xmalloc(n);
-            snprintf(cp, n, "%s;%s\\lib\\doja-support.jar", jar_a, home_a);
-            cmd_arg(cp);
-            free(cp);
-        }
+        snprintf(s, sizeof(s), "%s;%s\\lib\\doja-support.jar", jar_a, g_home_a);
+        cmd_arg(s);
         cmd_arg("internal");
         cmd_arg("com.funkey.doja.DoJaMIDlet");
         free(hex);
+        free(sp_a);
+        free(pics_a);
         free(jt);
         free(jd);
     } else {
-        /* MIDP: the game's .jad when it has MIDlet-1 (getAppProperty reads
-         * the .jad next to the jar), else one made from the manifest */
         unsigned char *d = NULL, *mf;
         DWORD n;
-        char *desc = NULL, main_class[512] = "";
+        char *desc = NULL, main_class[512] = "", name[512];
         int own_jad = 0;
 
-        setting("HEAP_MB", "16", s, sizeof(s)); set_env("PHONEME_HEAP_MB", s);
+        snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 16); env_set("PHONEME_HEAP_MB", s);
         _snwprintf(tmp, WBUF, L"%ls.jad", base);
         if (read_file(tmp, &d, &n)) {
             desc = normalize_descriptor(d);
@@ -787,7 +1205,7 @@ int wmain(int argc, wchar_t **argv) {
         }
         mf = zip_read(&zip, "META-INF/MANIFEST.MF", 1, &n);
         if (!own_jad) {
-            if (mf == NULL) fail(L"%ls has no manifest.", jar);
+            if (mf == NULL) { fail(L"%ls has no manifest.", jar); zip_close(&zip); free(ri); return 0; }
             desc = normalize_descriptor(mf);
             midlet_class(desc, main_class, sizeof(main_class));
         } else if (!main_class[0] && mf) {
@@ -795,22 +1213,24 @@ int wmain(int argc, wchar_t **argv) {
             midlet_class(m, main_class, sizeof(main_class));
             free(m);
         }
-        if (!main_class[0]) fail(L"No MIDlet-1 entry in %ls", jar);
+        if (!main_class[0]) { fail(L"No MIDlet-1 entry in %ls", jar); zip_close(&zip); free(ri); return 0; }
+        if (desc_value(desc, "MIDlet-Name", ':', name, sizeof(name)) && name[0])
+            copy_str(title, sizeof(title), name);
 
         jar_a = own_jad ? ascii_alias(jar) : NULL;
         if (jar_a != NULL) {
-            /* the .jad must also be reachable by the same (short) base name */
+            /* the .jad must be reachable by the same (short) base name */
             char jad_check[WBUF];
             snprintf(jad_check, sizeof(jad_check), "%s", jar_a);
             if (strlen(jad_check) > 4) strcpy(jad_check + strlen(jad_check) - 4, ".jad");
-            if (GetFileAttributesA(jad_check) == INVALID_FILE_ATTRIBUTES) {
-                free(jar_a);
-                jar_a = NULL;
-            }
+            if (GetFileAttributesA(jad_check) == INVALID_FILE_ATTRIBUTES) { free(jar_a); jar_a = NULL; }
         }
         if (jar_a == NULL) {
             _snwprintf(tmp, WBUF, L"%ls\\game.jar", rundir);
-            if (!link_or_copy(jar, tmp)) fail(L"Cannot copy %ls", jar);
+            if (!link_or_copy(jar, tmp)) {
+                fail(L"Cannot copy %ls\n(is the game still running?)", jar);
+                free(desc); if (mf) free(mf); zip_close(&zip); free(ri); return 0;
+            }
             jar_a = ascii_alias(tmp);
             _snwprintf(tmp, WBUF, L"%ls\\game.jad", rundir);
             if (own_jad) {
@@ -828,52 +1248,859 @@ int wmain(int argc, wchar_t **argv) {
         cmd_arg("internal");
         cmd_arg(main_class);
     }
+    zip_close(&zip);
+    free(jar_a);
+    if (!title[0]) {
+        char *u = utf8_of(basename_w(base));
+        copy_str(title, sizeof(title), u);
+        free(u);
+    }
+    env_set("PHONEME_WINDOW_TITLE", title);
 
-    /* start: log to data\logs\<game>.log, no console unless CONSOLE=1 */
-    setting("CONSOLE", "0", s, sizeof(s));
-    console = s[0] == '1';
+    /* start: log file / console / nothing */
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     memset(&pi, 0, sizeof(pi));
-    if (!console) {
-        memset(&sa, 0, sizeof(sa));
-        sa.nLength = sizeof(sa);
-        sa.bInheritHandle = TRUE;
-        logh = CreateFileW(logpath, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
-                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    if (!st.console) {
+        logh = CreateFileW(st.log ? logpath : L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           &sa, st.log ? CREATE_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (logh != INVALID_HANDLE_VALUE) {
             si.dwFlags = STARTF_USESTDHANDLES;
-            si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+            si.hStdInput = NULL;
             si.hStdOutput = logh;
             si.hStdError = logh;
         }
     }
+    envb = env_block();
     {
         wchar_t bindir[WBUF];
-        _snwprintf(bindir, WBUF, L"%ls\\bin", home);
+        _snwprintf(bindir, WBUF, L"%ls\\bin", g_home);
         if (!CreateProcessW(NULL, cmd, NULL, NULL, TRUE,
-                            console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW,
-                            NULL, bindir, &si, &pi))
+                            (st.console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) | CREATE_UNICODE_ENVIRONMENT,
+                            envb, bindir, &si, &pi)) {
             fail(L"Cannot start bin\\runMidlet.exe (error %lu).", (unsigned long)GetLastError());
+            free(envb);
+            if (logh != INVALID_HANDLE_VALUE) CloseHandle(logh);
+            free(ri);
+            return 0;
+        }
     }
-    started = GetTickCount();
+    free(envb);
     if (logh != INVALID_HANDLE_VALUE) CloseHandle(logh);
     CloseHandle(pi.hThread);
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    GetExitCodeProcess(pi.hProcess, &code);
-    CloseHandle(pi.hProcess);
 
-    /* scratchpad copy back */
-    if (sp_copy[0] && sp_orig[0]) {
-        if (!CopyFileW(sp_copy, sp_orig, FALSE))
-            MessageBoxW(NULL, L"Could not write the scratchpad (save) back to the game folder.",
-                        APP_TITLE, MB_OK | MB_ICONWARNING);
+    ri->process = pi.hProcess;
+    ri->notify = owner;
+    ri->show_errors = !st.console;
+    if (st.log && !st.console) wcscpy(ri->log, logpath);
+    if (wait) {
+        run_waiter(ri);
+    } else {
+        HANDLE th = CreateThread(NULL, 0, run_waiter, ri, 0, NULL);
+        if (th) CloseHandle(th);
     }
-    k = (int)code;
-    /* 1 = MIDP_SHUTDOWN_STATUS: the window was closed or the game quit;
-     * Java errors in a running game are shown by the runtime itself */
-    if (code != 0 && code != 1 && !console) show_log_tail(logpath, code);
-    (void)started;
-    (void)doja;
-    return k;
+    return 1;
+}
+
+/* =================================================================== GUI */
+
+static HWND g_main, g_tab, g_pages[4];
+static HWND g_games, g_keys;
+static HINSTANCE g_inst;
+static Settings g_set;            /* what the pages show */
+static int g_scope_game;          /* editing the selected game's own settings */
+static int g_loading;             /* filling controls: ignore notifications */
+static wchar_t g_sel_jar[WBUF];   /* selected game */
+
+typedef struct { wchar_t path[WBUF]; } GameItem;
+
+static const struct { const char *id; const wchar_t *label; } Modes[] = {
+    { "fit", L"Fit (keep aspect)" }, { "integer", L"Integer scale" },
+    { "auto", L"Auto" }, { "crop", L"Fill, crop edges" },
+    { "fill", L"Stretch" }, { "center", L"Center, no scaling" }
+};
+static const struct { const char *id; const wchar_t *label; } Filters[] = {
+    { "sharp", L"Sharp (clean pixels)" }, { "scale2x", L"Scale2x (smooth pixel art)" },
+    { "smooth", L"Smooth (bilinear)" }, { "pixel", L"Pixel (nearest)" }
+};
+static const struct { const char *id; const wchar_t *label; } Fpss[] = {
+    { "30", L"30 FPS" }, { "60", L"60 FPS" }, { "50", L"50 FPS" }, { "25", L"25 FPS" },
+    { "20", L"20 FPS" }, { "off", L"No limit" }
+};
+static const struct { const char *id; const wchar_t *label; } Synths[] = {
+    { "hybrid", L"Hybrid" }, { "wavetable", L"Wavetable" }, { "fm", L"FM" }
+};
+static const wchar_t *Lcds[] = {
+    L"Auto", L"128x128", L"128x160", L"176x208", L"176x220", L"208x208", L"240x240",
+    L"240x320", L"320x240", L"240x400", L"352x416", L"360x640", L"480x800", NULL
+};
+static const int Heaps[] = { 0, 8, 16, 24, 32, 48, 64 };
+
+#define N(a) ((int)(sizeof(a) / sizeof((a)[0])))
+
+static int combo_add(HWND d, int id, const wchar_t *t) {
+    return (int)SendDlgItemMessageW(d, id, CB_ADDSTRING, 0, (LPARAM)t);
+}
+
+static void combo_sel(HWND d, int id, int i) { SendDlgItemMessageW(d, id, CB_SETCURSEL, (WPARAM)i, 0); }
+static int combo_get(HWND d, int id) { return (int)SendDlgItemMessageW(d, id, CB_GETCURSEL, 0, 0); }
+
+static void check(HWND d, int id, int on) { CheckDlgButton(d, id, on ? BST_CHECKED : BST_UNCHECKED); }
+static int checked(HWND d, int id) { return IsDlgButtonChecked(d, id) == BST_CHECKED; }
+
+static void keys_refresh(void) {
+    int i, j, sel = ListView_GetNextItem(g_keys, -1, LVNI_SELECTED);
+    int p = phone_index(g_set.phone);
+    ListView_DeleteAllItems(g_keys);
+    for (i = 0; i < ACTION_COUNT; i++) {
+        LVITEMW it;
+        wchar_t keys[256] = L"", nm[64], label[96];
+        for (j = 0; j < MAX_BIND; j++) {
+            if (!g_set.keys[i][j]) continue;
+            sym_name(g_set.keys[i][j], nm, 64);
+            if (keys[0]) wcscat(keys, L",  ");
+            wcscat(keys, nm);
+        }
+        if (Actions[i].code == ACT_SOFT1 || Actions[i].code == ACT_SOFT2)
+            _snwprintf(label, 96, L"%ls  (%d)", Actions[i].label,
+                       Actions[i].code == ACT_SOFT1 ? Phones[p].soft1 : Phones[p].soft2);
+        else
+            wcscpy(label, Actions[i].label);
+        memset(&it, 0, sizeof(it));
+        it.mask = LVIF_TEXT;
+        it.iItem = i;
+        it.pszText = label;
+        ListView_InsertItem(g_keys, &it);
+        ListView_SetItemText(g_keys, i, 1, keys);
+    }
+    if (sel >= 0) {
+        ListView_SetItemState(g_keys, sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_EnsureVisible(g_keys, sel, FALSE);
+    }
+}
+
+static void pages_load(void) {
+    HWND d = g_pages[1], c = g_pages[2], so = g_pages[3];
+    int i;
+    wchar_t w[64];
+    g_loading = 1;
+    combo_sel(d, IDC_SCALE, g_set.scale - 1);
+    check(d, IDC_FULLSCREEN, g_set.fullscreen);
+    for (i = 0; i < N(Modes); i++) if (!strcmp(Modes[i].id, g_set.mode)) combo_sel(d, IDC_MODE, i);
+    for (i = 0; i < N(Filters); i++) if (!strcmp(Filters[i].id, g_set.filter)) combo_sel(d, IDC_FILTER, i);
+    if (g_set.lcd[0]) {
+        wchar_t *lw = widen_utf8(g_set.lcd);
+        SetDlgItemTextW(d, IDC_LCD, lw);
+        free(lw);
+    } else {
+        combo_sel(d, IDC_LCD, 0);
+    }
+    for (i = 0; i < N(Fpss); i++) if (!strcmp(Fpss[i].id, g_set.fps)) combo_sel(d, IDC_FPS, i);
+    combo_sel(d, IDC_HEAP, 0);
+    for (i = 0; i < N(Heaps); i++) if (Heaps[i] == g_set.heap) combo_sel(d, IDC_HEAP, i);
+    check(d, IDC_JIT, g_set.jit);
+    check(d, IDC_VERIFY, g_set.verify);
+    {
+        wchar_t *vw = widen_utf8(g_set.vmargs);
+        SetDlgItemTextW(d, IDC_VMARGS, vw);
+        free(vw);
+    }
+    combo_sel(c, IDC_PHONE, phone_index(g_set.phone));
+    keys_refresh();
+    check(so, IDC_MUTE, g_set.mute);
+    SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETPOS, TRUE, g_set.volume);
+    _snwprintf(w, 64, L"%d%%", g_set.volume);
+    SetDlgItemTextW(so, IDC_VOLTEXT, w);
+    for (i = 0; i < N(Synths); i++) if (!strcmp(Synths[i].id, g_set.synth)) combo_sel(so, IDC_SYNTH, i);
+    check(so, IDC_LOG, g_set.log);
+    check(so, IDC_CONSOLE, g_set.console);
+    check(so, IDC_LOGKEYS, g_set.log_keys);
+    check(so, IDC_LOGEVENTS, g_set.log_events);
+    check(so, IDC_LOGDISPLAY, g_set.log_display);
+    check(so, IDC_SHOWFPS, g_set.show_fps);
+    g_loading = 0;
+}
+
+static void scope_text(void) {
+    wchar_t t[WBUF];
+    if (g_scope_game && g_sel_jar[0])
+        _snwprintf(t, WBUF, L"Editing: settings of %ls only", basename_w(g_sel_jar));
+    else
+        wcscpy(t, L"Editing: settings for all games");
+    SetDlgItemTextW(g_main, IDC_SCOPE, t);
+}
+
+static void save_scope(void) {
+    if (g_scope_game && g_sel_jar[0]) {
+        wchar_t gi[WBUF];
+        game_ini_path(g_sel_jar, gi);
+        settings_save_file(&g_set, gi, 0);
+    } else {
+        settings_save_file(&g_set, g_ini, 1);
+    }
+}
+
+/* the selection or the scope changed: show the right settings */
+static void scope_update(void) {
+    wchar_t gi[WBUF];
+    int own = 0;
+    if (g_sel_jar[0]) {
+        game_ini_path(g_sel_jar, gi);
+        own = file_exists(gi);
+    }
+    g_scope_game = own;
+    EnableWindow(GetDlgItem(g_main, IDC_OWN), g_sel_jar[0] != 0);
+    check(g_main, IDC_OWN, own);
+    if (own) settings_for(&g_set, g_sel_jar);
+    else {
+        settings_for(&g_set, NULL);
+    }
+    pages_load();
+    scope_text();
+}
+
+static void pages_read(void) {
+    HWND d = g_pages[1], c = g_pages[2], so = g_pages[3];
+    int i;
+    wchar_t w[256];
+    if (g_loading) return;
+    g_set.scale = combo_get(d, IDC_SCALE) + 1;
+    if (g_set.scale < 1) g_set.scale = 3;
+    g_set.fullscreen = checked(d, IDC_FULLSCREEN);
+    i = combo_get(d, IDC_MODE); if (i >= 0) copy_str(g_set.mode, sizeof(g_set.mode), Modes[i].id);
+    i = combo_get(d, IDC_FILTER); if (i >= 0) copy_str(g_set.filter, sizeof(g_set.filter), Filters[i].id);
+    i = combo_get(d, IDC_LCD);
+    if (i >= 0) {
+        SendDlgItemMessageW(d, IDC_LCD, CB_GETLBTEXT, (WPARAM)i, (LPARAM)w);
+    } else {
+        GetDlgItemTextW(d, IDC_LCD, w, 256);
+    }
+    {
+        int a, b;
+        g_set.lcd[0] = 0;
+        if (swscanf(w, L"%dx%d", &a, &b) == 2 && a >= 64 && b >= 64 && a <= 1024 && b <= 1024)
+            snprintf(g_set.lcd, sizeof(g_set.lcd), "%dx%d", a, b);
+    }
+    i = combo_get(d, IDC_FPS); if (i >= 0) copy_str(g_set.fps, sizeof(g_set.fps), Fpss[i].id);
+    i = combo_get(d, IDC_HEAP); if (i >= 0) g_set.heap = Heaps[i];
+    g_set.jit = checked(d, IDC_JIT);
+    g_set.verify = checked(d, IDC_VERIFY);
+    GetDlgItemTextW(d, IDC_VMARGS, w, 256);
+    {
+        char *u = utf8_of(w);
+        copy_str(g_set.vmargs, sizeof(g_set.vmargs), u);
+        free(u);
+    }
+    i = combo_get(c, IDC_PHONE); if (i >= 0) copy_str(g_set.phone, sizeof(g_set.phone), Phones[i].id);
+    g_set.mute = checked(so, IDC_MUTE);
+    g_set.volume = (int)SendDlgItemMessageW(so, IDC_VOLUME, TBM_GETPOS, 0, 0);
+    i = combo_get(so, IDC_SYNTH); if (i >= 0) copy_str(g_set.synth, sizeof(g_set.synth), Synths[i].id);
+    g_set.log = checked(so, IDC_LOG);
+    g_set.console = checked(so, IDC_CONSOLE);
+    g_set.log_keys = checked(so, IDC_LOGKEYS);
+    g_set.log_events = checked(so, IDC_LOGEVENTS);
+    g_set.log_display = checked(so, IDC_LOGDISPLAY);
+    g_set.show_fps = checked(so, IDC_SHOWFPS);
+    save_scope();
+}
+
+/* ---- game list ---- */
+
+static int g_game_count;
+
+static void add_game_item(const wchar_t *jar) {
+    Zip z;
+    wchar_t jam[WBUF], name[512] = L"", *w;
+    const wchar_t *type = L"MIDP";
+    LVITEMW it;
+    GameItem *gi;
+    int row;
+    if (!zip_open(&z, jar)) return;
+    find_jam(jar, &z, jam);
+    if (jam[0]) {
+        unsigned char *d;
+        DWORD n;
+        type = L"i-appli";
+        if (read_file(jam, &d, &n)) {
+            char *t = normalize_descriptor(d), v[512];
+            if (desc_value(t, "AppName", '=', v, sizeof(v)) && v[0]) {
+                w = widen_cp(v, 932);
+                wcsncpy(name, w, 511);
+                free(w);
+            }
+            free(t);
+            free(d);
+        }
+    } else {
+        DWORD n;
+        unsigned char *mf = zip_read(&z, "META-INF/MANIFEST.MF", 1, &n);
+        if (mf) {
+            char *t = normalize_descriptor(mf), v[512];
+            if (desc_value(t, "MIDlet-Name", ':', v, sizeof(v)) && v[0]) {
+                w = widen_utf8(v);
+                wcsncpy(name, w, 511);
+                free(w);
+            }
+            free(t);
+            free(mf);
+        }
+    }
+    zip_close(&z);
+    if (!name[0]) {
+        const wchar_t *b = basename_w(jar);
+        wcsncpy(name, b, 511);
+        if (wcsrchr(name, L'.')) *wcsrchr(name, L'.') = 0;
+    }
+    gi = (GameItem *)malloc(sizeof(GameItem));
+    if (gi == NULL) return;
+    wcscpy(gi->path, jar);
+    memset(&it, 0, sizeof(it));
+    it.mask = LVIF_TEXT | LVIF_PARAM;
+    it.iItem = g_game_count;
+    it.pszText = name;
+    it.lParam = (LPARAM)gi;
+    row = ListView_InsertItem(g_games, &it);
+    if (row >= 0) {
+        wchar_t rel[WBUF];
+        size_t gl = wcslen(g_set.games_dir);
+        wcscpy(rel, jar);
+        if (_wcsnicmp(jar, g_set.games_dir, gl) == 0 && jar[gl] == L'\\') wcscpy(rel, jar + gl + 1);
+        ListView_SetItemText(g_games, row, 1, (wchar_t *)type);
+        ListView_SetItemText(g_games, row, 2, rel);
+        g_game_count++;
+    }
+}
+
+static void scan_dir(const wchar_t *dir, int depth) {
+    wchar_t pat[WBUF], p[WBUF];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    _snwprintf(pat, WBUF, L"%ls\\*", dir);
+    h = FindFirstFileW(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.cFileName[0] == L'.') continue;
+        _snwprintf(p, WBUF, L"%ls\\%ls", dir, fd.cFileName);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (depth < 3) scan_dir(p, depth + 1);
+        } else {
+            const wchar_t *e = wcsrchr(fd.cFileName, L'.');
+            if (e && _wcsicmp(e, L".jar") == 0 && g_game_count < 5000) add_game_item(p);
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+static void games_clear(void) {
+    int i, n = ListView_GetItemCount(g_games);
+    for (i = 0; i < n; i++) {
+        LVITEMW it;
+        memset(&it, 0, sizeof(it));
+        it.mask = LVIF_PARAM;
+        it.iItem = i;
+        if (ListView_GetItem(g_games, &it) && it.lParam) free((void *)it.lParam);
+    }
+    ListView_DeleteAllItems(g_games);
+    g_game_count = 0;
+}
+
+static void games_refresh(void) {
+    wchar_t t[WBUF];
+    HCURSOR old = SetCursor(LoadCursor(NULL, IDC_WAIT));
+    Settings glob;
+    settings_for(&glob, NULL);
+    wcscpy(g_set.games_dir, glob.games_dir);
+    SendMessageW(g_games, WM_SETREDRAW, FALSE, 0);
+    games_clear();
+    mkdirs(glob.games_dir);
+    scan_dir(glob.games_dir, 0);
+    SendMessageW(g_games, WM_SETREDRAW, TRUE, 0);
+    SetDlgItemTextW(g_pages[0], IDC_DIR, glob.games_dir);
+    _snwprintf(t, WBUF, L"%d game%ls", g_game_count, g_game_count == 1 ? L"" : L"s");
+    SetDlgItemTextW(g_pages[0], IDC_COUNT, t);
+    SetCursor(old);
+    g_sel_jar[0] = 0;
+    scope_update();
+}
+
+static void games_selection(void) {
+    int i = ListView_GetNextItem(g_games, -1, LVNI_SELECTED);
+    g_sel_jar[0] = 0;
+    if (i >= 0) {
+        LVITEMW it;
+        memset(&it, 0, sizeof(it));
+        it.mask = LVIF_PARAM;
+        it.iItem = i;
+        if (ListView_GetItem(g_games, &it) && it.lParam) wcscpy(g_sel_jar, ((GameItem *)it.lParam)->path);
+    }
+    scope_update();
+}
+
+static void play_selected(void) {
+    if (!g_sel_jar[0]) {
+        MessageBoxW(g_main, L"Select a game in the list first (or use \"Open a game...\").",
+                    APP_TITLE, MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    run_game(g_main, g_sel_jar, 0);
+}
+
+static int pick_file(HWND owner, wchar_t *out) {
+    OPENFILENAMEW of;
+    memset(&of, 0, sizeof(of));
+    out[0] = 0;
+    of.lStructSize = sizeof(of);
+    of.hwndOwner = owner;
+    of.lpstrFilter = L"J2ME / i-appli games (*.jar, *.jam)\0*.jar;*.jam\0All files\0*.*\0";
+    of.lpstrFile = out;
+    of.nMaxFile = WBUF;
+    of.lpstrTitle = L"Open a J2ME game";
+    of.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    return GetOpenFileNameW(&of);
+}
+
+static void pick_folder(void) {
+    BROWSEINFOW bi;
+    LPITEMIDLIST pidl;
+    wchar_t path[MAX_PATH];
+    memset(&bi, 0, sizeof(bi));
+    bi.hwndOwner = g_main;
+    bi.lpszTitle = L"Folder with your games (sub-folders are searched too):";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    pidl = SHBrowseForFolderW(&bi);
+    if (pidl == NULL) return;
+    if (SHGetPathFromIDListW(pidl, path)) {
+        Settings glob;
+        settings_for(&glob, NULL);
+        wcsncpy(glob.games_dir, path, WBUF - 1);
+        settings_save_file(&glob, g_ini, 1);
+        games_refresh();
+    }
+    CoTaskMemFree(pidl);
+}
+
+/* ---- key capture: a plain window gets every key, also Tab/Enter/Esc ---- */
+
+static int g_capture_sym;
+static int g_capture_done;
+
+static LRESULT CALLBACK capture_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: {
+        unsigned sc = (unsigned)((l >> 16) & 0xFF);
+        int ext = (l >> 24) & 1;
+        int sym = sdl_sym_of_scancode(sc, ext);
+        if (w == VK_SHIFT) sym = sc == 0x36 ? K_RSHIFT : K_LSHIFT;
+        if (sym > 0) {
+            g_capture_sym = sym;
+            g_capture_done = 1;
+            DestroyWindow(h);
+        }
+        return 0;
+    }
+    case WM_SYSCHAR:
+    case WM_CHAR:
+        return 0;
+    case WM_CLOSE:
+        g_capture_done = 1;
+        DestroyWindow(h);
+        return 0;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        RECT r;
+        HDC dc = BeginPaint(h, &ps);
+        HFONT f = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+        wchar_t *text = (wchar_t *)GetWindowLongPtrW(h, GWLP_USERDATA);
+        GetClientRect(h, &r);
+        FillRect(dc, &r, (HBRUSH)(COLOR_WINDOW + 1));
+        SelectObject(dc, f);
+        SetBkMode(dc, TRANSPARENT);
+        DrawTextW(dc, text, -1, &r, DT_CENTER | DT_VCENTER | DT_WORDBREAK);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+
+static int capture_key(HWND owner, const wchar_t *action) {
+    static int registered;
+    wchar_t text[256];
+    HWND h;
+    MSG msg;
+    RECT r;
+    int dpi = 96, W, H;
+    HDC dc = GetDC(NULL);
+    if (dc) { dpi = GetDeviceCaps(dc, LOGPIXELSX); ReleaseDC(NULL, dc); }
+    W = 340 * dpi / 96;
+    H = 120 * dpi / 96;
+    if (!registered) {
+        WNDCLASSW wc;
+        memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = capture_proc;
+        wc.hInstance = g_inst;
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.lpszClassName = L"FunKeyCapture";
+        RegisterClassW(&wc);
+        registered = 1;
+    }
+    _snwprintf(text, 256, L"\n\nPress the PC key for:  %ls\n\n(close this window to cancel)", action);
+    GetWindowRect(owner, &r);
+    h = CreateWindowExW(WS_EX_DLGMODALFRAME, L"FunKeyCapture", APP_TITLE,
+                        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                        (r.left + r.right - W) / 2, (r.top + r.bottom - H) / 2, W, H,
+                        owner, NULL, g_inst, NULL);
+    if (h == NULL) return 0;
+    SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)text);
+    InvalidateRect(h, NULL, TRUE);
+    EnableWindow(owner, FALSE);
+    SetFocus(h);
+    g_capture_sym = 0;
+    g_capture_done = 0;
+    while (!g_capture_done && GetMessageW(&msg, NULL, 0, 0) > 0) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    EnableWindow(owner, TRUE);
+    SetForegroundWindow(owner);
+    return g_capture_sym;
+}
+
+static void add_key_to_selected(void) {
+    int a = ListView_GetNextItem(g_keys, -1, LVNI_SELECTED), sym, i, j;
+    if (a < 0) {
+        MessageBoxW(g_main, L"Select a phone key in the list first.", APP_TITLE, MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    sym = capture_key(g_main, Actions[a].label);
+    if (sym <= 0) return;
+    /* one meaning per PC key: remove it elsewhere */
+    for (i = 0; i < ACTION_COUNT; i++)
+        for (j = 0; j < MAX_BIND; j++)
+            if (g_set.keys[i][j] == sym) g_set.keys[i][j] = 0;
+    for (j = 0; j < MAX_BIND && g_set.keys[a][j]; j++) ;
+    if (j == MAX_BIND) {               /* full: drop the oldest */
+        for (j = 0; j < MAX_BIND - 1; j++) g_set.keys[a][j] = g_set.keys[a][j + 1];
+        j = MAX_BIND - 1;
+    }
+    g_set.keys[a][j] = sym;
+    /* compact */
+    for (i = 0; i < ACTION_COUNT; i++) {
+        int k = 0, tmp[MAX_BIND] = { 0 };
+        for (j = 0; j < MAX_BIND; j++) if (g_set.keys[i][j]) tmp[k++] = g_set.keys[i][j];
+        memcpy(g_set.keys[i], tmp, sizeof(tmp));
+    }
+    keys_refresh();
+    save_scope();
+}
+
+/* ---- pages ---- */
+
+static INT_PTR CALLBACK page_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_INITDIALOG: {
+        /* tab page background like the tab control (visual styles) */
+        typedef HRESULT (WINAPI *ETDT)(HWND, DWORD);
+        HMODULE ux = LoadLibraryW(L"uxtheme.dll");
+        ETDT f = ux ? (ETDT)(void *)GetProcAddress(ux, "EnableThemeDialogTexture") : NULL;
+        if (f) f(h, 6 /* ETDT_ENABLETAB */);
+        return TRUE;
+    }
+    case WM_COMMAND: {
+        int id = LOWORD(w), code = HIWORD(w);
+        switch (id) {
+        case IDC_OPEN: {
+            wchar_t f[WBUF];
+            if (pick_file(g_main, f)) run_game(g_main, f, 0);
+            return TRUE;
+        }
+        case IDC_FOLDER: pick_folder(); return TRUE;
+        case IDC_REFRESH: games_refresh(); return TRUE;
+        case IDC_ADDKEY: add_key_to_selected(); return TRUE;
+        case IDC_CLEARKEY: {
+            int a = ListView_GetNextItem(g_keys, -1, LVNI_SELECTED), j;
+            if (a >= 0) {
+                for (j = 0; j < MAX_BIND; j++) g_set.keys[a][j] = 0;
+                keys_refresh();
+                save_scope();
+            }
+            return TRUE;
+        }
+        case IDC_DEFKEYS: {
+            int i, j;
+            if (MessageBoxW(g_main, L"Put back the default PC keys for all phone keys?", APP_TITLE,
+                            MB_YESNO | MB_ICONQUESTION) != IDYES) return TRUE;
+            for (i = 0; i < ACTION_COUNT; i++)
+                for (j = 0; j < MAX_BIND; j++) g_set.keys[i][j] = Actions[i].defaults[j];
+            keys_refresh();
+            save_scope();
+            return TRUE;
+        }
+        case IDC_OPENLOG: {
+            wchar_t lp[WBUF];
+            if (!g_sel_jar[0]) {
+                MessageBoxW(g_main, L"Select a game on the Games tab first.", APP_TITLE, MB_OK);
+                return TRUE;
+            }
+            game_log_path(g_sel_jar, lp);
+            if (!file_exists(lp)) {
+                MessageBoxW(g_main, L"This game has no log yet (start it with \"Write a log file\" on).",
+                            APP_TITLE, MB_OK);
+                return TRUE;
+            }
+            ShellExecuteW(g_main, L"open", L"notepad.exe", lp, NULL, SW_SHOWNORMAL);
+            return TRUE;
+        }
+        case IDC_OPENLOGDIR: {
+            wchar_t lp[WBUF];
+            _snwprintf(lp, WBUF, L"%ls\\logs", g_data);
+            mkdirs(lp);
+            ShellExecuteW(g_main, L"open", lp, NULL, NULL, SW_SHOWNORMAL);
+            return TRUE;
+        }
+        case IDC_VMARGS:
+            if (code == EN_KILLFOCUS) pages_read();
+            return TRUE;
+        case IDC_LCD:
+            if (code == CBN_SELCHANGE || code == CBN_KILLFOCUS) {
+                if (code == CBN_SELCHANGE) {
+                    /* the edit text follows the list after this message */
+                    PostMessageW(h, WM_COMMAND, MAKEWPARAM(IDC_LCD, CBN_KILLFOCUS), 0);
+                    return TRUE;
+                }
+                pages_read();
+            }
+            return TRUE;
+        case IDC_PHONE:
+            if (code == CBN_SELCHANGE) { pages_read(); keys_refresh(); }
+            return TRUE;
+        default:
+            if (code == CBN_SELCHANGE || code == BN_CLICKED) pages_read();
+            return TRUE;
+        }
+    }
+    case WM_HSCROLL:
+        if ((HWND)l == GetDlgItem(h, IDC_VOLUME)) {
+            wchar_t t[16];
+            int v = (int)SendDlgItemMessageW(h, IDC_VOLUME, TBM_GETPOS, 0, 0);
+            _snwprintf(t, 16, L"%d%%", v);
+            SetDlgItemTextW(h, IDC_VOLTEXT, t);
+            if (LOWORD(w) == TB_ENDTRACK || LOWORD(w) == TB_THUMBPOSITION) pages_read();
+        }
+        return TRUE;
+    case WM_NOTIFY: {
+        NMHDR *n = (NMHDR *)l;
+        if (n->idFrom == IDC_GAMES) {
+            if (n->code == LVN_ITEMCHANGED) {
+                NMLISTVIEW *lv = (NMLISTVIEW *)l;
+                if ((lv->uChanged & LVIF_STATE) && ((lv->uNewState ^ lv->uOldState) & LVIS_SELECTED))
+                    games_selection();
+            } else if (n->code == NM_DBLCLK || n->code == LVN_ITEMACTIVATE) {
+                play_selected();
+            }
+        } else if (n->idFrom == IDC_KEYS) {
+            if (n->code == NM_DBLCLK || n->code == LVN_ITEMACTIVATE) add_key_to_selected();
+        }
+        return TRUE;
+    }
+    }
+    return FALSE;
+}
+
+static void show_page(int i) {
+    int k;
+    for (k = 0; k < 4; k++) ShowWindow(g_pages[k], k == i ? SW_SHOW : SW_HIDE);
+}
+
+static void lv_columns(HWND lv, const wchar_t **names, const int *dlu, int n) {
+    int i;
+    RECT r = { 0, 0, 4, 8 };
+    MapDialogRect(GetParent(lv), &r);
+    ListView_SetExtendedListViewStyle(lv, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    for (i = 0; i < n; i++) {
+        LVCOLUMNW c;
+        memset(&c, 0, sizeof(c));
+        c.mask = LVCF_TEXT | LVCF_WIDTH;
+        c.pszText = (wchar_t *)names[i];
+        c.cx = dlu[i] * r.right / 4;
+        ListView_InsertColumn(lv, i, &c);
+    }
+}
+
+static INT_PTR CALLBACK main_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+    case WM_INITDIALOG: {
+        static const int pages[4] = { IDD_GAMES, IDD_DISPLAY, IDD_CONTROLS, IDD_SOUND };
+        static const wchar_t *names[4] = { L"Games", L"Display", L"Controls", L"Sound && logs" };
+        RECT rc;
+        int i;
+        HICON ic = LoadIconW(g_inst, MAKEINTRESOURCEW(IDI_APP));
+        g_main = h;
+        SendMessageW(h, WM_SETICON, ICON_BIG, (LPARAM)ic);
+        SendMessageW(h, WM_SETICON, ICON_SMALL, (LPARAM)ic);
+        g_tab = GetDlgItem(h, IDC_TAB);
+        for (i = 0; i < 4; i++) {
+            TCITEMW t;
+            memset(&t, 0, sizeof(t));
+            t.mask = TCIF_TEXT;
+            t.pszText = (wchar_t *)names[i];
+            TabCtrl_InsertItem(g_tab, i, &t);
+        }
+        GetWindowRect(g_tab, &rc);
+        MapWindowPoints(NULL, h, (POINT *)&rc, 2);
+        TabCtrl_AdjustRect(g_tab, FALSE, &rc);
+        for (i = 0; i < 4; i++) {
+            g_pages[i] = CreateDialogParamW(g_inst, MAKEINTRESOURCEW(pages[i]), h, page_proc, 0);
+            SetWindowPos(g_pages[i], HWND_TOP, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, 0);
+        }
+        g_games = GetDlgItem(g_pages[0], IDC_GAMES);
+        g_keys = GetDlgItem(g_pages[2], IDC_KEYS);
+        {
+            const wchar_t *gc[3] = { L"Game", L"Type", L"File" };
+            const int gw[3] = { 130, 40, 140 };
+            const wchar_t *kc[2] = { L"Phone key", L"PC keys" };
+            const int kw[2] = { 120, 186 };
+            lv_columns(g_games, gc, gw, 3);
+            lv_columns(g_keys, kc, kw, 2);
+        }
+        /* combo contents */
+        {
+            HWND d = g_pages[1], c = g_pages[2], so = g_pages[3];
+            for (i = 1; i <= 8; i++) {
+                wchar_t t[64];
+                _snwprintf(t, 64, i == 1 ? L"1x (phone size)" : L"%dx", i);
+                combo_add(d, IDC_SCALE, t);
+            }
+            for (i = 0; i < N(Modes); i++) combo_add(d, IDC_MODE, Modes[i].label);
+            for (i = 0; i < N(Filters); i++) combo_add(d, IDC_FILTER, Filters[i].label);
+            for (i = 0; Lcds[i]; i++) combo_add(d, IDC_LCD, Lcds[i]);
+            for (i = 0; i < N(Fpss); i++) combo_add(d, IDC_FPS, Fpss[i].label);
+            for (i = 0; i < N(Heaps); i++) {
+                wchar_t t[64];
+                if (Heaps[i] == 0) wcscpy(t, L"Default (16 MB, i-appli 32)");
+                else _snwprintf(t, 64, L"%d MB", Heaps[i]);
+                combo_add(d, IDC_HEAP, t);
+            }
+            for (i = 0; i < PHONE_COUNT; i++) combo_add(c, IDC_PHONE, Phones[i].label);
+            for (i = 0; i < N(Synths); i++) combo_add(so, IDC_SYNTH, Synths[i].label);
+            SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+            SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETTICFREQ, 10, 0);
+            SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETPAGESIZE, 0, 10);
+        }
+        show_page(0);
+        settings_for(&g_set, NULL);
+        games_refresh();
+        DragAcceptFiles(h, TRUE);
+        return TRUE;
+    }
+    case WM_NOTIFY: {
+        NMHDR *n = (NMHDR *)l;
+        if (n->idFrom == IDC_TAB && n->code == TCN_SELCHANGE) show_page(TabCtrl_GetCurSel(g_tab));
+        return TRUE;
+    }
+    case WM_DROPFILES: {
+        wchar_t f[WBUF];
+        if (DragQueryFileW((HDROP)w, 0, f, WBUF)) run_game(h, f, 0);
+        DragFinish((HDROP)w);
+        return TRUE;
+    }
+    case WM_COMMAND:
+        switch (LOWORD(w)) {
+        case IDC_PLAY: play_selected(); return TRUE;
+        case IDC_OWN:
+            if (g_sel_jar[0]) {
+                wchar_t gi[WBUF];
+                game_ini_path(g_sel_jar, gi);
+                if (checked(h, IDC_OWN)) {
+                    /* start from the current (global) settings */
+                    settings_save_file(&g_set, gi, 0);
+                } else {
+                    DeleteFileW(gi);
+                }
+                scope_update();
+            }
+            return TRUE;
+        case IDCANCEL:
+            /* commit an edit that still has the focus */
+            pages_read();
+            EndDialog(h, 0);
+            return TRUE;
+        }
+        return FALSE;
+    case WM_APP_GAME_ENDED:
+        return TRUE;
+    case WM_CLOSE:
+        pages_read();
+        EndDialog(h, 0);
+        return TRUE;
+    case WM_DESTROY:
+        games_clear();
+        return FALSE;
+    }
+    return FALSE;
+}
+
+/* =============================================================== start */
+
+static int init_paths(void) {
+    wchar_t exe[WBUF], tmp[WBUF];
+    GetModuleFileNameW(NULL, exe, WBUF);
+    dirname_w(exe, g_home);
+    _snwprintf(g_ini, WBUF, L"%ls\\settings.ini", g_home);
+    _snwprintf(tmp, WBUF, L"%ls\\bin\\runMidlet.exe", g_home);
+    if (!file_exists(tmp)) { fail(L"bin\\runMidlet.exe is missing next to %ls.", exe); return 0; }
+    g_home_a = ascii_alias(g_home);
+    if (g_home_a == NULL) {
+        fail(L"The runtime folder\n%ls\nhas non-Latin characters and no short (8.3) name.\n"
+             L"Move it to a folder like C:\\j2me.", g_home);
+        return 0;
+    }
+    /* data: next to the exe when writable (portable), else %LOCALAPPDATA% */
+    _snwprintf(g_data, WBUF, L"%ls\\data", g_home);
+    mkdirs(g_data);
+    _snwprintf(tmp, WBUF, L"%ls\\.write-test", g_data);
+    if (!write_file(tmp, "", 0)) {
+        DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", tmp, WBUF);
+        if (n == 0 || n >= WBUF) { fail(L"Cannot write to %ls", g_data); return 0; }
+        _snwprintf(g_data, WBUF, L"%ls\\funkey-j2me", tmp);
+        mkdirs(g_data);
+        /* settings next to the data then, too */
+        _snwprintf(g_ini, WBUF, L"%ls\\settings.ini", g_data);
+    } else {
+        DeleteFileW(tmp);
+    }
+    {
+        char *a = ascii_alias(g_data);
+        if (a == NULL) {
+            fail(L"The data folder\n%ls\nhas non-Latin characters and no short (8.3) name.\n"
+                 L"Move the runtime to a folder like C:\\j2me.", g_data);
+            return 0;
+        }
+        free(a);
+    }
+    return 1;
+}
+
+int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show) {
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    INITCOMMONCONTROLSEX icc;
+    (void)prev; (void)cmdline; (void)show;
+    g_inst = inst;
+    if (!init_paths()) return 1;
+    if (argc >= 2) {
+        /* drag & drop / command line: start right away */
+        return run_game(NULL, argv[1], 1) ? 0 : 1;
+    }
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;
+    InitCommonControlsEx(&icc);
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    DialogBoxParamW(inst, MAKEINTRESOURCEW(IDD_MAIN), NULL, main_proc, 0);
+    CoUninitialize();
+    return 0;
 }

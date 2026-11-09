@@ -2314,7 +2314,8 @@ int lfjport_ui_init()
     WindowScale = ws != NULL ? atoi(ws) : 1;
     if (WindowScale < 1) WindowScale = 1;
     if (WindowScale > 8) WindowScale = 8;
-    DesktopMode = WindowScale > 1 || (wsize != NULL && wsize[0] != '\0');
+    DesktopMode = WindowScale > 1 || (wsize != NULL && wsize[0] != '\0') ||
+                  (getenv("PHONEME_DESKTOP") != NULL && atoi(getenv("PHONEME_DESKTOP")) != 0);
     if (DesktopMode) {
       const SDL_VideoInfo *vi = SDL_GetVideoInfo();   /* before any video mode: the monitor */
       const char *title = getenv("PHONEME_WINDOW_TITLE");
