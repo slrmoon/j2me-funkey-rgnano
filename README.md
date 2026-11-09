@@ -489,8 +489,11 @@ files stay on your computer. The page remembers the games you opened
 their saves in the browser; **Export saves** gives the same files as
 `rms/<game>` on the FunKey, so saves move both ways. It runs the VM in
 slave mode with a C interpreter (no JIT in WebAssembly): slower than the
-desktop builds, fine for 2D games, heavy 3D may be slow. No touch controls
-yet. Page options: `?fps=1` (FPS counter), `?limit=off`, `?lcd=240x320`.
+desktop builds, fine for 2D games, heavy 3D may be slow. **Buttons** shows
+on-screen keys (soft keys, D-pad, keypad, menu; on by default on phones and
+tablets), **Keys** remaps the keyboard (several keys per phone key, soft key
+type per game). Page options: `?fps=1` (FPS counter), `?limit=off`,
+`?lcd=240x320`.
 
 ## Repository structure
 
@@ -603,9 +606,9 @@ runtime, the SDL launcher, desktop entry and icon (plus a tiny built-in
   bend textures slightly on large surfaces seen at a steep angle.
 - **MascotCapsule (MIDP)** — 2D drawn between `renderFigure` and `flush()`
   ends up under the 3D instead of over it.
-- **Browser** — no JIT (slower than the other builds), no touch or gamepad
-  controls yet; the page keeps only what a game saved itself (no save
-  states).
+- **Browser** — no JIT (slower than the other builds, most of all for games
+  that draw their 3D in Java); no gamepad yet; the page keeps only what a
+  game saved itself (no save states).
 - **Not supported**: Motorola `com.motorola.game` (GameScreen API), Mobile XMF music, video, camera/recording, network.
 - **Optional JSRs without the hardware** (JSR 75 FileConnection/PIM, JSR 82
   Bluetooth/OBEX, JSR 179 Location, JSR 226 SVG, JSR 239 OpenGL ES) are

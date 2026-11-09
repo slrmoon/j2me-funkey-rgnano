@@ -23,7 +23,42 @@
   h1 span { color: var(--muted); font-weight: 400; }
   #stage { position: relative; width: 100%; aspect-ratio: 1; background: #000;
            border-radius: 6px; overflow: hidden; max-height: 85vh; margin: 0 auto; }
-  #stage:fullscreen { max-height: none; border-radius: 0; aspect-ratio: auto; }
+  #play:fullscreen { background: #000; display: flex; flex-direction: column; padding: 0; }
+  #play:fullscreen #stage { flex: 1; min-height: 0; max-height: none; border-radius: 0; aspect-ratio: auto; }
+  /* on-screen buttons */
+  #pad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;
+         user-select: none; -webkit-user-select: none; touch-action: none; }
+  #pad[hidden] { display: none; }
+  #play:fullscreen #pad { padding: 8px 12px 12px; }
+  #pad .softs { grid-column: 1 / 3; display: flex; justify-content: space-between; gap: 8px; }
+  #pad button { padding: 0; min-height: 44px; font-size: 15px; touch-action: none;
+                -webkit-tap-highlight-color: transparent; }
+  #pad button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+  #pad .softs button { flex: 1; max-width: 30%; }
+  #pad .dpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; aspect-ratio: 1;
+               max-width: 210px; width: 100%; justify-self: center; }
+  #pad .dpad button { min-height: 0; }
+  #pad .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 210px;
+               width: 100%; justify-self: center; }
+  #pad .nums button { min-height: 40px; }
+  /* key bindings */
+  dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 8px; padding: 16px; max-width: min(640px, calc(100vw - 32px));
+           max-height: calc(100vh - 32px); }
+  dialog::backdrop { background: rgba(0, 0, 0, .55); }
+  dialog h2 { font-size: 16px; margin: 0 0 6px; }
+  dialog p { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  #bindings { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center;
+              font-size: 14px; }
+  #bindings .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line);
+          border-radius: 4px; padding: 1px 2px 1px 6px; font: 12px ui-monospace, monospace; }
+  .chip button { border: 0; background: none; padding: 0 4px; color: var(--muted); font-size: 14px; }
+  .chip.add { padding: 1px 6px; cursor: pointer; color: var(--muted); background: none; }
+  .chip.wait { border-color: var(--accent); color: var(--accent); }
+  dialog .row { justify-content: space-between; margin-top: 14px; }
+  dialog .row button, dialog select { padding: 6px 12px; font: inherit; }
+  dialog select { border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain;
            image-rendering: pixelated; outline: none; }
   #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -60,6 +95,7 @@
 <body>
 <main>
 <h1>phoneME <span>J2ME in the browser · prototype</span></h1>
+<div id="play">
 <div id="stage">
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
   <div id="overlay">
@@ -75,17 +111,59 @@
     <div id="recent"></div>
   </div>
 </div>
+<div id="pad" hidden>
+  <div class="softs">
+    <button data-act="soft1">Soft L</button>
+    <button data-act="menu">Menu</button>
+    <button data-act="soft2">Soft R</button>
+  </div>
+  <div class="dpad">
+    <span></span><button data-act="up" aria-label="Up">▲</button><span></span>
+    <button data-act="left" aria-label="Left">◀</button><button data-act="fire">OK</button><button data-act="right" aria-label="Right">▶</button>
+    <span></span><button data-act="down" aria-label="Down">▼</button><span></span>
+  </div>
+  <div class="nums">
+    <button data-act="1">1</button><button data-act="2">2</button><button data-act="3">3</button>
+    <button data-act="4">4</button><button data-act="5">5</button><button data-act="6">6</button>
+    <button data-act="7">7</button><button data-act="8">8</button><button data-act="9">9</button>
+    <button data-act="star">*</button><button data-act="0">0</button><button data-act="pound">#</button>
+  </div>
+</div>
+</div>
+<dialog id="keysDlg">
+  <h2>Keyboard</h2>
+  <p>Click + and press a key to add it, × to remove one. Changes apply when the
+    game starts (or restarts).</p>
+  <div id="bindings"></div>
+  <div class="row">
+    <label>Soft keys of this game:
+      <select id="phone">
+        <option value="standard">Nokia / SE / Samsung (-6/-7)</option>
+        <option value="motorola">Motorola (-21/-22)</option>
+        <option value="moto-old">Motorola old (21/22)</option>
+        <option value="siemens">Siemens (-1/-4)</option>
+      </select></label>
+  </div>
+  <div class="row">
+    <button id="keysReset">Defaults</button>
+    <span><button id="keysRestart" hidden>Restart the game</button>
+      <button id="keysClose" class="primary">Done</button></span>
+  </div>
+</dialog>
 <div id="bar">
   <div id="status">No game loaded</div>
   <button id="export" disabled title="the game's saves as a .zip (the files of rms/&lt;game&gt; on the FunKey, Linux and Windows)">Export saves</button>
   <label class="file small" id="importLabel" aria-disabled="true">Import saves<input id="import" type="file" multiple disabled></label>
+  <button id="keysBtn">Keys</button>
+  <button id="padBtn" aria-pressed="false">Buttons</button>
   <button id="full" disabled>Full screen</button>
   <button id="reload">Another game</button>
 </div>
 <div class="keys">
-  <kbd>←↑→↓</kbd> move · <kbd>Enter</kbd>/<kbd>Space</kbd> fire ·
-  <kbd>F1</kbd> <kbd>F2</kbd> soft keys · <kbd>0</kbd>–<kbd>9</kbd> keypad ·
-  <kbd>Esc</kbd> runtime menu. Saves and recent games are kept in this browser;
+  <kbd>←↑→↓</kbd>/<kbd>WASD</kbd> move · <kbd>Enter</kbd>/<kbd>Space</kbd> fire ·
+  <kbd>F1</kbd>/<kbd>Q</kbd> <kbd>F2</kbd>/<kbd>E</kbd> soft keys · <kbd>0</kbd>–<kbd>9</kbd> keypad ·
+  <kbd>Esc</kbd> runtime menu · <kbd>F11</kbd> full screen (Keys changes them; Buttons shows
+  on-screen ones). Saves and recent games are kept in this browser;
   Export / Import saves moves them to or from another browser, the FunKey or a PC.
 </div>
 <details><summary>Log</summary><div id="log"></div></details>
@@ -502,7 +580,7 @@ function resumeAudio() {
 }
 document.addEventListener('keydown', resumeAudio);
 document.addEventListener('pointerdown', resumeAudio);
-$('full').addEventListener('click', () => $('stage').requestFullscreen && $('stage').requestFullscreen());
+$('full').addEventListener('click', () => $('play').requestFullscreen && $('play').requestFullscreen());
 
 // --- the runtime ---------------------------------------------------------
 function loadScript(src) {
@@ -573,13 +651,185 @@ document.addEventListener('fullscreenchange', stageResized);
 // F11 / Alt+Enter: the page's full screen (the runtime's own switch is for
 // a desktop window); taken before the runtime sees the key
 window.addEventListener('keydown', e => {
-  if (e.key === 'F11' || (e.key === 'Enter' && e.altKey)) {
+  if (capturing) return;
+  if (boundTo(e) === 'full' || (e.key === 'Enter' && e.altKey)) {
     e.preventDefault();
     e.stopImmediatePropagation();
     if (document.fullscreenElement) document.exitFullscreen();
-    else if ($('stage').requestFullscreen) $('stage').requestFullscreen();
+    else if ($('play').requestFullscreen) $('play').requestFullscreen();
   }
 }, true);
+
+// --- controls: the PC keys of every phone key (as the Windows launcher),
+// passed to the runtime as PHONEME_PC_KEYS, and on-screen buttons
+const K = (code, keyCode) => ({ code, keyCode });
+const ACTIONS = [
+  { id: 'up', label: 'Up', code: -1, keys: [K('ArrowUp', 38), K('KeyW', 87)] },
+  { id: 'down', label: 'Down', code: -2, keys: [K('ArrowDown', 40), K('KeyS', 83)] },
+  { id: 'left', label: 'Left', code: -3, keys: [K('ArrowLeft', 37), K('KeyA', 65)] },
+  { id: 'right', label: 'Right', code: -4, keys: [K('ArrowRight', 39), K('KeyD', 68)] },
+  { id: 'fire', label: 'Fire / OK', code: -5, keys: [K('Enter', 13), K('Space', 32)] },
+  { id: 'soft1', label: 'Left soft key', code: 'soft1', keys: [K('F1', 112), K('Tab', 9), K('KeyQ', 81)] },
+  { id: 'soft2', label: 'Right soft key', code: 'soft2', keys: [K('F2', 113), K('Backspace', 8), K('KeyE', 69)] },
+  { id: '1', label: '1', code: 49, keys: [K('Digit1', 49), K('Numpad7', 103)] },
+  { id: '2', label: '2', code: 50, keys: [K('Digit2', 50), K('Numpad8', 104)] },
+  { id: '3', label: '3', code: 51, keys: [K('Digit3', 51), K('Numpad9', 105)] },
+  { id: '4', label: '4', code: 52, keys: [K('Digit4', 52), K('Numpad4', 100)] },
+  { id: '5', label: '5', code: 53, keys: [K('Digit5', 53), K('Numpad5', 101)] },
+  { id: '6', label: '6', code: 54, keys: [K('Digit6', 54), K('Numpad6', 102)] },
+  { id: '7', label: '7', code: 55, keys: [K('Digit7', 55), K('Numpad1', 97)] },
+  { id: '8', label: '8', code: 56, keys: [K('Digit8', 56), K('Numpad2', 98)] },
+  { id: '9', label: '9', code: 57, keys: [K('Digit9', 57), K('Numpad3', 99)] },
+  { id: '0', label: '0', code: 48, keys: [K('Digit0', 48), K('Numpad0', 96)] },
+  { id: 'star', label: '*', code: 42, keys: [K('NumpadMultiply', 106), K('KeyZ', 90)] },
+  { id: 'pound', label: '#', code: 35, keys: [K('NumpadAdd', 107), K('KeyX', 88)] },
+  { id: 'clear', label: 'Clear (C)', code: -8, keys: [K('Delete', 46)] },
+  { id: 'send', label: 'Call (green)', code: -10, keys: [K('Home', 36)] },
+  { id: 'end', label: 'Hang up (red)', code: -11, keys: [K('End', 35)] },
+  { id: 'gamea', label: 'Game A', code: -13, keys: [K('F9', 120)] },
+  { id: 'gameb', label: 'Game B', code: -14, keys: [K('F10', 121)] },
+  { id: 'gamec', label: 'Game C', code: -15, keys: [K('PageUp', 33)] },
+  { id: 'gamed', label: 'Game D', code: -16, keys: [K('PageDown', 34), K('F12', 123)] },
+  { id: 'menu', label: 'Runtime menu', code: 1000, keys: [K('Escape', 27)] },
+  { id: 'full', label: 'Full screen', code: null, keys: [K('F11', 122)] },
+];
+const SOFT = { standard: [-6, -7], motorola: [-21, -22], 'moto-old': [21, 22], siemens: [-1, -4] };
+const VIRTUAL_SYM = 1400;   // + action index: on-screen buttons (free SDL key symbols)
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+let keymap = store.get('phoneme-keys', null) || defaultKeymap();
+function defaultKeymap() {
+  const m = {};
+  for (const a of ACTIONS) m[a.id] = a.keys.map(k => Object.assign({}, k));
+  return m;
+}
+const phoneOf = g => store.get('phoneme-phone:' + (g ? g.name : ''), 'standard');
+function phoneCode(a, g) {
+  const soft = SOFT[phoneOf(g)] || SOFT.standard;
+  return a.code === 'soft1' ? soft[0] : a.code === 'soft2' ? soft[1] : a.code;
+}
+function boundTo(e) {
+  for (const a of ACTIONS) if ((keymap[a.id] || []).some(k => k.code === e.code)) return a.id;
+  return null;
+}
+// "sym=code;..." with the SDL key symbols Emscripten's SDL gives these keys
+function pcKeysSpec(g) {
+  const parts = [];
+  ACTIONS.forEach((a, i) => {
+    if (a.code === null) return;   // full screen: the page does it
+    const code = phoneCode(a, g);
+    for (const k of keymap[a.id] || []) {
+      parts.push(SDL.lookupKeyCodeForEvent({ keyCode: k.keyCode, location: 0 }) + '=' + code);
+    }
+    parts.push((VIRTUAL_SYM + i) + '=' + code);
+  });
+  return parts.join(';');
+}
+const keyName = c => c.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpad/, 'Num ')
+  .replace('ArrowUp', '↑').replace('ArrowDown', '↓').replace('ArrowLeft', '←').replace('ArrowRight', '→');
+
+// on-screen buttons: key events straight into the runtime's SDL queue
+function padKey(id, down) {
+  const i = ACTIONS.findIndex(a => a.id === id);
+  if (i < 0) return;
+  if (id === 'full') return;
+  if (!running || typeof SDL === 'undefined') return;
+  resumeAudio();
+  SDL.events.push({ type: down ? 'keydown' : 'keyup', keyCode: VIRTUAL_SYM + i, charCode: 0,
+                    location: 0, preventDefault() {} });
+}
+for (const b of document.querySelectorAll('#pad button[data-act]')) {
+  const press = e => {
+    e.preventDefault();
+    if (b.classList.contains('on')) return;
+    b.classList.add('on');
+    try { b.setPointerCapture(e.pointerId); } catch (err) {}
+    if (navigator.vibrate) navigator.vibrate(8);
+    padKey(b.dataset.act, true);
+  };
+  const release = e => {
+    if (!b.classList.contains('on')) return;
+    b.classList.remove('on');
+    padKey(b.dataset.act, false);
+  };
+  b.addEventListener('pointerdown', press);
+  b.addEventListener('pointerup', release);
+  b.addEventListener('pointercancel', release);
+  b.addEventListener('lostpointercapture', release);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+}
+function showPad(on) {
+  $('pad').hidden = !on;
+  $('padBtn').setAttribute('aria-pressed', on ? 'true' : 'false');
+  $('padBtn').textContent = on ? 'Hide buttons' : 'Buttons';
+  store.set('phoneme-pad', on);
+  stageResized();
+}
+showPad(store.get('phoneme-pad', matchMedia('(pointer: coarse)').matches));
+$('padBtn').addEventListener('click', () => showPad($('pad').hidden));
+
+// key bindings dialog
+let capturing = null;   // action id waiting for a key
+function renderBindings() {
+  const box = $('bindings');
+  box.textContent = '';
+  for (const a of ACTIONS) {
+    const label = document.createElement('div');
+    label.textContent = a.label;
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    for (const k of keymap[a.id] || []) {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.append(keyName(k.code));
+      const x = document.createElement('button');
+      x.textContent = '×';
+      x.title = 'Remove';
+      x.onclick = () => { keymap[a.id] = keymap[a.id].filter(o => o !== k); keysChanged(); };
+      c.appendChild(x);
+      chips.appendChild(c);
+    }
+    const add = document.createElement('button');
+    add.className = 'chip add' + (capturing === a.id ? ' wait' : '');
+    add.textContent = capturing === a.id ? 'press a key…' : '+';
+    add.onclick = () => { capturing = capturing === a.id ? null : a.id; renderBindings(); };
+    chips.appendChild(add);
+    box.append(label, chips);
+  }
+}
+function keysChanged() {
+  store.set('phoneme-keys', keymap);
+  $('keysRestart').hidden = !running;
+  renderBindings();
+}
+window.addEventListener('keydown', e => {
+  if ($('keysDlg').open && !capturing) { e.stopImmediatePropagation(); return; }
+  if (!capturing) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  // one key has one meaning: taken away from any other action
+  for (const id in keymap) keymap[id] = (keymap[id] || []).filter(k => k.code !== e.code);
+  (keymap[capturing] = keymap[capturing] || []).push(K(e.code, e.keyCode));
+  capturing = null;
+  keysChanged();
+}, true);
+window.addEventListener('keyup', e => { if ($('keysDlg').open) e.stopImmediatePropagation(); }, true);
+$('keysBtn').addEventListener('click', () => {
+  $('phone').value = phoneOf(game);
+  $('phone').disabled = !game;
+  $('keysRestart').hidden = true;
+  renderBindings();
+  $('keysDlg').showModal();
+});
+$('phone').addEventListener('change', () => {
+  if (game) { store.set('phoneme-phone:' + game.name, $('phone').value); $('keysRestart').hidden = !running; }
+});
+$('keysReset').addEventListener('click', () => { keymap = defaultKeymap(); keysChanged(); });
+$('keysClose').addEventListener('click', () => { capturing = null; $('keysDlg').close(); $('canvas').focus(); });
+$('keysDlg').addEventListener('cancel', e => { if (capturing) e.preventDefault(); });
+$('keysRestart').addEventListener('click', () => { saveRms(); setTimeout(() => startAgain(true), 300); });
 
 // the command line of an i-appli (as launchers/linux/run.sh)
 function dojaArgs(spPath) {
@@ -659,6 +909,7 @@ $('start').addEventListener('click', async () => {
             FS.writeFile(sp, new Uint8Array(0));
           }
         }
+        ENV.PHONEME_PC_KEYS = pcKeysSpec(game);
         if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
         // ?env=NAME=value (repeatable): any runtime setting, for testing
