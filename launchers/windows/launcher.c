@@ -985,7 +985,51 @@ typedef struct {
     wchar_t sp_orig[WBUF], sp_copy[WBUF];
     int show_errors;
     DWORD code;
+    /* to start the runtime again ("Restart game" in its menu) */
+    wchar_t *cmd, *env;
+    wchar_t bindir[WBUF], logpath[WBUF], restart[WBUF];
+    int console, log_on;
 } RunInfo;
+
+/* starts bin\runMidlet.exe for ri: log file / console / nothing */
+static int start_vm(RunInfo *ri) {
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    SECURITY_ATTRIBUTES sa;
+    HANDLE logh = INVALID_HANDLE_VALUE;
+    int ok;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    memset(&pi, 0, sizeof(pi));
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    if (!ri->console) {
+        logh = CreateFileW(ri->log_on ? ri->logpath : L"NUL", GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+                           ri->log_on ? CREATE_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (logh != INVALID_HANDLE_VALUE) {
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdInput = NULL;
+            si.hStdOutput = logh;
+            si.hStdError = logh;
+        }
+    }
+    ok = CreateProcessW(NULL, ri->cmd, NULL, NULL, TRUE,
+                        (ri->console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) | CREATE_UNICODE_ENVIRONMENT,
+                        ri->env, ri->bindir, &si, &pi);
+    if (logh != INVALID_HANDLE_VALUE) CloseHandle(logh);
+    if (!ok) return 0;
+    CloseHandle(pi.hThread);
+    ri->process = pi.hProcess;
+    return 1;
+}
+
+static void run_info_free(RunInfo *ri) {
+    free(ri->cmd);
+    free(ri->env);
+    free(ri);
+}
 
 static void show_log_tail(HWND owner, const wchar_t *log, DWORD code) {
     unsigned char *d;
@@ -1009,30 +1053,35 @@ static void show_log_tail(HWND owner, const wchar_t *log, DWORD code) {
 
 static DWORD WINAPI run_waiter(LPVOID p) {
     RunInfo *ri = (RunInfo *)p;
-    WaitForSingleObject(ri->process, INFINITE);
-    GetExitCodeProcess(ri->process, &ri->code);
-    CloseHandle(ri->process);
+    for (;;) {
+        WaitForSingleObject(ri->process, INFINITE);
+        GetExitCodeProcess(ri->process, &ri->code);
+        CloseHandle(ri->process);
+        /* "Restart game" in the runtime menu: it left the flag and quit */
+        if (!ri->restart[0] || !DeleteFileW(ri->restart)) break;
+        if (!start_vm(ri)) {
+            MessageBoxW(ri->notify, L"Cannot restart bin\\runMidlet.exe.", APP_TITLE,
+                        MB_OK | MB_ICONWARNING);
+            break;
+        }
+    }
     if (ri->sp_copy[0] && ri->sp_orig[0] && !CopyFileW(ri->sp_copy, ri->sp_orig, FALSE))
         MessageBoxW(ri->notify, L"Could not write the scratchpad (save) back to the game folder.",
                     APP_TITLE, MB_OK | MB_ICONWARNING);
     /* 1 = MIDP_SHUTDOWN_STATUS: the window was closed or the game quit */
     if (ri->code != 0 && ri->code != 1 && ri->show_errors) show_log_tail(ri->notify, ri->log, ri->code);
     if (ri->notify) PostMessageW(ri->notify, WM_APP_GAME_ENDED, 0, 0);
-    free(ri);
+    run_info_free(ri);
     return 0;
 }
 
 /* starts a game; wait = 1: returns when it ends (drag & drop mode) */
 static int run_game(HWND owner, const wchar_t *path, int wait) {
     wchar_t jar[WBUF], jam[WBUF], dir[WBUF], base[WBUF], tmp[WBUF];
-    wchar_t rundir[WBUF], rmsdir[WBUF], logpath[WBUF], *dot, *envb;
+    wchar_t rundir[WBUF], rmsdir[WBUF], logpath[WBUF], *dot;
     char id[260], s[4096], *jar_a = NULL, *r;
     Settings st;
     Zip zip;
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    SECURITY_ATTRIBUTES sa;
-    HANDLE logh = INVALID_HANDLE_VALUE;
     RunInfo *ri;
     char title[600] = "";
 
@@ -1072,6 +1121,13 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     if (r == NULL) { fail(L"Bad data folder %ls", rmsdir); zip_close(&zip); return 0; }
     env_set("PHONEME_RMS_HOME", r);
     free(r);
+    /* "Restart game" in the runtime menu leaves this file and exits */
+    r = ascii_alias(rundir);
+    if (r != NULL) {
+        snprintf(s, sizeof(s), "%s\\restart-request", r);
+        env_set("PHONEME_RESTART_FLAG", s);
+        free(r);
+    }
     snprintf(s, sizeof(s), "%d", st.scale); env_set("PHONEME_WINDOW_SCALE", s);
     env_set("PHONEME_DESKTOP", "1");
     env_set("PHONEME_FULLSCREEN", st.fullscreen ? "1" : "0");
@@ -1257,42 +1313,20 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     }
     env_set("PHONEME_WINDOW_TITLE", title);
 
-    /* start: log file / console / nothing */
-    memset(&si, 0, sizeof(si));
-    si.cb = sizeof(si);
-    memset(&pi, 0, sizeof(pi));
-    memset(&sa, 0, sizeof(sa));
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-    if (!st.console) {
-        logh = CreateFileW(st.log ? logpath : L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                           &sa, st.log ? CREATE_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (logh != INVALID_HANDLE_VALUE) {
-            si.dwFlags = STARTF_USESTDHANDLES;
-            si.hStdInput = NULL;
-            si.hStdOutput = logh;
-            si.hStdError = logh;
-        }
+    /* start */
+    _snwprintf(ri->restart, WBUF, L"%ls\\restart-request", rundir);
+    DeleteFileW(ri->restart);
+    ri->cmd = _wcsdup(cmd);
+    ri->env = env_block();
+    _snwprintf(ri->bindir, WBUF, L"%ls\\bin", g_home);
+    wcscpy(ri->logpath, logpath);
+    ri->console = st.console;
+    ri->log_on = st.log;
+    if (ri->cmd == NULL || ri->env == NULL || !start_vm(ri)) {
+        fail(L"Cannot start bin\\runMidlet.exe (error %lu).", (unsigned long)GetLastError());
+        run_info_free(ri);
+        return 0;
     }
-    envb = env_block();
-    {
-        wchar_t bindir[WBUF];
-        _snwprintf(bindir, WBUF, L"%ls\\bin", g_home);
-        if (!CreateProcessW(NULL, cmd, NULL, NULL, TRUE,
-                            (st.console ? CREATE_NEW_CONSOLE : CREATE_NO_WINDOW) | CREATE_UNICODE_ENVIRONMENT,
-                            envb, bindir, &si, &pi)) {
-            fail(L"Cannot start bin\\runMidlet.exe (error %lu).", (unsigned long)GetLastError());
-            free(envb);
-            if (logh != INVALID_HANDLE_VALUE) CloseHandle(logh);
-            free(ri);
-            return 0;
-        }
-    }
-    free(envb);
-    if (logh != INVALID_HANDLE_VALUE) CloseHandle(logh);
-    CloseHandle(pi.hThread);
-
-    ri->process = pi.hProcess;
     ri->notify = owner;
     ri->show_errors = !st.console;
     if (st.log && !st.console) wcscpy(ri->log, logpath);

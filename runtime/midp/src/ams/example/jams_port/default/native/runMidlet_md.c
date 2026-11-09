@@ -49,6 +49,7 @@
 #include <stdlib.h>
 #include <string.h>
 char *emscripten_run_script_string(const char *script);
+void emscripten_run_script(const char *script);
 
 int
 main(void) {
@@ -69,7 +70,16 @@ main(void) {
     argv[argc] = NULL;
     setvbuf(stderr, NULL, _IONBF, 0);
     setvbuf(stdout, NULL, _IONBF, 0);
-    return runMidlet(argc, argv);
+    {
+        /* the page learns that the game ended (Exit / Restart in the
+         * runtime menu): the Emscripten runtime itself stays alive */
+        int status = runMidlet(argc, argv);
+        char js[96];
+        snprintf(js, sizeof(js),
+                 "if (Module.fkGameEnded) Module.fkGameEnded(%d)", status);
+        emscripten_run_script(js);
+        return status;
+    }
 }
 #else
 int

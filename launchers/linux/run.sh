@@ -110,6 +110,19 @@ else
 fi
 
 export MIDP_HOME=$HERE
+# "Restart game" in the runtime menu leaves this file and exits; run_vm
+# then starts the game again
+export PHONEME_RESTART_FLAG=$DATA/run/$NAME/restart-request
+run_vm() {
+    local rc
+    while :; do
+        rm -f "$PHONEME_RESTART_FLAG"
+        ./runMidlet "$@" && rc=0 || rc=$?
+        [ -f "$PHONEME_RESTART_FLAG" ] || break
+    done
+    rm -f "$PHONEME_RESTART_FLAG"
+    return "$rc"
+}
 [ "${VERIFY:-0}" = 1 ] || VMARGS="-UseVerifier ${VMARGS:-}"
 export PHONEME_RMS_HOME=$DATA/rms/$NAME
 export PHONEME_WINDOW_SCALE=${SCALE:-3}
@@ -151,7 +164,7 @@ if [ -n "$APP_CLASS" ]; then
     ver=$(jam_value "$JAM" AppVer)
     spsize=$(jam_value "$JAM" SPsize)
     [ -n "${FKT_PRELOAD:-}" ] && export LD_PRELOAD=$FKT_PRELOAD
-    exec ./runMidlet $VMARGS =MaxMethodToCompile3000 \
+    run_vm $VMARGS =MaxMethodToCompile3000 \
         "-Ddoja.app.class=$APP_CLASS" \
         "-Ddoja.app.param=$param" \
         "-Ddoja.app.ver=$ver" \
@@ -162,6 +175,7 @@ if [ -n "$APP_CLASS" ]; then
         "-Ddoja.pictures=$pics" \
         -classpathext "$VMJAR:$HERE/lib/doja-support.jar" \
         internal com.funkey.doja.DoJaMIDlet
+    exit $?
 fi
 
 export PHONEME_HEAP_MB=${HEAP_MB:-16}
@@ -191,4 +205,5 @@ if [ -z "$MAIN" ]; then
     exit 1
 fi
 [ -n "${FKT_PRELOAD:-}" ] && export LD_PRELOAD=$FKT_PRELOAD
-exec ./runMidlet $VMARGS -classpathext "$RUNJAR" internal "$MAIN"
+run_vm $VMARGS -classpathext "$RUNJAR" internal "$MAIN"
+exit $?
