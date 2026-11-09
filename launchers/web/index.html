@@ -57,7 +57,8 @@
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
   <div id="overlay">
     <div>Open a J2ME game (.jar) or an i-appli (.jar + .jam, and its .sp
-      if you have one) — the files stay on this computer.</div>
+      if you have one: it replaces the scratchpad kept in this browser) —
+      the files stay on this computer.</div>
     <div class="row">
       <label class="file">Choose game<input id="file" type="file" accept=".jar,.jam,.sp" multiple></label>
       <button id="demo">MotherLoad (demo)</button>
@@ -419,8 +420,16 @@ $('start').addEventListener('click', async () => {
           // i-appli: the screen is the .jam DrawArea; the scratchpad lives
           // with the saves (the picked .sp only the first time)
           if (!params.get('lcd') && !ENV.PHONEME_SOURCE_SIZE) ENV.PHONEME_SOURCE_SIZE = game.doja.area;
+          // a .sp picked with the game replaces the kept one (its downloaded
+          // data); written once, so a restart keeps what the game saved
           const sp = rmsDir + '/game.sp';
-          if (!FS.analyzePath(sp).exists) FS.writeFile(sp, game.doja.sp || new Uint8Array(0));
+          if (game.doja.sp) {
+            FS.writeFile(sp, game.doja.sp);
+            log('scratchpad: ' + game.doja.sp.length + ' bytes from the picked .sp');
+            game.doja.sp = null;
+          } else if (!FS.analyzePath(sp).exists) {
+            FS.writeFile(sp, new Uint8Array(0));
+          }
         }
         if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
