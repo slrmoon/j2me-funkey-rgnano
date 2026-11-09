@@ -35,3 +35,8 @@ SUBSYSTEM_LCDLF_NATIVE_FILES += \
     lfjport_st_export.c \
     lfjport_profile.c
 
+
+# browser build: SDL surfaces in plain memory (web_sdl_video.c)
+ifeq ($(FUNKEY_WEB), true)
+SUBSYSTEM_LCDLF_NATIVE_FILES += web_sdl_video.c
+endif
