@@ -5,71 +5,241 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>phoneME Web</title>
 <style>
-  :root { --bg: #111; --fg: #ddd; --muted: #888; }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) { --bg: #f4f4f4; --fg: #222; --muted: #666; }
+  :root {
+    --bg: #101214; --panel: #1b1e22; --fg: #e4e6e8; --muted: #8b9198;
+    --accent: #e0b040; --line: #2c3036;
   }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f3f4f5; --panel: #ffffff; --fg: #1d2024; --muted: #5d636a;
+      --accent: #a87a10; --line: #d9dce0;
+    }
+  }
+  * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 14px system-ui, sans-serif; display: flex; flex-direction: column;
-         align-items: center; padding: 16px; box-sizing: border-box; }
-  canvas { image-rendering: pixelated; background: #000; outline: none;
-           width: min(100%, 720px); aspect-ratio: 1; height: auto; }
-  #status, #log { color: var(--muted); max-width: 720px; width: 100%; }
-  #log { white-space: pre-wrap; font: 12px monospace; max-height: 30vh; overflow: auto; }
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; margin: 4px 0 12px; font-weight: 600; }
+  h1 span { color: var(--muted); font-weight: 400; }
+  #stage { position: relative; width: 100%; aspect-ratio: 1; background: #000;
+           border-radius: 6px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; object-fit: contain;
+           image-rendering: pixelated; outline: none; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
+             align-items: center; justify-content: center; gap: 14px; padding: 16px;
+             background: var(--panel); text-align: center; }
+  #overlay.drag { outline: 3px dashed var(--accent); outline-offset: -10px; }
+  button, .file { font: inherit; padding: 10px 18px; border-radius: 6px; cursor: pointer;
+                  border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #111;
+                   font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .file input { display: none; }
+  #picked { color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #bar { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  #status { color: var(--muted); flex: 1; min-width: 150px; }
+  #bar button { padding: 6px 12px; }
+  details { margin-top: 14px; color: var(--muted); }
+  summary { cursor: pointer; }
+  #log { white-space: pre-wrap; font: 12px/1.35 ui-monospace, monospace;
+         max-height: 30vh; overflow: auto; margin-top: 8px; }
+  .keys { margin-top: 14px; color: var(--muted); font-size: 13px; }
+  kbd { border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+        font: 12px ui-monospace, monospace; color: var(--fg); }
 </style>
 </head>
 <body>
-<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
-<div id="status">Loading…</div>
-<div id="log"></div>
+<main>
+<h1>phoneME <span>J2ME in the browser · prototype</span></h1>
+<div id="stage">
+  <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="overlay">
+    <div>Open a J2ME game (.jar) — it stays on this computer.</div>
+    <div class="row">
+      <label class="file">Choose .jar<input id="file" type="file" accept=".jar"></label>
+      <button id="demo">MotherLoad (demo)</button>
+    </div>
+    <div id="picked"></div>
+    <button id="start" class="primary" disabled>Start</button>
+  </div>
+</div>
+<div id="bar">
+  <div id="status">No game loaded</div>
+  <button id="full" disabled>Full screen</button>
+  <button id="reload">Another game</button>
+</div>
+<div class="keys">
+  <kbd>←↑→↓</kbd> move · <kbd>Enter</kbd>/<kbd>Space</kbd> fire ·
+  <kbd>F1</kbd> <kbd>F2</kbd> soft keys · <kbd>0</kbd>–<kbd>9</kbd> keypad ·
+  <kbd>Esc</kbd> runtime menu. Saves are kept in this browser.
+</div>
+<details><summary>Log</summary><div id="log"></div></details>
+</main>
 <script>
-// Prototype launcher: runs one game (?jar=<file>&main=<MIDlet class>) from
-// this folder. The runtime files (lib/, appdb/) come from midp-files.data.
+// Launcher page of the browser build. Picks a jar (file, drop, or ?jar=),
+// reads the MIDlet class from its manifest, and starts runMidlet.js after a
+// click (browsers allow sound only after one). Record stores live in
+// IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
-const jar = params.get('jar') || 'game.jar';
-const mainClass = params.get('main') || '';
-const logEl = document.getElementById('log');
+const $ = id => document.getElementById(id);
+const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
-var Module = {
-  canvas: document.getElementById('canvas'),
-  arguments: ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', mainClass],
-  print: log,
-  printErr: log,
-  setStatus: s => { document.getElementById('status').textContent = s || 'Running'; },
-  preRun: [function () {
-    Module.addRunDependency('game');
-    fetch(jar).then(r => {
-      if (!r.ok) throw new Error(jar + ': ' + r.status);
-      return r.arrayBuffer();
-    }).then(buf => {
+function status(s) { $('status').textContent = s; }
+
+let game = null;   // { name, bytes, main }
+
+// --- the MIDlet class: MIDlet-1 in META-INF/MANIFEST.MF -------------------
+async function readManifest(bytes) {
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('not a zip/jar file');
+  let p = v.getUint32(eocd + 16, true);
+  const count = v.getUint16(eocd + 10, true);
+  for (let n = 0; n < count; n++) {
+    const method = v.getUint16(p + 10, true), csize = v.getUint32(p + 20, true);
+    const nlen = v.getUint16(p + 28, true), xlen = v.getUint16(p + 30, true);
+    const clen = v.getUint16(p + 32, true), local = v.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + xlen + clen;
+    if (name.toUpperCase() !== 'META-INF/MANIFEST.MF') continue;
+    const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+    const data = bytes.subarray(start, start + csize);
+    if (method === 0) return new TextDecoder().decode(data);
+    const out = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return await new Response(out).text();
+  }
+  throw new Error('no META-INF/MANIFEST.MF in the jar');
+}
+
+function manifestValue(text, key) {
+  const lines = text.replace(/\r/g, '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].toLowerCase().startsWith(key.toLowerCase() + ':')) {
+      let v = lines[i].slice(key.length + 1);
+      while (i + 1 < lines.length && lines[i + 1].startsWith(' ')) v += lines[++i].slice(1);
+      return v.trim();
+    }
+  }
+  return null;
+}
+
+async function pick(name, buf) {
+  const bytes = new Uint8Array(buf);
+  let main = params.get('main');
+  try {
+    const mf = await readManifest(bytes);
+    const m1 = manifestValue(mf, 'MIDlet-1');
+    if (!main && m1) main = (m1.split(',')[2] || '').trim();
+    if (!main && manifestValue(mf, 'AppClass')) {
+      throw new Error('i-appli (DoJa) games are not supported here yet');
+    }
+  } catch (e) {
+    $('picked').textContent = name + ': ' + e.message;
+    return;
+  }
+  if (!main) { $('picked').textContent = name + ': no MIDlet-1 in the manifest'; return; }
+  game = { name: name.replace(/\.jar$/i, ''), bytes, main };
+  $('picked').textContent = name + ' — ' + main;
+  $('start').disabled = false;
+  $('start').focus();
+  status('Ready: ' + game.name);
+}
+
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (f) pick(f.name, await f.arrayBuffer());
+});
+const ov = $('overlay');
+ov.addEventListener('dragover', e => { e.preventDefault(); ov.classList.add('drag'); });
+ov.addEventListener('dragleave', () => ov.classList.remove('drag'));
+ov.addEventListener('drop', async e => {
+  e.preventDefault(); ov.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) pick(f.name, await f.arrayBuffer());
+});
+async function fetchJar(url) {
+  status('Loading ' + url + '…');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + ': HTTP ' + r.status);
+  await pick(url.split('/').pop(), await r.arrayBuffer());
+}
+$('demo').addEventListener('click', () => fetchJar('MotherLoad.jar').catch(e => status(e.message)));
+if (params.get('jar')) fetchJar(params.get('jar')).catch(e => status(e.message));
+
+$('reload').addEventListener('click', () => location.href = location.pathname);
+$('full').addEventListener('click', () => $('stage').requestFullscreen && $('stage').requestFullscreen());
+
+// --- the runtime ---------------------------------------------------------
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = () => fail(new Error('cannot load ' + src));
+    document.body.appendChild(s);
+  });
+}
+
+let syncing = false;
+function saveRms() {
+  if (syncing || typeof FS === 'undefined') return;
+  syncing = true;
+  FS.syncfs(false, err => { syncing = false; if (err) log('saving failed: ' + err); });
+}
+
+$('start').addEventListener('click', async () => {
+  if (!game) return;
+  $('start').disabled = true;
+  status('Starting ' + game.name + '…');
+  const rmsDir = '/rms/' + game.name.replace(/[^A-Za-z0-9_.-]/g, '_');
+  window.Module = {
+    canvas: $('canvas'),
+    arguments: ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', game.main],
+    print: log,
+    printErr: log,
+    setStatus: s => s && status(s),
+    preRun: [function () {
       FS.mkdir('/game');
-      FS.writeFile('/game/game.jar', new Uint8Array(buf));
+      FS.writeFile('/game/game.jar', game.bytes);
       FS.mkdir('/rms');
+      FS.mkdir(rmsDir);
+      FS.mount(IDBFS, {}, rmsDir);
+      Module.addRunDependency('rms');
+      FS.syncfs(true, err => {
+        if (err) log('cannot read saves: ' + err);
+        Module.removeRunDependency('rms');
+      });
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
-        PHONEME_RMS_HOME: '/rms',
+        PHONEME_RMS_HOME: rmsDir,
         PHONEME_HEAP_MB: params.get('heap') || '16',
         PHONEME_LCD_SIZE: params.get('lcd') || '240x240',
         PHONEME_ENABLE_AUDIO: '1',
       });
       if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
-      Module.removeRunDependency('game');
-    }).catch(e => log('cannot load the game: ' + e));
-  }],
-};
-// The runtime reads the module's own bytes (function signatures, see
-// emscripten_sig.js), so the page fetches them and hands them over.
-function loadScript(src) {
-  return new Promise((ok, fail) => {
-    const s = document.createElement('script');
-    s.src = src; s.onload = ok; s.onerror = () => fail(new Error(src));
-    document.body.appendChild(s);
-  });
-}
-fetch('runMidlet.wasm').then(r => r.arrayBuffer()).then(buf => {
-  Module.wasmBinary = buf;
-  return loadScript('midp-files.js');
-}).then(() => loadScript('runMidlet.js')).catch(e => log('cannot start: ' + e));
+    }],
+    onRuntimeInitialized() {
+      ov.style.display = 'none';
+      $('full').disabled = false;
+      $('canvas').focus();
+      status('Running ' + game.name);
+      setInterval(saveRms, 3000);
+      document.addEventListener('visibilitychange', saveRms);
+      window.addEventListener('pagehide', saveRms);
+    },
+    onExit(code) { saveRms(); status(game.name + ' ended (' + code + ')'); },
+  };
+  try {
+    // the runtime reads its own module bytes (emscripten_sig.js)
+    Module.wasmBinary = await (await fetch('runMidlet.wasm')).arrayBuffer();
+    await loadScript('midp-files.js');
+    await loadScript('runMidlet.js');
+  } catch (e) {
+    status(e.message);
+  }
+});
 </script>
 </body>
 </html>
