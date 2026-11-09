@@ -83,7 +83,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=0a72c9c-1794235175';
+const V = '?v=561bf25-1794236389';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -323,6 +323,7 @@ $('start').addEventListener('click', async () => {
         if (err) log('cannot read saves: ' + err);
         applyRuntimeCfg(gameCfg);
         if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
+      if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
         Module.removeRunDependency('saves');
       });
     }],
