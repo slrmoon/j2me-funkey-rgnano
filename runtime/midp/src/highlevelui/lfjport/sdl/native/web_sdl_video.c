@@ -172,6 +172,25 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags) {
 
 SDL_Surface *SDL_GetVideoSurface(void) { return VideoSurface; }
 
+/* Emscripten's SDL_ShowCursor goes through pointer lock (which a page
+ * gets only after a click); the cursor over the game area stays as it is */
+int SDL_ShowCursor(int toggle) {
+    static int shown = 1;
+    if (toggle >= 0) shown = toggle;
+    return shown;
+}
+
+/* the page's game area changed size (window, full screen): the desktop
+ * presenter takes it as a window resize and draws at the new size */
+EMSCRIPTEN_KEEPALIVE void fk_web_resize(int w, int h) {
+    SDL_Event e;
+    memset(&e, 0, sizeof(e));
+    e.type = SDL_VIDEORESIZE;
+    e.resize.w = w;
+    e.resize.h = h;
+    SDL_PushEvent(&e);
+}
+
 /* back to the browser for a moment (MessageChannel: no 4 ms timer clamp) */
 EM_ASYNC_JS(void, fk_web_yield_js, (void), {
     await new Promise(function (resolve) {

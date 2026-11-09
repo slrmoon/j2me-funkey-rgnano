@@ -22,7 +22,8 @@
   h1 { font-size: 18px; margin: 4px 0 12px; font-weight: 600; }
   h1 span { color: var(--muted); font-weight: 400; }
   #stage { position: relative; width: 100%; aspect-ratio: 1; background: #000;
-           border-radius: 6px; overflow: hidden; }
+           border-radius: 6px; overflow: hidden; max-height: 85vh; margin: 0 auto; }
+  #stage:fullscreen { max-height: none; border-radius: 0; aspect-ratio: auto; }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain;
            image-rendering: pixelated; outline: none; }
   #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -325,6 +326,32 @@ function saveRms() {
   FS.syncfs(false, err => { syncing = false; if (err) log('saving failed: ' + err); });
 }
 
+// size of the game area in device pixels
+function stagePixels() {
+  const r = $('stage').getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const k = Math.min(1, 2048 / Math.max(r.width * dpr, r.height * dpr));
+  return [Math.max(120, Math.round(r.width * dpr * k)), Math.max(120, Math.round(r.height * dpr * k))];
+}
+let resizeTimer = 0;
+function stageResized() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (window.Module && Module._fk_web_resize) Module._fk_web_resize(...stagePixels());
+  }, 100);
+}
+window.addEventListener('resize', stageResized);
+document.addEventListener('fullscreenchange', stageResized);
+// F11 / Alt+Enter: the page's full screen (the runtime's own switch is for
+// a desktop window); taken before the runtime sees the key
+window.addEventListener('keydown', e => {
+  if (e.key === 'F11' || (e.key === 'Enter' && e.altKey)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if ($('stage').requestFullscreen) $('stage').requestFullscreen();
+  }
+}, true);
+
 // the command line of an i-appli (as launchers/linux/run.sh)
 function dojaArgs(spPath) {
   const d = game.doja;
@@ -344,6 +371,8 @@ $('start').addEventListener('click', async () => {
   if (started) { startAgain(true); return; }   // after the game ended
   started = true;
   $('start').disabled = true;
+  const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x240'));
+  if (lcd) $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
   status('Starting ' + game.name + '…');
   const rmsDir = '/rms/' + game.name.replace(/[^A-Za-z0-9_.-]/g, '_');
   window.Module = {
@@ -377,6 +406,9 @@ $('start').addEventListener('click', async () => {
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
         PHONEME_DEBUG_CONFIG: '/cfg/debug.cfg',
         PHONEME_CONFIG_PATH: gameCfg,
+        // desktop presenter: the game drawn straight at the size of the
+        // page's game area in device pixels (filters, fit/integer modes)
+        PHONEME_WINDOW_SIZE: stagePixels().join('x'),
       });
       Module.addRunDependency('saves');
       FS.syncfs(true, err => {
