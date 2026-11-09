@@ -19,14 +19,15 @@
  */
 #include <phoneme_config.h>
 
-#ifdef _WIN32
-/* Windows: no SIGPROF/thread CPU timers/ELF symbols; profiler disabled. */
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+/* Windows, browser: no SIGPROF/thread CPU timers/ELF symbols; profiler
+ * disabled. */
 #include <stdio.h>
 #include <stdlib.h>
 void PhoneMEProfileInit(void) {
     const char *e = PhoneMEConfig("PHONEME_PROFILE");
     if (e != NULL && e[0] == '1') {
-        fprintf(stderr, "phoneME: profiler is not available on Windows\n");
+        fprintf(stderr, "phoneME: profiler is not available on this platform\n");
     }
 }
 void PhoneMEProfileThread(void) {}
@@ -419,4 +420,4 @@ void PhoneMEProfileTick(void) {
     prof_last_usage = usage;
 }
 
-#endif /* !_WIN32 */
+#endif /* !_WIN32 && !__EMSCRIPTEN__ */

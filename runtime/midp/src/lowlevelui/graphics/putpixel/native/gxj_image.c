@@ -48,8 +48,9 @@
 #else
 #include <string.h>
 #include <SDL.h>
-#ifdef _WIN32
-/* Windows build: JPEG through stb_image (public domain), no SDL_image/libjpeg */
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
+/* Windows and browser builds: JPEG through stb_image (public domain), no
+ * SDL_image/libjpeg */
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
 #define STBI_ONLY_JPEG
@@ -307,6 +308,31 @@ decode_jpeg
     }
 
 #else
+#if defined(__EMSCRIPTEN__)
+    /* browser: stb_image straight to RGB565 (Emscripten's SDL is not
+     * SDL 1.2 enough for the SDL_ConvertSurface path below) */
+    {
+        int jw = 0, jh = 0, jn = 0, x, y, w, h;
+        unsigned char *rgb = stbi_load_from_memory(
+            (const unsigned char *) srcBuffer, length, &jw, &jh, &jn, 3);
+        *creationErrorPtr = GXUTL_NATIVE_IMAGE_DECODING_ERROR;
+        if (rgb != NULL && image->pixelData != NULL) {
+            w = jw < image->width ? jw : image->width;
+            h = jh < image->height ? jh : image->height;
+            for (y = 0; y < h; y++) {
+                const unsigned char *p = rgb + (size_t) y * jw * 3;
+                unsigned short *d = (unsigned short *) image->pixelData
+                    + (size_t) y * image->width;
+                for (x = 0; x < w; x++, p += 3) {
+                    d[x] = (unsigned short) (((p[0] & 0xF8) << 8)
+                        | ((p[1] & 0xFC) << 3) | (p[2] >> 3));
+                }
+            }
+            *creationErrorPtr = GXUTL_NATIVE_IMAGE_NO_ERROR;
+        }
+        if (rgb != NULL) stbi_image_free(rgb);
+    }
+#else
     /* no phoneME JPEG decoder in this build: SDL_image (libjpeg) does it,
      * on the device and the desktop build alike; i-appli load JPEG
      * pictures (photos, illustrations) */
@@ -374,6 +400,7 @@ decode_jpeg
         if (rgb != NULL) stbi_image_free(rgb);
 #endif
     }
+#endif /* __EMSCRIPTEN__ */
 #endif
 }
 

@@ -1,0 +1,17 @@
+#
+# SDL 1.2 port, WebAssembly target built with Emscripten (work in progress).
+# Sources are the same as linux_sdl_gcc (TARGET_OS stays linux); browser
+# differences are handled with __EMSCRIPTEN__ in the sources. The toolchain
+# comes from GNU_TOOLS_DIR (a shim directory whose gcc/g++/ar point at
+# emcc/em++/emar); SDL is Emscripten's own SDL 1.2, SDL_gfx is built from
+# source into SDL_GFX_LIB.
+#
+EXTRA_CFLAGS   += -D_GNU_SOURCE=1 -DFUNKEY_WEB=1
+EXTRA_INCLUDES += $(SDL_GFX_INCLUDES)
+
+# gcc.gmk's "-lpthread -lm" is fine: Emscripten links stub pthreads.
+LIBS += $(SDL_GFX_LIB) -lm
+LD_FLAGS += $(EMSCRIPTEN_LINK_FLAGS)
+
+# clang does not know gcc.gmk's -fconserve-space (ROMImage.cpp)
+EXTRA_CPPFLAGS := $(filter-out -fconserve-space,$(EXTRA_CPPFLAGS))
