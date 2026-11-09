@@ -40,7 +40,14 @@
   .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
   #bar { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
   #status { color: var(--muted); flex: 1; min-width: 150px; }
-  #bar button { padding: 6px 12px; }
+  #bar button, #bar .file { padding: 6px 12px; }
+  #bar .file[aria-disabled="true"] { opacity: .5; cursor: default; pointer-events: none; }
+  #recent { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 100%; }
+  #recent:empty { display: none; }
+  #recent .title { width: 100%; color: var(--muted); font-size: 13px; }
+  #recent .game { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  #recent .game button { border: 0; border-radius: 0; padding: 6px 10px; }
+  #recent .game button.del { color: var(--muted); padding: 6px 8px; border-left: 1px solid var(--line); }
   details { margin-top: 14px; color: var(--muted); }
   summary { cursor: pointer; }
   #log { white-space: pre-wrap; font: 12px/1.35 ui-monospace, monospace;
@@ -65,17 +72,21 @@
     </div>
     <div id="picked"></div>
     <button id="start" class="primary" disabled>Start</button>
+    <div id="recent"></div>
   </div>
 </div>
 <div id="bar">
   <div id="status">No game loaded</div>
+  <button id="export" disabled title="the game's saves as a .zip (the files of rms/&lt;game&gt; on the FunKey, Linux and Windows)">Export saves</button>
+  <label class="file small" id="importLabel" aria-disabled="true">Import saves<input id="import" type="file" multiple disabled></label>
   <button id="full" disabled>Full screen</button>
   <button id="reload">Another game</button>
 </div>
 <div class="keys">
   <kbd>←↑→↓</kbd> move · <kbd>Enter</kbd>/<kbd>Space</kbd> fire ·
   <kbd>F1</kbd> <kbd>F2</kbd> soft keys · <kbd>0</kbd>–<kbd>9</kbd> keypad ·
-  <kbd>Esc</kbd> runtime menu. Saves are kept in this browser.
+  <kbd>Esc</kbd> runtime menu. Saves and recent games are kept in this browser;
+  Export / Import saves moves them to or from another browser, the FunKey or a PC.
 </div>
 <details><summary>Log</summary><div id="log"></div></details>
 </main>
@@ -86,7 +97,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=fb4ab15-1794239121';
+const V = '?v=ba3bd35-1794240810';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -191,6 +202,8 @@ async function pick(files) {
   $('start').disabled = false;
   $('start').focus();
   status('Ready: ' + game.name);
+  saveButtons();
+  remember(game);
 }
 
 async function readFiles(list) {
@@ -220,13 +233,17 @@ $('demo').addEventListener('click', () => fetchJar('MotherLoad.jar').catch(e => 
 if (params.get('jar')) fetchJar(params.get('jar')).catch(e => status(e.message));
 
 $('reload').addEventListener('click', () => location.href = location.pathname);
+showRecent();
 
 // --- start again: the runtime cannot run twice in one page, so the game is
 // kept in IndexedDB and the page reloads with ?restart=1
 function stashDb() {
   return new Promise((ok, fail) => {
-    const r = indexedDB.open('phoneme-web', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('stash');
+    const r = indexedDB.open('phoneme-web', 2);
+    r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains('stash')) r.result.createObjectStore('stash');
+      if (!r.result.objectStoreNames.contains('games')) r.result.createObjectStore('games');
+    };
     r.onsuccess = () => ok(r.result);
     r.onerror = () => fail(r.error);
   });
@@ -247,8 +264,221 @@ async function unstash() {
     r.onsuccess = () => ok(r.result); r.onerror = () => ok(null);
   });
 }
+// --- recent games: the picked files kept in IndexedDB, so a reloaded page
+// starts them again without choosing the files
+async function library(mode, fn) {
+  const db = await stashDb();
+  return new Promise((ok, fail) => {
+    const t = db.transaction('games', mode);
+    const r = fn(t.objectStore('games'));
+    t.oncomplete = () => ok(r && r.result); t.onerror = () => fail(t.error);
+  });
+}
+async function remember(g) {
+  const copy = Object.assign({}, g, { time: Date.now() });
+  if (copy.doja) copy.doja = Object.assign({}, copy.doja, { sp: null });
+  try { await library('readwrite', st => st.put(copy, copy.name)); } catch (e) { log('cannot keep the game: ' + e); }
+  showRecent();
+}
+async function showRecent() {
+  let games = [];
+  try { games = (await library('readonly', st => st.getAll())) || []; } catch (e) {}
+  games.sort((a, b) => b.time - a.time);
+  const box = $('recent');
+  box.textContent = '';
+  if (!games.length) return;
+  const t = document.createElement('div');
+  t.className = 'title';
+  t.textContent = 'Recent games';
+  box.appendChild(t);
+  for (const g of games.slice(0, 12)) {
+    const el = document.createElement('span');
+    el.className = 'game';
+    const b = document.createElement('button');
+    b.textContent = g.name + (g.doja ? ' (i-appli)' : '');
+    b.onclick = () => { delete g.time; select(g); };
+    const d = document.createElement('button');
+    d.className = 'del';
+    d.textContent = '×';
+    d.title = 'Forget the game (its saves stay)';
+    d.onclick = async () => { await library('readwrite', st => st.delete(g.name)); showRecent(); };
+    el.append(b, d);
+    box.appendChild(el);
+  }
+}
+function select(g) {
+  game = g;
+  $('picked').textContent = g.name + ' — ' + (g.doja ? 'i-appli ' : '') + g.main;
+  $('start').disabled = false;
+  $('start').focus();
+  status('Ready: ' + g.name);
+  saveButtons();
+}
+
+// --- the game's save files: /rms/<game> (record stores; game.sp for an
+// i-appli), kept by Emscripten's IDBFS in an IndexedDB database of that name
+const rmsDirOf = g => '/rms/' + g.name.replace(/[^A-Za-z0-9_.-]/g, '_');
+let running = false;
+function saveButtons() {
+  $('export').disabled = !game;
+  $('import').disabled = !game;
+  $('importLabel').setAttribute('aria-disabled', game ? 'false' : 'true');
+}
+function idbfs(dir) {
+  return new Promise((ok, fail) => {
+    const r = indexedDB.open(dir, 21);   // IDBFS.DB_VERSION
+    r.onupgradeneeded = () => {
+      const st = r.result.createObjectStore('FILE_DATA');
+      st.createIndex('timestamp', 'timestamp', { unique: false });
+    };
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => fail(r.error);
+  });
+}
+async function readSaves(g) {
+  const dir = rmsDirOf(g), out = [];
+  if (running) {
+    for (const n of FS.readdir(dir)) {
+      const p = dir + '/' + n;
+      if (n !== '.' && n !== '..' && FS.isFile(FS.stat(p).mode)) out.push({ name: n, bytes: FS.readFile(p) });
+    }
+    return out;
+  }
+  const db = await idbfs(dir);
+  return new Promise((ok, fail) => {
+    const t = db.transaction('FILE_DATA');
+    const st = t.objectStore('FILE_DATA');
+    const keys = st.getAllKeys(), vals = st.getAll();
+    t.oncomplete = () => {
+      keys.result.forEach((k, i) => {
+        const v = vals.result[i];
+        if (v && v.contents) out.push({ name: k.slice(dir.length + 1), bytes: new Uint8Array(v.contents) });
+      });
+      ok(out);
+    };
+    t.onerror = () => fail(t.error);
+  });
+}
+async function writeSaves(g, files) {
+  const dir = rmsDirOf(g);
+  if (running) {
+    for (const n of FS.readdir(dir)) if (n !== '.' && n !== '..') FS.unlink(dir + '/' + n);
+    for (const f of files) FS.writeFile(dir + '/' + f.name, f.bytes);
+    return;
+  }
+  const db = await idbfs(dir);
+  await new Promise((ok, fail) => {
+    const t = db.transaction('FILE_DATA', 'readwrite');
+    const st = t.objectStore('FILE_DATA');
+    st.clear();
+    for (const f of files) st.put({ timestamp: new Date(), mode: 33206, contents: f.bytes }, dir + '/' + f.name);
+    t.oncomplete = ok; t.onerror = () => fail(t.error);
+  });
+}
+
+// zip: stored entries out, stored or deflated entries in
+const crcTable = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(b) {
+  let c = 0xffffffff;
+  for (let i = 0; i < b.length; i++) c = crcTable[(c ^ b[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function makeZip(files) {
+  const parts = [], dir = [];
+  let off = 0;
+  for (const f of files) {
+    const name = new TextEncoder().encode(f.name), crc = crc32(f.bytes);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true);
+    h.setUint16(12, 33, true);   // 1980-01-01
+    h.setUint32(14, crc, true); h.setUint32(18, f.bytes.length, true); h.setUint32(22, f.bytes.length, true);
+    h.setUint16(26, name.length, true);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true);
+    c.setUint16(14, 33, true);
+    c.setUint32(16, crc, true); c.setUint32(20, f.bytes.length, true); c.setUint32(24, f.bytes.length, true);
+    c.setUint16(28, name.length, true); c.setUint32(42, off, true);
+    parts.push(h, name, f.bytes);
+    dir.push(c, name);
+    off += 30 + name.length + f.bytes.length;
+  }
+  const dirLen = dir.reduce((n, x) => n + x.byteLength, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+  e.setUint32(12, dirLen, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...dir, e], { type: 'application/zip' });
+}
+async function readZip(bytes) {
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (v.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('not a zip file');
+  let p = v.getUint32(eocd + 16, true);
+  const out = [];
+  for (let n = v.getUint16(eocd + 10, true); n > 0; n--) {
+    const method = v.getUint16(p + 10, true), csize = v.getUint32(p + 20, true);
+    const nlen = v.getUint16(p + 28, true), xlen = v.getUint16(p + 30, true);
+    const clen = v.getUint16(p + 32, true), local = v.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + xlen + clen;
+    if (name.endsWith('/')) continue;
+    const start = local + 30 + v.getUint16(local + 26, true) + v.getUint16(local + 28, true);
+    let data = bytes.subarray(start, start + csize);
+    if (method === 8) {
+      const s2 = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      data = new Uint8Array(await new Response(s2).arrayBuffer());
+    } else if (method !== 0) continue;
+    out.push({ name: name.split('/').pop(), bytes: data });
+  }
+  return out;
+}
+
+$('export').addEventListener('click', async () => {
+  if (!game) return;
+  try {
+    let files = await readSaves(game);
+    // the scratchpad goes out as <game>.sp, as it lies next to the jar elsewhere
+    files = files.map(f => f.name === 'game.sp' ? { name: game.name + '.sp', bytes: f.bytes } : f);
+    if (!files.length) { status('No saves for ' + game.name + ' yet'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(makeZip(files));
+    a.download = game.name + '-saves.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    status('Exported ' + files.length + ' file(s) of ' + game.name);
+  } catch (e) { status('Export failed: ' + e.message); }
+});
+$('import').addEventListener('change', async e => {
+  const list = await readFiles(e.target.files);
+  e.target.value = '';
+  if (!game || !list.length) return;
+  try {
+    let files = [];
+    for (const f of list) files.push(...(/\.zip$/i.test(f.name) ? await readZip(f.bytes) : [f]));
+    files = files.map(f => /\.sp$/i.test(f.name) ? { name: 'game.sp', bytes: f.bytes } : f);
+    if (!files.length) { status('Nothing to import'); return; }
+    if (!confirm('Replace the saves of ' + game.name + ' with ' + files.length + ' imported file(s)?')) return;
+    await writeSaves(game, files);
+    if (game.doja) game.doja.sp = null;   // a .sp picked with the game would overwrite them
+    status('Imported ' + files.length + ' file(s) for ' + game.name);
+    if (running) {
+      // the game has its saves open: start it again with the new ones
+      FS.syncfs(false, () => startAgain(true));
+    }
+  } catch (err) { status('Import failed: ' + err.message); }
+});
+
 async function startAgain(auto) {
   await stash(Object.assign({}, game, { auto }));
+  leaving = true;
   location.href = location.pathname + '?restart=1' + (params.get('fps') ? '&fps=1' : '');
 }
 if (params.get('restart')) {
@@ -257,10 +487,7 @@ if (params.get('restart')) {
     if (!g) return;
     const auto = g.auto;
     delete g.auto;
-    game = g;
-    $('picked').textContent = g.name + '.jar — ' + g.main;
-    $('start').disabled = false;
-    status('Ready: ' + g.name);
+    select(g);
     if (auto) $('start').click();
   }).catch(e => log('cannot restart: ' + e));
 }
@@ -368,6 +595,7 @@ function dojaArgs(spPath) {
 }
 
 let started = false;
+let leaving = false;   // our own reloads (restart) need no question
 $('start').addEventListener('click', async () => {
   if (!game) return;
   if (started) { startAgain(true); return; }   // after the game ended
@@ -376,7 +604,7 @@ $('start').addEventListener('click', async () => {
   const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x240'));
   if (lcd) $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
   status('Starting ' + game.name + '…');
-  const rmsDir = '/rms/' + game.name.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const rmsDir = rmsDirOf(game);
   window.Module = {
     locateFile: path => path + V,   // midp-files.data
     canvas: $('canvas'),
@@ -442,6 +670,7 @@ $('start').addEventListener('click', async () => {
       });
     }],
     onRuntimeInitialized() {
+      running = true;
       ov.style.display = 'none';
       $('full').disabled = false;
       $('canvas').focus();
@@ -449,9 +678,17 @@ $('start').addEventListener('click', async () => {
       setInterval(saveRms, 3000);
       document.addEventListener('visibilitychange', saveRms);
       window.addEventListener('pagehide', saveRms);
+      // reload / close while playing: ask first (the game may not have saved)
+      window.addEventListener('beforeunload', e => {
+        if (!running || leaving) return;
+        saveRms();
+        e.preventDefault();
+        e.returnValue = '';
+      });
     },
     // runMidlet returned: Exit or "Restart game" in the runtime menu
     fkGameEnded(code) {
+      running = false;
       saveRms();
       let restart = false;
       try { restart = FS.analyzePath('/tmp/restart-request').exists; } catch (e) {}
