@@ -15,5 +15,10 @@ LIBS += $(SDL_GFX_LIB) -lm
 # system is not for the browser.
 LD_FLAGS := $(filter-out -sNODERAWFS=1,$(LD_FLAGS)) $(EMSCRIPTEN_LINK_FLAGS)
 
+# Asyncify: the VM runs in slave mode (midp_master_mode_events.c), so only
+# the main loop's wait unwinds; the master-mode wait paths of the VM are
+# never used and must not drag the interpreter into the instrumentation.
+LD_FLAGS += -sASYNCIFY_IGNORE_INDIRECT=1 -sASYNCIFY_REMOVE=@$(CURDIR)/asyncify-remove.json
+
 # clang does not know gcc.gmk's -fconserve-space (ROMImage.cpp)
 EXTRA_CPPFLAGS := $(filter-out -fconserve-space,$(EXTRA_CPPFLAGS))
