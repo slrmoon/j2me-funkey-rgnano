@@ -116,7 +116,7 @@ async function readManifest(bytes) {
     const out = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     return await new Response(out).text();
   }
-  throw new Error('no META-INF/MANIFEST.MF in the jar');
+  return '';   // i-appli jars usually have none: the .jam describes them
 }
 
 function manifestValue(text, key) {
@@ -169,7 +169,8 @@ async function pick(files) {
   const name = jar.name.replace(/\.jar$/i, '');
   if (chosen.jam || !main) {
     if (!chosen.jam) {
-      $('picked').textContent = jar.name + ': no MIDlet-1 — if it is an i-appli, add its .jam';
+      $('picked').textContent = jar.name + (mf ? ': no MIDlet-1' : ': no manifest') +
+        ' — if it is an i-appli, add its .jam';
       return;
     }
     const jam = jamValues(chosen.jam.bytes);
