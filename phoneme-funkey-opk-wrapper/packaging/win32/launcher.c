@@ -870,7 +870,9 @@ int wmain(int argc, wchar_t **argv) {
                         APP_TITLE, MB_OK | MB_ICONWARNING);
     }
     k = (int)code;
-    if (code != 0 && !console) show_log_tail(logpath, code);
+    /* 1 = MIDP_SHUTDOWN_STATUS: the window was closed or the game quit;
+     * Java errors in a running game are shown by the runtime itself */
+    if (code != 0 && code != 1 && !console) show_log_tail(logpath, code);
     (void)started;
     (void)doja;
     return k;
