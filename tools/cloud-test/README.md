@@ -32,17 +32,12 @@ gcc -m32 -O2 -c tools/cloud-test/fmodshim.c -o $T/fmodshim.o
 ## 3. Build runtime and OPK
 
 ```bash
-cd phoneme-funkey-clean
-HOST_LINK_FLAGS="-m32 $T/fmodshim.o" JDK_DIR=$T/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
-FUNKEY_SDK_DIR=$T/FunKey-sdk-2.3.0 ./build-funkey-s.sh
-cd ../phoneme-funkey-opk-wrapper
-FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
-JDK_DIR=$T/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 FUNKEY_SDK_DIR=$T/FunKey-sdk-2.3.0 \
-FUNKEY_CC=$T/FunKey-sdk-2.3.0/bin/arm-funkey-linux-musleabihf-gcc ./package-funkey-opk.sh
+HOST_LINK_FLAGS="-m32 -pthread $T/fmodshim.o" JDK_DIR=$T/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
+FUNKEY_SDK_DIR=$T/FunKey-sdk-2.3.0 ./build.sh funkey package
 ```
 
 Compiler flags are not tracked by make: after changing them delete
-`phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s`.
+`out/funkey`.
 
 ## 4. ARM emulator
 
@@ -53,7 +48,7 @@ ln -sf libc.so $T/qroot/lib/ld-musl-armhf.so.1
 mkdir -p $T/tools
 $T/FunKey-sdk-2.3.0/bin/arm-funkey-linux-musleabihf-gcc -shared -fPIC -O2 \
     -I$SYS/usr/include/SDL tools/cloud-test/inject.c -o $T/tools/inject.so -lSDL -ldl
-unsquashfs -d $T/run/home phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk
+unsquashfs -d $T/run/home out/funkey/opk/pm.opk
 cp tools/cloud-test/run.sh $T/run/
 ```
 

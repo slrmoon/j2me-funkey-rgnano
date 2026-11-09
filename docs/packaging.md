@@ -1,67 +1,28 @@
-# FunKey OPK Wrapper for phoneME
+# Packaging and launchers
 
-This directory contains the `OPK` packaging layer around the runtime:
+Each target has its launcher and packaging script in `launchers/<target>/`;
+`./build.sh <target> package` runs it after the build. The runtime side of
+the interface is in [runtime-interface.md](runtime-interface.md).
 
-- launcher
-- JAR/JAD wrapping
-- icon + desktop entry
+| Folder | Launcher | Package |
+|---|---|---|
+| `launchers/funkey/` | `pm-launch.c`: SDL game browser on the handheld | `out/funkey/opk/pm.opk` |
+| `launchers/linux/` | `run.sh`, `test-games.py`, `test-doja.py` | `out/dist/funkey-j2me-linux-x86.tar.gz` |
+| `launchers/windows/` | `FunKeyJ2ME.exe` (`launcher.c`): settings window | `out/dist/funkey-j2me-win32.zip` |
 
-It is intentionally kept separate from the runtime source tree.
+All packages include `lib/doja-support.jar`, built from `java/doja/stubs`
+(the DoJa runtime) and `java/doja/api` (generated API skeletons).
 
-## Contents
-
-- `package-funkey-opk.sh`
-- `packaging/funkey-s/pm-launch.c`
-- `packaging/funkey-s/HelloMidlet.java`
-- `packaging/funkey-s/java-runtime-icon.png`
-
-## Expected layout
-
-By default the wrapper expects the runtime source tree next to it:
-
-```text
-repo/
-  phoneme-funkey-clean/
-  phoneme-funkey-opk-wrapper/
-```
-
-Default runtime root used by the script:
-
-`../phoneme-funkey-clean/phoneME-GP2X-SDL`
-
-You can override it with:
+## FunKey OPK
 
 ```bash
-FUNKEY_PHONEME_ROOT=/path/to/phoneME-GP2X-SDL
-```
-
-## Dependency versions
-
-1. Runtime tree
-   Build `../phoneme-funkey-clean` first so that `build_output_funkey_s` exists.
-
-2. `FunKey SDK 2.3.0`
-   Direct release used by this project:
-   `https://github.com/FunKey-Project/FunKey-OS/releases/download/FunKey-OS-2.3.0/FunKey-sdk-2.3.0.tar.gz`
-
-3. `Azul Zulu JDK 7`
-   Exact archive used by this project:
-   `zulu7.24.0.1-ca-jdk7.0.191-linux_x64.tar.gz`
-   Direct download:
-   `https://cdn.azul.com/zulu/bin/zulu7.24.0.1-ca-jdk7.0.191-linux_x64.tar.gz`
-
-## Build an OPK
-
-```bash
-FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
 FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
 JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
-./package-funkey-opk.sh
+launchers/funkey/package.sh
 ```
 
-Result:
-
-- `../phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
+Needs `out/funkey` from `./build.sh funkey` (`BUILD_OUTPUT_DIR` overrides it).
+Result: `out/funkey/opk/pm.opk`.
 
 The default OPK is launcher/runtime-only: it contains the browser launcher,
 phoneME runtime/JVM, libraries, appdb seed, icon, and helper scripts. It does
@@ -72,17 +33,18 @@ Legacy debug bundles with a built-in MIDlet are still available only when
 requested explicitly:
 
 ```bash
-FUNKEY_BUNDLE_MIDLET=1 ./package-funkey-opk.sh /path/to/game.jar
+FUNKEY_BUNDLE_MIDLET=1 launchers/funkey/package.sh /path/to/game.jar [game.jad]
 ```
 
-## Current launcher defaults
+Defaults: app title `J2ME`, desktop category `emulators`.
 
-- App title: `J2ME`
-- Desktop category: `emulators`
+## Linux and Windows
 
-## Not included here
+```bash
+JDK_DIR=/path/to/zulu7... launchers/linux/package.sh [out_dir]
+JDK_DIR=/path/to/zulu7... launchers/windows/package.sh [out_dir]
+```
 
-- `build_output*`
-- prebuilt `OPK` files
-- SDK/JDK bundles
-- local test JARs
+They read `out/linux-x86` and `out/win32` and write to `out/dist` by
+default. The Windows script also builds `FunKeyJ2ME.exe` (needs the MinGW
+sysroot with zlib that `scripts/build-win32.sh` made in `out/win32/sysroot`).

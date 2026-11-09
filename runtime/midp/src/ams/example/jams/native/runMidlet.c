@@ -25,6 +25,7 @@
  */
 
 #include <stdio.h>
+#include <phoneme_config.h>
 #include <string.h>
 #include <ctype.h>
 #include <midp_logging.h>
@@ -47,8 +48,8 @@
 #define RUNMIDLET_MAX_ARGS 32
 
 static int getMidpHeapRequirement() {
-    char *heapKb = getenv("PHONEME_HEAP_KB");
-    char *heapMb = getenv("PHONEME_HEAP_MB");
+    char *heapKb = PhoneMEConfig("PHONEME_HEAP_KB");
+    char *heapMb = PhoneMEConfig("PHONEME_HEAP_MB");
     int value;
 
     if (heapKb != NULL && heapKb[0] != '\0') {

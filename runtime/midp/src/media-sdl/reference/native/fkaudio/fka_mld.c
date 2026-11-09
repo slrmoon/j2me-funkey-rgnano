@@ -14,6 +14,7 @@
  * multiply-add and int overflow wraps.
  */
 #include "fka_mld.h"
+#include "fka_config.h"
 
 #ifdef FKA_MLD_TRACE
 #include <stdio.h>
@@ -980,7 +981,7 @@ static void sampler_init(Sampler *s, float rate)
      * still well above our 22 kHz. PHONEME_MLD_EXACT=1: bit-exact with the
      * reference (used by the tests in tools/doja/mldref). */
     {
-        const char *e = getenv("PHONEME_MLD_EXACT");
+        const char *e = FKA_CONFIG("PHONEME_MLD_EXACT");
         s->steps = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 2;
     }
     s->smpWidth = MA3_RATE / s->steps / rate;

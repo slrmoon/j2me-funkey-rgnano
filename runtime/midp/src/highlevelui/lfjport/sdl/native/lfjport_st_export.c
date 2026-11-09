@@ -25,6 +25,7 @@
  */
 
 #include <kni.h>
+#include <phoneme_config.h>
 #include <midp_logging.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -532,7 +533,7 @@ static int find_fps_limit_index(const char *id) {
 }
 
 static void configure_frame_limit(void) {
-    const char *fpsText = getenv("PHONEME_FPS_LIMIT");
+    const char *fpsText = PhoneMEConfig("PHONEME_FPS_LIMIT");
     OverlayFpsSel = find_fps_limit_index(fpsText);
     FrameLimitFps = OverlayFpsLimits[OverlayFpsSel].fps;
     FrameLimitNext = 0;
@@ -575,7 +576,7 @@ static void configure_logical_screen_size(void) {
     const char *sizeText;
     int configuredWidth, configuredHeight;
 
-    sizeText = getenv("PHONEME_LCD_SIZE");
+    sizeText = PhoneMEConfig("PHONEME_LCD_SIZE");
     if (parse_screen_size(sizeText, &configuredWidth, &configuredHeight)) {
         OriginalWidth = configuredWidth;
         OriginalHeight = configuredHeight;
@@ -615,7 +616,7 @@ static void configure_present_scale_mode(void) {
     PresentSourceWidth = 0;
     PresentSourceHeight = 0;
     PresentSourceFull = 0;
-    modeText = getenv("PHONEME_SCALE_MODE");
+    modeText = PhoneMEConfig("PHONEME_SCALE_MODE");
     if (modeText != NULL) {
         if (strcmp(modeText, "fill") == 0) {
             PresentScaleMode = PRESENT_SCALE_FILL;
@@ -632,8 +633,8 @@ static void configure_present_scale_mode(void) {
         }
     }
     {
-        const char *filterText = getenv("PHONEME_SCALE_FILTER");
-        const char *panText = getenv("PHONEME_PAN");
+        const char *filterText = PhoneMEConfig("PHONEME_SCALE_FILTER");
+        const char *panText = PhoneMEConfig("PHONEME_PAN");
         int i;
         PresentFilter = SCALE_FILTER_SHARP;
         for (i = 0; filterText != NULL && i < OVERLAY_FILTER_COUNT; i++) {
@@ -650,7 +651,7 @@ static void configure_present_scale_mode(void) {
         }
     }
 
-    ratioText = getenv("PHONEME_SCALE_RATIO");
+    ratioText = PhoneMEConfig("PHONEME_SCALE_RATIO");
     if (ratioText != NULL) {
         ratio = atoi(ratioText);
         if (ratio >= 250 && ratio <= 4000) {
@@ -659,7 +660,7 @@ static void configure_present_scale_mode(void) {
             PresentScaleRatio = ratio * 10;
         }
     }
-    sourceText = getenv("PHONEME_SOURCE_SIZE");
+    sourceText = PhoneMEConfig("PHONEME_SOURCE_SIZE");
     if (sourceText != NULL && strcmp(sourceText, "full") == 0) {
         PresentSourceFull = 1;
     } else {
@@ -954,12 +955,12 @@ static int overlay_debug_needs_restart(void) {
 
 /* Restart: leave a flag for the launcher, then exit like "Exit" does */
 static int overlay_can_restart(void) {
-    const char *flag = getenv("PHONEME_RESTART_FLAG");
+    const char *flag = PhoneMEConfig("PHONEME_RESTART_FLAG");
     return flag != NULL && flag[0] != '\0';
 }
 
 static void overlay_request_restart(void) {
-    const char *flag = getenv("PHONEME_RESTART_FLAG");
+    const char *flag = PhoneMEConfig("PHONEME_RESTART_FLAG");
     if (flag != NULL && flag[0] != '\0') {
         FILE *f = fopen(flag, "w");
         if (f != NULL) fclose(f);
@@ -1000,17 +1001,17 @@ static void overlay_init(void) {
     char *volumeText;
     int i;
 
-    OverlayDebugPath = getenv("PHONEME_DEBUG_CONFIG");
+    OverlayDebugPath = PhoneMEConfig("PHONEME_DEBUG_CONFIG");
     overlay_load_debug();
     for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) OverlayDebugAtStart[i] = OverlayDebug[i];
-    ShowFps = getenv("PHONEME_SHOW_FPS") != NULL;
+    ShowFps = PhoneMEConfig("PHONEME_SHOW_FPS") != NULL;
 
-    OverlayConfigPath = getenv("PHONEME_CONFIG_PATH");
+    OverlayConfigPath = PhoneMEConfig("PHONEME_CONFIG_PATH");
     configure_frame_limit();
     overlay_apply_display();
     OverlayResolutionChanged = 0;
     OverlayProfileSel = PhoneMEInputGetProfileIndex();
-    volumeText = getenv("PHONEME_SOUND_VOLUME");
+    volumeText = PhoneMEConfig("PHONEME_SOUND_VOLUME");
     if (volumeText != NULL && volumeText[0] != '\0') {
         OverlayVolume = atoi(volumeText);
     } else {
@@ -1018,7 +1019,7 @@ static void overlay_init(void) {
     }
     overlay_set_volume(OverlayVolume);
     /* the engine reads PHONEME_SYNTH itself at start; just mirror it */
-    OverlaySynthSel = overlay_find_synth(getenv("PHONEME_SYNTH"));
+    OverlaySynthSel = overlay_find_synth(PhoneMEConfig("PHONEME_SYNTH"));
 }
 
 
@@ -2271,7 +2272,7 @@ gxj_screen_buffer gxj_system_screen_buffer;
  */
 int lfjport_ui_init() 
 { int audioStatus;
-  DisplayDebug = getenv("PHONEME_DISPLAY_DEBUG") != NULL;
+  DisplayDebug = PhoneMEConfig("PHONEME_DISPLAY_DEBUG") != NULL;
   if (DisplayDebug) {
     fprintf(stderr, "lfjport_ui_init: begin %dx%d\n",
             SDL_FULLWIDTH, SDL_FULLHEIGHT);
@@ -2282,7 +2283,7 @@ int lfjport_ui_init()
    }
   if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: SDL_Init ok\n");
   SDL_ShowCursor(SDL_DISABLE);
-  if (getenv("PHONEME_ENABLE_AUDIO") != NULL)
+  if (PhoneMEConfig("PHONEME_ENABLE_AUDIO") != NULL)
    { audioStatus = InitAudioSubsystem();
      if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: InitAudioSubsystem=%d\n", audioStatus);
    }
@@ -2294,12 +2295,12 @@ int lfjport_ui_init()
     SDL_JoystickEventState(SDL_ENABLE);
   }
   OriginalOrientation = 0;
-  if (getenv("J2ME_GP2X_REVERSE") != NULL) OriginalOrientation = 1;
+  if (PhoneMEConfig("J2ME_GP2X_REVERSE") != NULL) OriginalOrientation = 1;
   OriginalWidth = OriginalOrientation ? SDL_FULLHEIGHT : SDL_FULLWIDTH;
   OriginalHeight = OriginalOrientation ? SDL_FULLWIDTH : SDL_FULLHEIGHT;
   configure_logical_screen_size();
   configure_present_scale_mode();
-  if (getenv("PHONEME_ENABLE_GP2X_KEYS") != NULL) {
+  if (PhoneMEConfig("PHONEME_ENABLE_GP2X_KEYS") != NULL) {
     InitGP2XKeys();
     if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: InitGP2XKeys ok\n");
   } else {
@@ -2308,17 +2309,17 @@ int lfjport_ui_init()
   overlay_init();
   PhoneMEProfileInit();
   {
-    const char *ws = getenv("PHONEME_WINDOW_SCALE");
-    const char *wsize = getenv("PHONEME_WINDOW_SIZE");
+    const char *ws = PhoneMEConfig("PHONEME_WINDOW_SCALE");
+    const char *wsize = PhoneMEConfig("PHONEME_WINDOW_SIZE");
     int winW = 0, winH = 0;
     WindowScale = ws != NULL ? atoi(ws) : 1;
     if (WindowScale < 1) WindowScale = 1;
     if (WindowScale > 8) WindowScale = 8;
     DesktopMode = WindowScale > 1 || (wsize != NULL && wsize[0] != '\0') ||
-                  (getenv("PHONEME_DESKTOP") != NULL && atoi(getenv("PHONEME_DESKTOP")) != 0);
+                  (PhoneMEConfig("PHONEME_DESKTOP") != NULL && atoi(PhoneMEConfig("PHONEME_DESKTOP")) != 0);
     if (DesktopMode) {
       const SDL_VideoInfo *vi = SDL_GetVideoInfo();   /* before any video mode: the monitor */
-      const char *title = getenv("PHONEME_WINDOW_TITLE");
+      const char *title = PhoneMEConfig("PHONEME_WINDOW_TITLE");
       DesktopW = vi != NULL && vi->current_w > 0 ? vi->current_w : 1280;
       DesktopH = vi != NULL && vi->current_h > 0 ? vi->current_h : 1024;
       if (!parse_screen_size(wsize, &winW, &winH)) {
@@ -2335,7 +2336,7 @@ int lfjport_ui_init()
       WindowedW = winW;
       WindowedH = winH;
       SDL_WM_SetCaption(title != NULL && title[0] ? title : "phoneME", "phoneME");
-      if (getenv("PHONEME_FULLSCREEN") != NULL && atoi(getenv("PHONEME_FULLSCREEN")) != 0 &&
+      if (PhoneMEConfig("PHONEME_FULLSCREEN") != NULL && atoi(PhoneMEConfig("PHONEME_FULLSCREEN")) != 0 &&
           DesktopW <= SCALE_MAX_DIM && DesktopH <= SCALE_MAX_DIM) {
         Native_SDL_Window = SDL_SetVideoMode(DesktopW, DesktopH, 16, SDL_SWSURFACE | SDL_FULLSCREEN);
         WindowFullscreen = Native_SDL_Window != NULL;
@@ -2406,7 +2407,7 @@ int lfjport_ui_init()
  * Finalize the lfjport_ui_ native resources.
  */
 void lfjport_ui_finalize() 
-{ if (getenv("PHONEME_ENABLE_AUDIO") != NULL) FinalizeAudioSubsystem();
+{ if (PhoneMEConfig("PHONEME_ENABLE_AUDIO") != NULL) FinalizeAudioSubsystem();
   SDL_Quit();
 }
 

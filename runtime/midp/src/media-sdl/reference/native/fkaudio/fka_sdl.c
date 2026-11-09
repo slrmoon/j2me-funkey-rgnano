@@ -11,6 +11,7 @@
  * PHONEME_AUDIO_SUM     1/0 forces the halving on/off
  */
 #include "fka.h"
+#include "fka_config.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -31,7 +32,7 @@ static int g_have_next;
 static int detect_monocard(void)
 {
     char line[256];
-    const char *env = getenv("PHONEME_AUDIO_SUM");
+    const char *env = FKA_CONFIG("PHONEME_AUDIO_SUM");
     FILE *f;
     int found = 0;
     if (env != NULL && env[0] != '\0') return atoi(env) != 0;
@@ -97,7 +98,7 @@ static void callback(void *user, Uint8 *stream, int bytes)
 int fka_output_open(void)
 {
     SDL_AudioSpec want, got;
-    const char *env = getenv("PHONEME_AUDIO_BUFFER");
+    const char *env = FKA_CONFIG("PHONEME_AUDIO_BUFFER");
     int samples = 1024;
     if (g_open) return 0;
     if (env != NULL && atoi(env) >= 128 && atoi(env) <= 8192) samples = atoi(env);
@@ -138,7 +139,7 @@ int fka_output_open(void)
     }
     g_open = 1;
     SDL_PauseAudio(0);
-    if (getenv("PHONEME_AUDIO_TRACE") != NULL)
+    if (FKA_CONFIG("PHONEME_AUDIO_TRACE") != NULL)
         fprintf(stderr, "fkaudio: %d Hz, %d ch, %d samples, sum=%d\n",
                 g_rate, g_channels, got.samples, g_sum);
     return 0;

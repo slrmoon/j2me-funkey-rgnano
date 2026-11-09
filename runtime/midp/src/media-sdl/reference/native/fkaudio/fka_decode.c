@@ -13,6 +13,7 @@
  *   MLD  (i-mode / DoJa melody: Yamaha MA-3 FM synthesis, fka_mld.c)
  */
 #include "fka_decode.h"
+#include "fka_config.h"
 #include "fka.h"
 #include "fka_mld.h"
 
@@ -562,7 +563,7 @@ static int mld_native_disabled(void)
 {
     static int v = -1;
     if (v < 0) {
-        const char *e = getenv("PHONEME_MLD_MIDI");
+        const char *e = FKA_CONFIG("PHONEME_MLD_MIDI");
         FILE *f = NULL;
         v = (e != NULL && e[0] != '\0' && e[0] != '0');
         if (!v && (f = fopen("/mnt/FunKey/.pm/mld-midi", "r")) != NULL) {

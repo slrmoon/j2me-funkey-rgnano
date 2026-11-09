@@ -34,6 +34,7 @@
  */
 
 #include <kni.h>
+#include <phoneme_config.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,7 +106,7 @@ midp_suite_get_rms_filename(SuiteIdType suiteId,
      * See rms.c, rmsdb_get_record_store_space_available() for more details.
      */
     root = storage_get_root(storageId);
-    envRmsRoot = getenv("PHONEME_RMS_HOME");
+    envRmsRoot = PhoneMEConfig("PHONEME_RMS_HOME");
     if (envRmsRoot != NULL && envRmsRoot[0] != '\0') {
         envRmsRootLen = strlen(envRmsRoot);
         if (envRmsRootLen + 2 >= sizeof(envRmsRootPath)) {

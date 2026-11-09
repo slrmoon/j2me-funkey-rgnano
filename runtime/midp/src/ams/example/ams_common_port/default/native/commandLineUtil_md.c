@@ -25,6 +25,7 @@
  */
 
 #include <string.h>
+#include <phoneme_config.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -71,7 +72,7 @@ char* midpFixMidpHome(char *cmd) {
      * If MIDP_HOME is set, just use it. Does not check if MIDP_HOME is
      * pointing to a directory contain "appdb".
      */
-    midp_home = getenv("MIDP_HOME");
+    midp_home = PhoneMEConfig("MIDP_HOME");
     if (midp_home != NULL) {
         return midp_home;
     }

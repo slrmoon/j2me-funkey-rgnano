@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include "fka.h"
+#include "fka_config.h"
 
 extern const char *midpGetHomeDir(void);
 
@@ -27,7 +28,7 @@ static int file_exists(const char *path)
 
 static void load_user_bank(void)
 {
-    const char *env = getenv("PHONEME_SOUNDBANK");
+    const char *env = FKA_CONFIG("PHONEME_SOUNDBANK");
     const char *home;
     char path[512];
     if (env != NULL && env[0] != '\0') {
@@ -44,8 +45,8 @@ static void load_user_bank(void)
 
 int InitAudioSubsystem(void)
 {
-    const char *synth = getenv("PHONEME_SYNTH");
-    const char *vol = getenv("PHONEME_SOUND_VOLUME");
+    const char *synth = FKA_CONFIG("PHONEME_SYNTH");
+    const char *vol = FKA_CONFIG("PHONEME_SOUND_VOLUME");
     int r;
     if (g_audio_state != 0) return g_audio_state > 0 ? 0 : g_audio_state;
     if (synth != NULL) {

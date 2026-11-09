@@ -357,31 +357,38 @@ and command lists, all drawn through the M3G renderer above.
 
 ## Repository structure
 
-This export is split into two parts:
+```text
+build.sh                 ./build.sh <funkey|linux|windows> [package]
+runtime/                 the runtime: phoneME CLDC VM, MIDP (SDL port), JSRs,
+                         M3G, fkaudio, our native code (upstream phoneME tree)
+java/doja/               i-appli (DoJa) API and runtime classes, all targets
+launchers/
+  funkey/                FunKey S / RG Nano: launcher pm-launch.c, OPK packaging
+  linux/                 desktop Linux: run.sh, test-games.py, test-doja.py
+  windows/               Windows: FunKeyJ2ME.exe (settings window), packaging
+scripts/                 per-target build scripts used by build.sh
+docs/                    building, packaging, runtime interface, DoJa status
+tools/                   test MIDlets, reference renderers, cloud test helpers
+out/                     build outputs (not in git): out/<target>, out/dist
+```
 
-- `phoneme-funkey-clean`
-  Cleaned runtime source tree with FunKey-specific build scripts.
-- `phoneme-funkey-opk-wrapper`
-  `OPK` packaging layer, launcher, icon and JAR/JAD wrapper logic.
+The runtime does not know about game folders or settings screens: a
+launcher starts `runMidlet` with a command line and environment variables.
+All of them are listed in [docs/runtime-interface.md](docs/runtime-interface.md)
+(`tools/check-runtime-interface.py` keeps the list complete).
 
-Intentionally not included:
-
-- `FunKey-sdk-2.3.0`
-- `Zulu JDK 7`
-- `build_output*`
-- `.toolchains`
-- prebuilt `OPK` files
-- local test JARs and older backup/dev folders
+Not in the repository: the FunKey SDK, the JDK, `out/`, `.toolchains/`,
+prebuilt OPKs and test games.
 
 ## Required dependency versions
 
-1. FunKey SDK
+1. FunKey SDK (FunKey target only)
    Version: `2.3.0`
    Official docs: <https://doc.funkey-project.com/developer_guide/tutorials/build_system/build_program_using_sdk/>
    Release download used by this project:
    `https://github.com/FunKey-Project/FunKey-OS/releases/download/FunKey-OS-2.3.0/FunKey-sdk-2.3.0.tar.gz`
 
-2. JDK
+2. JDK (all targets)
    Version: `Azul Zulu JDK 7`
    Exact archive used by this project:
    `zulu7.24.0.1-ca-jdk7.0.191-linux_x64.tar.gz`
@@ -390,116 +397,72 @@ Intentionally not included:
    Direct download:
    `https://cdn.azul.com/zulu/bin/zulu7.24.0.1-ca-jdk7.0.191-linux_x64.tar.gz`
 
+Pass them as `JDK_DIR=...` and `FUNKEY_SDK_DIR=...`, or unpack them in the
+repository root (`zulu7*-linux_x64/`, `FunKey-sdk-2.3.0/`), where the
+scripts look by default.
+
 ## Host build requirements
 
-Confirmed working on **Ubuntu 26** (amd64 host).
+Linux amd64 host (Ubuntu 24.04 and 26 tested): `bash`, `make`, `gcc`,
+`g++`, `gcc-multilib`, `g++-multilib`, `libc6-dev-i386`, `file`,
+`mksquashfs` (OPK). The VM's build tools are 32-bit Linux programs for
+every target.
 
-- `bash`
-- `make`
-- `gcc`
-- `g++`
-- `find`
-- `sed`
-- `grep`
-- `file`
-- `mksquashfs`
-- `gcc-multilib`
-- `g++-multilib`
-- `libc6-dev-i386`
+- Linux x86 target: `zlib1g-dev:i386 libsdl1.2-dev:i386
+  libsdl-image1.2-dev:i386 libsdl-gfx1.2-dev:i386`
+  (`sudo dpkg --add-architecture i386` first)
+- Windows target: `mingw-w64` and `git` (SDL 1.2, SDL_gfx and zlib are
+  built from GitHub sources into `out/win32/sysroot` the first time)
 
-## Expected layout
+Ubuntu 24.04 only: its static i386 libm has no `fmod`, so the host tools
+need a shim, see [tools/cloud-test/README.md](tools/cloud-test/README.md):
+`HOST_LINK_FLAGS="-m32 -pthread /path/to/fmodshim.o"` (FunKey, Linux) or
+`HOST_LINK_EXTRA=/path/to/fmodshim.o` (Windows).
 
-```text
-repo/
-  phoneme-funkey-clean/
-  phoneme-funkey-opk-wrapper/
-```
-
-Recommended approach: keep the SDK and JDK outside the repository and pass them explicitly via env vars.
-
-If you prefer local unpacked copies, these are the paths the scripts know how to use by default:
-
-- `phoneme-funkey-clean/FunKey-sdk-2.3.0`
-- `phoneme-funkey-clean/zulu7.24.0.1-ca-jdk7.0.191-linux_x64`
-- `phoneme-funkey-clean/zulu7.24.0.1-jdk7.0.191-linux_x64`
-
-## Build runtime
+## Building
 
 ```bash
-cd phoneme-funkey-clean
-JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
-FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
-./build-funkey-s.sh
+JDK_DIR=/path/to/zulu7... FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 ./build.sh funkey package
+JDK_DIR=/path/to/zulu7... ./build.sh linux package
+JDK_DIR=/path/to/zulu7... ./build.sh windows package
 ```
 
-Compiler flags are not tracked by make: after changing `ARM_CFLAGS` (or
-pulling a commit that changes them in `build-funkey-s.sh`) delete
-`phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s` and build again.
+| Target | Runtime | Package |
+|---|---|---|
+| `funkey` | `out/funkey/midp/bin/arm/runMidlet` | `out/funkey/opk/pm.opk` |
+| `linux` | `out/linux-x86/midp/bin/i386/runMidlet` | `out/dist/funkey-j2me-linux-x86.tar.gz` |
+| `windows` | `out/win32/midp/bin/i386/runMidlet.exe` | `out/dist/funkey-j2me-win32.zip` |
 
-Main runtime outputs:
+Compiler flags are not tracked by make: after changing them (or pulling a
+commit that does) delete `out/<target>` and build again.
 
-- `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/midp/bin/arm/runMidlet`
-- `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/cldc/linux_arm_vfp/dist/bin/cldc_vm`
+More: [docs/building.md](docs/building.md) (runtime build details),
+[docs/packaging.md](docs/packaging.md) (OPK options, bundling one MIDlet).
 
-## Build OPK (launcher)
+### FunKey OPK
 
-The wrapper builds a self-contained `pm.opk` with the full runtime, SDL launcher, desktop entry and icon.
+`./build.sh funkey package` builds a self-contained `pm.opk` with the
+runtime, the SDL launcher, desktop entry and icon (plus a tiny built-in
+`HelloMidlet` as a test). To bundle one game instead:
+`JDK_DIR=... FUNKEY_SDK_DIR=... FUNKEY_BUNDLE_MIDLET=1 launchers/funkey/package.sh /path/to/game.jar [game.jad]`
+(`FUNKEY_MIDLET_MAIN` sets the main class).
 
-**Launcher build** (no external JAR required):
-If no MIDlet is passed, the script still builds the launcher `OPK`. In that mode it also bundles a tiny built-in `HelloMidlet` as a fallback/test MIDlet inside the package, but the main user-facing entry point is still the SDL launcher.
+### Desktop Linux (x86)
 
-```bash
-cd phoneme-funkey-opk-wrapper
-FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
-JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
-FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
-./package-funkey-opk.sh
-```
+The same runtime as a 32-bit x86 Linux program with an SDL window. The
+binary needs the glibc of the build machine or newer: build on Ubuntu 20.04
+(or in a 20.04 chroot: `debootstrap focal`) to run on 20.04 and later.
+Unpack the tar.gz and run `./run.sh game.jar` (i-appli: `game.jam` next to
+the jar); `SCALE=4` makes the window bigger, `LCD=240x320` sets the screen
+size the game sees; the packed `README.txt` lists keys and packages.
 
-**With your own bundled MIDlet:**
+### Windows
 
-```bash
-cd phoneme-funkey-opk-wrapper
-FUNKEY_PHONEME_ROOT=../phoneme-funkey-clean/phoneME-GP2X-SDL \
-JDK_DIR=/path/to/zulu7.24.0.1-ca-jdk7.0.191-linux_x64 \
-FUNKEY_SDK_DIR=/path/to/FunKey-sdk-2.3.0 \
-./package-funkey-opk.sh /path/to/game.jar
-```
-
-If the JAD is separate, pass it as second argument.  
-Set `FUNKEY_MIDLET_MAIN` to specify the main class explicitly.
-
-Result: `phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/opk/pm.opk`
-
-## Desktop build (Linux x86)
-
-The same runtime (M3G, fkaudio, DoJa) also builds as a 32-bit x86 Linux
-program with an SDL window, for testing games on a PC. Needs the JDK 7 above,
-no FunKey SDK. Host packages (Debian/Ubuntu):
-
-```bash
-sudo dpkg --add-architecture i386 && sudo apt update
-sudo apt install gcc-multilib g++-multilib libc6-dev-i386 zlib1g-dev:i386 \
-    libsdl1.2-dev:i386 libsdl-image1.2-dev:i386 libsdl-gfx1.2-dev:i386
-```
-
-```bash
-cd phoneme-funkey-clean
-JDK_DIR=/path/to/zulu7... ./build-linux-x86.sh
-# Ubuntu 24.04 only: its static i386 libm has no fmod, see tools/cloud-test/README.md
-#   HOST_LINK_FLAGS="-m32 /path/to/fmodshim.o" JDK_DIR=... ./build-linux-x86.sh
-cd ../phoneme-funkey-opk-wrapper
-JDK_DIR=/path/to/zulu7... ./package-linux-x86.sh
-```
-
-Result: `phoneme-funkey-opk-wrapper/dist/funkey-j2me-linux-x86.tar.gz`.
-The binary needs the glibc of the build machine or newer: build on Ubuntu
-20.04 (or in a 20.04 chroot: `debootstrap focal`, then the same packages and
-`BUILD_OUTPUT_DIR=...` per build) to run on 20.04 and later.
-Unpack it and run `./run.sh game.jar` (i-appli: `game.jam` next to the jar).
-`SCALE=4` makes the window bigger (the screen is 240x240 times `SCALE`,
-default 3), `LCD=240x320` sets the screen size the game sees; the packed
-`README.txt` lists keys and runtime library packages.
+A native 32-bit Windows build (Windows 7 or newer, also Windows 11 on ARM),
+cross-compiled with MinGW-w64: no WSL, no Java on the PC. The zip holds
+`FunKeyJ2ME.exe`, a settings window with the game list, display (window
+size, full screen, filters), PC key map and log options; dropping a jar on
+the exe starts it directly. See `launchers/windows/README.txt`.
 
 ## Known issues
 

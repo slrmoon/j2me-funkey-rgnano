@@ -1,0 +1,15 @@
+#
+# phoneME FunKey runtime settings: the interface between a launcher and the
+# runtime (environment variables). See docs/runtime-interface.md.
+#
+PHONEMECONFIG_LIB = phoneme_config
+LIB_SET  += $(PHONEMECONFIG_LIB)
+PHONEMECONFIG_DIR = $(SUBSYSTEM_CORE_DIR)/$(PHONEMECONFIG_LIB)
+
+SUBSYSTEM_PHONEMECONFIG_EXTRA_INCLUDES += \
+    -I$(PHONEMECONFIG_DIR)/include
+
+vpath % $(PHONEMECONFIG_DIR)/reference/native
+
+SUBSYSTEM_PHONEMECONFIG_NATIVE_FILES += \
+    phoneme_config.c

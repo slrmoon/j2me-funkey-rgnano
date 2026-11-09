@@ -25,6 +25,7 @@
  */
 
 #include <midp_logging.h>
+#include <phoneme_config.h>
 #include <midp_mastermode_port.h>
 #include <keymap_input.h>
 #include <stdio.h>
@@ -57,7 +58,7 @@ static void PcKeysLoad(void)
   const char *spec;
   if (PcKeysLoaded) return;
   PcKeysLoaded = 1;
-  spec = getenv("PHONEME_PC_KEYS");
+  spec = PhoneMEConfig("PHONEME_PC_KEYS");
   if (spec == NULL || spec[0] == '\0') return;
   while (*spec) {
     char *end;
@@ -279,16 +280,16 @@ static const char *ActionName(int Action)
 
 static int EnvKey(const char *Name, int Default)
 {
-  char *Value = getenv(Name);
+  const char *Value = PhoneMEConfig(Name);
   return (Value != NULL) ? atoi(Value) : Default;
 }
 
 void InitGP2XKeys()
 { int i;
-  const char *KeyProfile = getenv("PHONEME_KEY_PROFILE");
-  KeyDebug = (getenv("PHONEME_KEY_DEBUG") != NULL);
-  EventDebug = (getenv("PHONEME_EVENT_DEBUG") != NULL);
-  IgnoreJoystick = (getenv("PHONEME_IGNORE_JOYSTICK") != NULL);
+  const char *KeyProfile = PhoneMEConfig("PHONEME_KEY_PROFILE");
+  KeyDebug = (PhoneMEConfig("PHONEME_KEY_DEBUG") != NULL);
+  EventDebug = (PhoneMEConfig("PHONEME_EVENT_DEBUG") != NULL);
+  IgnoreJoystick = (PhoneMEConfig("PHONEME_IGNORE_JOYSTICK") != NULL);
   PhoneKeyProfile = (KeyProfile != NULL) && (strcmp(KeyProfile, "phone") == 0);
   for (i = 0; i < 8; i++) {
     JoyAxisKeys[i] = KEYMAP_KEY_INVALID;

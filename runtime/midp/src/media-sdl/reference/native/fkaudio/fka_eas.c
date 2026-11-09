@@ -8,6 +8,7 @@
  * Must be called with the engine lock held.
  */
 #include "fka_eas.h"
+#include "fka_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,7 +56,7 @@ int fka_eas_init(int engine)
     /* EAS volume is in dB (100 = 0 dB). At 0 dB dense GM songs sit in
      * the limiter a tenth of the time; handsets ran it lower too. */
     {
-        const char *env = getenv("PHONEME_MIDI_GAIN");
+        const char *env = FKA_CONFIG("PHONEME_MIDI_GAIN");
         int v = env != NULL && env[0] != '\0' ? atoi(env) : FKA_EAS_DEFAULT_VOLUME;
         if (v < 50) v = 50;
         if (v > 100) v = 100;
