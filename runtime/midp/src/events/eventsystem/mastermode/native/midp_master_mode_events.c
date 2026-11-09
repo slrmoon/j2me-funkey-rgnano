@@ -227,6 +227,50 @@ void midp_check_events(JVMSPI_BlockedThreadInfo *blocked_threads,
  *
  * @return exit status of the VM
  */
+#ifdef __EMSCRIPTEN__
+/*
+ * Browser: the VM runs in slave mode. Waiting (for events, timers, the
+ * frame limit) happens here, with no Java code and no interpreter on the
+ * stack, so Asyncify needs to instrument only this short path to
+ * SDL_Delay (-sASYNCIFY_IGNORE_INDIRECT), not the interpreter: in master
+ * mode the VM waits deep inside a native call and every interpreter
+ * function had to be able to unwind (about 1.5x slower).
+ */
+unsigned int fk_web_frame_wait_ms(void);   /* lfjport_st_export.c */
+void fk_web_yield(void);                    /* web_sdl_video.c */
+double emscripten_get_now(void);
+
+int midpRunVm(JvmPathChar* classPath,
+              char* mainClass,
+              int argc,
+              char** argv) {
+    double lastYield = emscripten_get_now();
+    midp_thread_set_timeslice_proc(NULL);
+    JVM_SetConfig(JVM_CONFIG_SLAVE_MODE, KNI_TRUE);
+    if (JVM_Start(classPath, mainClass, argc, argv) == 0) {
+        for (;;) {
+            JVMSPI_BlockedThreadInfo *blocked;
+            int count;
+            jlong timeout = JVM_TimeSlice();
+            unsigned int frame;
+            if (timeout <= -2) break;          /* all Java code ended */
+            frame = fk_web_frame_wait_ms();
+            if (timeout >= 0 && (jlong)frame > timeout) timeout = frame;
+            blocked = SNI_GetBlockedThreads(&count);
+            midp_check_events(blocked, count, timeout);
+            /* a busy game never waits: still let the page draw and take
+             * keys about every frame */
+            if (emscripten_get_now() - lastYield > 15.0) {
+                fk_web_yield();
+                lastYield = emscripten_get_now();
+            } else if (timeout != 0) {
+                lastYield = emscripten_get_now();
+            }
+        }
+    }
+    return JVM_CleanUp();
+}
+#else
 int midpRunVm(JvmPathChar* classPath,
               char* mainClass,
               int argc,
@@ -236,3 +280,4 @@ int midpRunVm(JvmPathChar* classPath,
 
     return JVM_Start(classPath, mainClass, argc, argv);
 }
+#endif

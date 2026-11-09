@@ -551,6 +551,11 @@ static void configure_frame_limit(void) {
  * than reset, so a stall never turns into a burst and an overloaded game is
  * never delayed.
  */
+#ifdef __EMSCRIPTEN__
+void os_emscripten_force_tick(void);
+static Uint32 FkWebWakeAtMs;
+#endif
+
 static void wait_frame_limit(void) {
     unsigned long long now;
     unsigned long long frameUs;
@@ -568,10 +573,27 @@ static void wait_frame_limit(void) {
     } else if (now > FrameLimitNext + maxLag) {
         FrameLimitNext = now - maxLag;   /* forget lag beyond the budget */
     } else if (now < FrameLimitNext) {
+#ifdef __EMSCRIPTEN__
+        /* browser: Java must not sleep here (the VM runs in slave mode,
+         * see midp_master_mode_events.c); the main loop waits instead */
+        FkWebWakeAtMs = (Uint32)((FrameLimitNext + 999ULL) / 1000ULL);
+        os_emscripten_force_tick();
+#else
         SDL_Delay((Uint32)((FrameLimitNext - now + 999ULL) / 1000ULL));
+#endif
     }
     FrameLimitNext += frameUs;
 }
+
+#ifdef __EMSCRIPTEN__
+/* ms the main loop still has to wait for the frame limit (0: none) */
+unsigned int fk_web_frame_wait_ms(void) {
+    Uint32 now = SDL_GetTicks();
+    unsigned int wait = FkWebWakeAtMs > now ? FkWebWakeAtMs - now : 0;
+    FkWebWakeAtMs = 0;
+    return wait;
+}
+#endif
 
 static void configure_logical_screen_size(void) {
     const char *sizeText;

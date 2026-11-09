@@ -172,6 +172,18 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags) {
 
 SDL_Surface *SDL_GetVideoSurface(void) { return VideoSurface; }
 
+/* back to the browser for a moment (MessageChannel: no 4 ms timer clamp) */
+EM_ASYNC_JS(void, fk_web_yield_js, (void), {
+    await new Promise(function (resolve) {
+        var c = new MessageChannel();
+        c.port1.onmessage = function () { resolve(); };
+        c.port2.postMessage(0);
+    });
+});
+
+/* (an EM_ASYNC_JS function is an import of this file only) */
+void fk_web_yield(void) { fk_web_yield_js(); }
+
 EM_JS(void, fk_web_present, (const void *rgba, int w, int h), {
     var c = Module['canvas'];
     if (!c) return;
@@ -179,6 +191,7 @@ EM_JS(void, fk_web_present, (const void *rgba, int w, int h), {
     if (!Module.fkCtx) Module.fkCtx = c.getContext('2d');
     var img = new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4), w, h);
     Module.fkCtx.putImageData(img, 0, 0);
+    Module.fkFrames = (Module.fkFrames || 0) + 1;
 });
 
 int SDL_Flip(SDL_Surface *s) {

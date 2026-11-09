@@ -1276,6 +1276,12 @@ static inline void rt_tick_event() {
 
 #if defined(__EMSCRIPTEN__)
 extern "C" double emscripten_get_now(void);   /* <emscripten.h> clashes here */
+// The browser's frame limiter: let the scheduler yield (slave mode: leave
+// JVM_TimeSlice) at the next check instead of up to a tick later.
+extern "C" void os_emscripten_force_tick() {
+  if (ticker_running) rt_tick_event();
+}
+
 extern "C" void os_emscripten_poll_ticks() {
   static double next_tick;
   double now;
