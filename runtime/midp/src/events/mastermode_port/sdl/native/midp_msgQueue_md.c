@@ -748,6 +748,17 @@ void checkForSystemSignal(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent,
        if (timeout == 0) return;
        if (timeout > 0 && JVM_JavaMilliSeconds() >= stopTime) return;
        /* nothing pending: yield the CPU instead of spinning */
+#ifdef __EMSCRIPTEN__
+       /* browser: every wait is a timer of at least 4 ms, so 1 ms steps
+        * overshot Thread.sleep() by up to 4 ms; wait the time left at
+        * once (minus a last short step, so keys still come in) */
+       if (timeout > 0)
+          { jlong left = stopTime - JVM_JavaMilliSeconds();
+            SDL_Delay((Uint32)(left > 20 ? left - 16 : left));
+          }
+       else SDL_Delay(10);
+#else
        SDL_Delay(timeout == -1 ? 10 : 1);
+#endif
      }
 }

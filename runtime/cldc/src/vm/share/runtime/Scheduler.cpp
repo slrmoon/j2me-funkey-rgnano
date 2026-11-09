@@ -1134,7 +1134,10 @@ bool Scheduler::wait_for_event_or_timer(bool sleeper_found,
 
     sleep_time = -1;
   } else {
-    sleep_time = (min_wakeup_time - Os::java_time_millis()) + 1;
+    // No "+ 1": a sleeper wakes when the time reaches its wakeup time, so
+    // the extra millisecond only made every Thread.sleep() 1 ms longer (a
+    // game pacing itself with sleep(66) ran at 14.9 instead of 15.1 fps).
+    sleep_time = min_wakeup_time - Os::java_time_millis();
     if (sleep_time < 0) {
       // Clock has advanced somewhat, but make sure we're not passing
       // a negative timeout, which means wait forever!
