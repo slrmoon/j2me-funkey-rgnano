@@ -5,7 +5,7 @@
 #   JDK_DIR=/path/to/jdk7 ./package-win32.sh [out_dir]
 #
 # Result: <out_dir>/funkey-j2me-win32/{FunKeyJ2ME.exe,bin,lib,appdb,
-# settings.ini,README.txt} and <out_dir>/funkey-j2me-win32.zip
+# games,README.txt} and <out_dir>/funkey-j2me-win32.zip
 # (default out_dir: ./dist). Needs i686-w64-mingw32-gcc and the MinGW
 # sysroot with zlib that build-win32.sh used (MINGW_SYSROOT).
 
@@ -58,16 +58,19 @@ find "$DOJA_STUB_SRC" "$DOJA_API_SRC" -name '*.java' | sort > "$TMP/sources.list
 find "$DOJA_STUB_SRC" -maxdepth 1 -name 'NOTICE-*' -exec cp {} "$STAGE/lib/" \;
 
 echo "Building the launcher (FunKeyJ2ME.exe)"
-"${MINGW_PREFIX}windres" "$ROOT/packaging/win32/launcher.rc" -O coff -o "$TMP/launcher.res"
+(cd "$ROOT/packaging/win32" &&
+ "${MINGW_PREFIX}windres" launcher.rc -O coff -o "$TMP/launcher.res")
 "${MINGW_PREFIX}gcc" -O2 -Wall -municode -mwindows -I"$MINGW_SYSROOT/include" \
     "$ROOT/packaging/win32/launcher.c" "$TMP/launcher.res" -o "$STAGE/FunKeyJ2ME.exe" \
-    -L"$MINGW_SYSROOT/lib" -static -lz -lcomdlg32 -lshlwapi
+    -L"$MINGW_SYSROOT/lib" -static -lz -lcomctl32 -lcomdlg32 -lshlwapi -lole32 -lshell32 -luuid
 "${MINGW_PREFIX}strip" "$STAGE/FunKeyJ2ME.exe" 2>/dev/null || true
 
-# Windows line endings for the text files people open in Notepad
-for f in settings.ini README.txt; do
-    sed 's/\r*$/\r/' "$ROOT/packaging/win32/$f" > "$STAGE/$f"
-done
+# Windows line endings for the text files people open in Notepad;
+# settings.ini is written by the launcher itself
+sed 's/\r*$/\r/' "$ROOT/packaging/win32/README.txt" > "$STAGE/README.txt"
+mkdir -p "$STAGE/games"
+printf 'Put your games (.jar, i-appli .jar + .jam) here, sub-folders are fine.\r\n' \
+    > "$STAGE/games/put-games-here.txt"
 
 rm -f "$OUT/$NAME.zip"
 (cd "$OUT" && python3 -c 'import os,sys,zipfile
