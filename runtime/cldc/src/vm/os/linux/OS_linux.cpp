@@ -160,6 +160,10 @@ jlong Os::java_time_millis() {
  * scheduler requiring a yield, therefore we should call
  * sched_yield and not really sleep.
  */
+#if defined(__EMSCRIPTEN__)
+extern "C" void emscripten_sleep(unsigned int ms);
+#endif
+
 void Os::sleep(jlong ms) {
   if (ms == 0) {
 #if ENABLE_TIMER_THREAD
@@ -170,6 +174,11 @@ void Os::sleep(jlong ms) {
     return;
   }
 
+#if defined(__EMSCRIPTEN__)
+  // with -sASYNCIFY this returns to the browser for the time asked
+  emscripten_sleep((unsigned int)ms);
+  return;
+#endif
   jlong end = Os::java_time_millis() + ms;
   while (Os::java_time_millis() < end) {
     ::usleep(1000);  // sleep for 1 ms
