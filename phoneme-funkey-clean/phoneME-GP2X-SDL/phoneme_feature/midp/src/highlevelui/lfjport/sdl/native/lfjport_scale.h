@@ -24,8 +24,15 @@
 #define SCALE_FILTER_SHARP  0
 #define SCALE_FILTER_SMOOTH 1
 #define SCALE_FILTER_PIXEL  2
+/* Scale2x (AdvMAME2x) pre-pass, once or twice, then SHARP to the final
+ * size: rounded edges for pixel art on large desktop windows */
+#define SCALE_FILTER_EPX    3
 
+#if defined(__arm__) || defined(ARM)
 #define SCALE_MAX_DIM 1024
+#else
+#define SCALE_MAX_DIM 4096   /* desktop windows up to 4K */
+#endif
 #define SCALE_MAX_TAPS 3
 #define SCALE_ROWS 4
 
@@ -240,6 +247,33 @@ static void scale_run(Scaler *sc, const uint16_t *src, int srcPitch,
             } else {
                 for (x = 0; x < sc->dstW; x++)
                     o[x] = scale_unspread(((r0[x] * w0 + r1[x] * w1) >> 5) & 0x07E0F81Fu);
+            }
+        }
+    }
+}
+
+/* Scale2x of a w x h region (pitch sp) into dst (2w x 2h, pitch dp);
+ * neighbours outside the region repeat the edge pixel. */
+static void scale2x_565(const uint16_t *src, int sp, int w, int h,
+                        uint16_t *dst, int dp) {
+    int x, y;
+    for (y = 0; y < h; y++) {
+        const uint16_t *row = src + y * sp;
+        const uint16_t *up = y > 0 ? row - sp : row;
+        const uint16_t *dn = y + 1 < h ? row + sp : row;
+        uint16_t *o0 = dst + (2 * y) * dp, *o1 = o0 + dp;
+        for (x = 0; x < w; x++) {
+            uint16_t E = row[x];
+            uint16_t B = up[x], H = dn[x];
+            uint16_t D = x > 0 ? row[x - 1] : E;
+            uint16_t F = x + 1 < w ? row[x + 1] : E;
+            if (B != H && D != F) {
+                o0[2 * x]     = D == B ? D : E;
+                o0[2 * x + 1] = B == F ? F : E;
+                o1[2 * x]     = D == H ? D : E;
+                o1[2 * x + 1] = H == F ? F : E;
+            } else {
+                o0[2 * x] = o0[2 * x + 1] = o1[2 * x] = o1[2 * x + 1] = E;
             }
         }
     }

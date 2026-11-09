@@ -130,36 +130,72 @@ const char *PhoneMEInputGetProfileLabel(int index);
 int  PhoneMEInputGetProfileIndex(void);
 void PhoneMEProfileInit(void);
 void PhoneMEInputApplyProfile(int index);
+int  PhoneMEInputIsMenuKey(int sym);
+int  PhoneMEInputIsFullscreenKey(int sym, int mod);
 
 SDL_Surface     *Native_SDL_Screen, *Native_SDL_HScreen, *Native_SDL_VScreen;
-/* Desktop builds: PHONEME_WINDOW_SCALE=N opens an N times larger window;
- * Native_SDL_Screen is then an off-screen 240x240 surface and each flip
- * enlarges it by pixel duplication. NULL on the device. */
+/*
+ * Desktop builds (PHONEME_WINDOW_SCALE > 1 or PHONEME_WINDOW_SIZE): a real,
+ * resizable window. The game frame is scaled straight from its own size to
+ * the window size (no 240x240 step); Native_SDL_Screen stays a 240x240
+ * off-screen canvas for the runtime menu and the error screen, which is
+ * then scaled to the window. NULL on the device.
+ */
 static SDL_Surface *Native_SDL_Window;
 static int WindowScale = 1;
+static int DesktopMode;
+static int WindowFullscreen;
+static int WindowedW, WindowedH;           /* size to return to from full screen */
+static int DesktopW, DesktopH;             /* monitor size at start */
+static int LastPresentDirect;              /* last frame went straight to the window */
+static Scaler *CanvasScaler;               /* 240x240 canvas -> window */
+/* target of the frame presenter: Native_SDL_Screen, or the window */
+static SDL_Surface *PresentTarget;
+static int PresentW = SDL_FULLWIDTH, PresentH = SDL_FULLHEIGHT;
+
+static void clear_bars(SDL_Surface *t, int x, int y, int w, int h) {
+    SDL_Rect r;
+    if (y > 0) { r.x = 0; r.y = 0; r.w = (Uint16) t->w; r.h = (Uint16) y; SDL_FillRect(t, &r, 0); }
+    if (y + h < t->h) {
+        r.x = 0; r.y = (Sint16) (y + h); r.w = (Uint16) t->w; r.h = (Uint16) (t->h - y - h);
+        SDL_FillRect(t, &r, 0);
+    }
+    if (x > 0) { r.x = 0; r.y = (Sint16) y; r.w = (Uint16) x; r.h = (Uint16) h; SDL_FillRect(t, &r, 0); }
+    if (x + w < t->w) {
+        r.x = (Sint16) (x + w); r.y = (Sint16) y; r.w = (Uint16) (t->w - x - w); r.h = (Uint16) h;
+        SDL_FillRect(t, &r, 0);
+    }
+}
+
+/* the 240x240 canvas (menu, error screen), fitted into the window */
+static void canvas_to_window(void) {
+    int w = Native_SDL_Window->w, h = Native_SDL_Window->h;
+    int side = w < h ? w : h, x, y, k;
+    if (CanvasScaler == NULL) {
+        CanvasScaler = (Scaler *) calloc(1, sizeof(Scaler));
+        if (CanvasScaler == NULL) return;
+    }
+    k = side / SDL_FULLWIDTH;
+    if (k >= 1 && side - k * SDL_FULLWIDTH < side / 8) side = k * SDL_FULLWIDTH;  /* crisp */
+    x = (w - side) / 2;
+    y = (h - side) / 2;
+    clear_bars(Native_SDL_Window, x, y, side, side);
+    if (!scale_prepare(CanvasScaler, 0, 0, SDL_FULLWIDTH, SDL_FULLHEIGHT, side, side,
+                       SCALE_FILTER_SHARP)) return;
+    if (SDL_LockSurface(Native_SDL_Window) != 0) return;
+    scale_run(CanvasScaler, (const uint16_t *) Native_SDL_Screen->pixels,
+              Native_SDL_Screen->pitch / 2,
+              (uint16_t *) Native_SDL_Window->pixels + y * (Native_SDL_Window->pitch / 2) + x,
+              Native_SDL_Window->pitch / 2);
+    SDL_UnlockSurface(Native_SDL_Window);
+}
 
 static void screen_flip(void) {
-    int x, y, k;
     if (Native_SDL_Window == NULL) {
         SDL_Flip(Native_SDL_Screen);
         return;
     }
-    if (SDL_LockSurface(Native_SDL_Window) != 0) return;
-    for (y = 0; y < Native_SDL_Screen->h; ++y) {
-        const Uint16 *src = (const Uint16 *)((const Uint8 *)Native_SDL_Screen->pixels +
-                                             y * Native_SDL_Screen->pitch);
-        Uint16 *dst = (Uint16 *)((Uint8 *)Native_SDL_Window->pixels +
-                                 y * WindowScale * Native_SDL_Window->pitch);
-        Uint16 *d = dst;
-        for (x = 0; x < Native_SDL_Screen->w; ++x) {
-            for (k = 0; k < WindowScale; ++k) *d++ = src[x];
-        }
-        for (k = 1; k < WindowScale; ++k) {
-            memcpy((Uint8 *)dst + k * Native_SDL_Window->pitch, dst,
-                   (size_t)Native_SDL_Screen->w * WindowScale * 2);
-        }
-    }
-    SDL_UnlockSurface(Native_SDL_Window);
+    if (!LastPresentDirect) canvas_to_window();
     SDL_Flip(Native_SDL_Window);
 }
 SDL_Surface     *Native_SDL_PScreen;
@@ -254,7 +290,8 @@ static const struct {
 } OverlayFilters[] = {
     { "sharp", "Sharp", SCALE_FILTER_SHARP },
     { "smooth", "Smooth", SCALE_FILTER_SMOOTH },
-    { "pixel", "Pixel", SCALE_FILTER_PIXEL }
+    { "pixel", "Pixel", SCALE_FILTER_PIXEL },
+    { "scale2x", "Scale2x", SCALE_FILTER_EPX }
 };
 #define OVERLAY_FILTER_COUNT ((int) (sizeof(OverlayFilters) / sizeof(OverlayFilters[0])))
 static const OverlayScalePreset OverlayScales[] = {
@@ -952,8 +989,11 @@ static void fps_draw(void) {
     if (FpsValue < 0) snprintf(text, sizeof(text), "-- fps");
     else snprintf(text, sizeof(text), "%d fps", FpsValue);
     w = (int) strlen(text) * 8;
-    boxColor(Native_SDL_Screen, 0, 0, (Sint16) (w + 3), 11, 0x000000a0);
-    stringColor(Native_SDL_Screen, 2, 2, text, 0x00ff88ff);
+    {
+        SDL_Surface *t = PresentTarget != NULL ? PresentTarget : Native_SDL_Screen;
+        boxColor(t, 0, 0, (Sint16) (w + 3), 11, 0x000000a0);
+        stringColor(t, 2, 2, text, 0x00ff88ff);
+    }
 }
 
 static void overlay_init(void) {
@@ -983,52 +1023,52 @@ static void overlay_init(void) {
 
 
 static void compute_center_layout(PresentLayout *layout) {
-    if (layout->srcW > SDL_FULLWIDTH) {
-        layout->srcX = (layout->srcW - SDL_FULLWIDTH) / 2;
-        layout->srcW = SDL_FULLWIDTH;
+    if (layout->srcW > PresentW) {
+        layout->srcX = (layout->srcW - PresentW) / 2;
+        layout->srcW = PresentW;
     }
-    if (layout->srcH > SDL_FULLHEIGHT) {
-        layout->srcY = (layout->srcH - SDL_FULLHEIGHT) / 2;
-        layout->srcH = SDL_FULLHEIGHT;
+    if (layout->srcH > PresentH) {
+        layout->srcY = (layout->srcH - PresentH) / 2;
+        layout->srcH = PresentH;
     }
     layout->dstW = layout->srcW;
     layout->dstH = layout->srcH;
-    layout->dstX = (SDL_FULLWIDTH - layout->dstW) / 2;
-    layout->dstY = (SDL_FULLHEIGHT - layout->dstH) / 2;
+    layout->dstX = (PresentW - layout->dstW) / 2;
+    layout->dstY = (PresentH - layout->dstH) / 2;
     layout->name = "center";
 }
 
 static void compute_fit_layout(PresentLayout *layout) {
     int dstWidth, dstHeight;
 
-    dstWidth = SDL_FULLWIDTH;
-    dstHeight = (layout->srcH * SDL_FULLWIDTH + (layout->srcW / 2)) / layout->srcW;
-    if (dstHeight > SDL_FULLHEIGHT) {
-        dstHeight = SDL_FULLHEIGHT;
-        dstWidth = (layout->srcW * SDL_FULLHEIGHT + (layout->srcH / 2)) / layout->srcH;
+    dstWidth = PresentW;
+    dstHeight = (layout->srcH * PresentW + (layout->srcW / 2)) / layout->srcW;
+    if (dstHeight > PresentH) {
+        dstHeight = PresentH;
+        dstWidth = (layout->srcW * PresentH + (layout->srcH / 2)) / layout->srcH;
     }
 
     layout->dstW = dstWidth;
     layout->dstH = dstHeight;
-    layout->dstX = (SDL_FULLWIDTH - dstWidth) / 2;
-    layout->dstY = (SDL_FULLHEIGHT - dstHeight) / 2;
+    layout->dstX = (PresentW - dstWidth) / 2;
+    layout->dstY = (PresentH - dstHeight) / 2;
     layout->name = "fit";
 }
 
 static void compute_crop_layout(PresentLayout *layout) {
-    if (layout->srcW * SDL_FULLHEIGHT > layout->srcH * SDL_FULLWIDTH) {
-        int croppedWidth = (layout->srcH * SDL_FULLWIDTH) / SDL_FULLHEIGHT;
+    if (layout->srcW * PresentH > layout->srcH * PresentW) {
+        int croppedWidth = (layout->srcH * PresentW) / PresentH;
         layout->srcX = (layout->srcW - croppedWidth) / 2;
         layout->srcW = croppedWidth;
-    } else if (layout->srcH * SDL_FULLWIDTH > layout->srcW * SDL_FULLHEIGHT) {
-        int croppedHeight = (layout->srcW * SDL_FULLHEIGHT) / SDL_FULLWIDTH;
+    } else if (layout->srcH * PresentW > layout->srcW * PresentH) {
+        int croppedHeight = (layout->srcW * PresentH) / PresentW;
         layout->srcY = (layout->srcH - croppedHeight) / 2;
         layout->srcH = croppedHeight;
     }
     layout->dstX = 0;
     layout->dstY = 0;
-    layout->dstW = SDL_FULLWIDTH;
-    layout->dstH = SDL_FULLHEIGHT;
+    layout->dstW = PresentW;
+    layout->dstH = PresentH;
     layout->name = "crop";
 }
 
@@ -1040,35 +1080,37 @@ static void compute_zoom_layout(PresentLayout *layout) {
     layout->areaY = layout->srcY;
     layout->areaW = layout->srcW;
     layout->areaH = layout->srcH;
-    int scaledWidth = (layout->srcW * PresentScaleRatio + 500) / 1000;
-    int scaledHeight = (layout->srcH * PresentScaleRatio + 500) / 1000;
+    /* ratio 1000 = 1:1 on the 240x240 screen; a desktop window is larger */
+    int unit = (PresentW < PresentH ? PresentW : PresentH) * 1000 / SDL_FULLWIDTH;
+    int scaledWidth = (int) (((long long) layout->srcW * PresentScaleRatio * unit + 500000) / 1000000);
+    int scaledHeight = (int) (((long long) layout->srcH * PresentScaleRatio * unit + 500000) / 1000000);
 
     if (scaledWidth < 1) scaledWidth = 1;
     if (scaledHeight < 1) scaledHeight = 1;
 
-    if (scaledWidth > SDL_FULLWIDTH) {
-        int visibleSrcW = (layout->srcW * SDL_FULLWIDTH + (scaledWidth / 2)) / scaledWidth;
+    if (scaledWidth > PresentW) {
+        int visibleSrcW = (layout->srcW * PresentW + (scaledWidth / 2)) / scaledWidth;
         if (visibleSrcW < 1) visibleSrcW = 1;
         if (visibleSrcW > layout->srcW) visibleSrcW = layout->srcW;
         layout->srcX = baseSrcX + (layout->srcW - visibleSrcW) / 2;
         layout->srcW = visibleSrcW;
         layout->dstX = 0;
-        layout->dstW = SDL_FULLWIDTH;
+        layout->dstW = PresentW;
     } else {
-        layout->dstX = (SDL_FULLWIDTH - scaledWidth) / 2;
+        layout->dstX = (PresentW - scaledWidth) / 2;
         layout->dstW = scaledWidth;
     }
 
-    if (scaledHeight > SDL_FULLHEIGHT) {
-        int visibleSrcH = (layout->srcH * SDL_FULLHEIGHT + (scaledHeight / 2)) / scaledHeight;
+    if (scaledHeight > PresentH) {
+        int visibleSrcH = (layout->srcH * PresentH + (scaledHeight / 2)) / scaledHeight;
         if (visibleSrcH < 1) visibleSrcH = 1;
         if (visibleSrcH > layout->srcH) visibleSrcH = layout->srcH;
         layout->srcY = baseSrcY + (layout->srcH - visibleSrcH) / 2;
         layout->srcH = visibleSrcH;
         layout->dstY = 0;
-        layout->dstH = SDL_FULLHEIGHT;
+        layout->dstH = PresentH;
     } else {
-        layout->dstY = (SDL_FULLHEIGHT - scaledHeight) / 2;
+        layout->dstY = (PresentH - scaledHeight) / 2;
         layout->dstH = scaledHeight;
     }
 
@@ -1153,8 +1195,8 @@ static int apply_refresh_bounds(int visibleWidth, int visibleHeight,
 }
 
 static void update_refresh_bounds(int x1, int y1, int x2, int y2) {
-    int fullW = OriginalWidth > 0 ? OriginalWidth : SDL_FULLWIDTH;
-    int fullH = OriginalHeight > 0 ? OriginalHeight : SDL_FULLHEIGHT;
+    int fullW = OriginalWidth > 0 ? OriginalWidth : PresentW;
+    int fullH = OriginalHeight > 0 ? OriginalHeight : PresentH;
 
     if (x2 <= x1 || y2 <= y1) {
         return;
@@ -1249,7 +1291,7 @@ static void choose_zoom_source_bounds(SDL_Surface *surface, int visibleWidth,
 }
 
 static void compute_integer_layout(PresentLayout *layout) {
-    int kx = SDL_FULLWIDTH / layout->srcW, ky = SDL_FULLHEIGHT / layout->srcH;
+    int kx = PresentW / layout->srcW, ky = PresentH / layout->srcH;
     int k = kx < ky ? kx : ky;
     if (k < 1) {
         compute_center_layout(layout);
@@ -1258,8 +1300,8 @@ static void compute_integer_layout(PresentLayout *layout) {
     }
     layout->dstW = layout->srcW * k;
     layout->dstH = layout->srcH * k;
-    layout->dstX = (SDL_FULLWIDTH - layout->dstW) / 2;
-    layout->dstY = (SDL_FULLHEIGHT - layout->dstH) / 2;
+    layout->dstX = (PresentW - layout->dstW) / 2;
+    layout->dstY = (PresentH - layout->dstH) / 2;
     layout->name = "integer";
 }
 
@@ -1271,8 +1313,8 @@ static void compute_present_layout(int visibleWidth, int visibleHeight,
     layout->srcH = visibleHeight;
     layout->dstX = 0;
     layout->dstY = 0;
-    layout->dstW = SDL_FULLWIDTH;
-    layout->dstH = SDL_FULLHEIGHT;
+    layout->dstW = PresentW;
+    layout->dstH = PresentH;
     layout->areaX = 0;
     layout->areaY = 0;
     layout->areaW = visibleWidth;
@@ -1312,18 +1354,18 @@ static void compute_present_layout(int visibleWidth, int visibleHeight,
      *  - otherwise: fit with bars
      * e.g. 128x128 crop (=fit), 176x208 crop, 176x220 / 128x160 / 240x320 fit
      */
-    if (visibleWidth == SDL_FULLWIDTH && visibleHeight == SDL_FULLHEIGHT) {
+    if (visibleWidth == PresentW && visibleHeight == PresentH) {
         layout->name = "native";
         return;
     }
     {
-        int kx = SDL_FULLWIDTH / visibleWidth, ky = SDL_FULLHEIGHT / visibleHeight;
+        int kx = PresentW / visibleWidth, ky = PresentH / visibleHeight;
         int k = kx < ky ? kx : ky;
         /* fit and fill factors as 1/1000 */
-        int fitX = SDL_FULLWIDTH * 1000 / visibleWidth, fitY = SDL_FULLHEIGHT * 1000 / visibleHeight;
+        int fitX = PresentW * 1000 / visibleWidth, fitY = PresentH * 1000 / visibleHeight;
         int fit = fitX < fitY ? fitX : fitY, fill = fitX > fitY ? fitX : fitY;
-        if (k >= 2 && (visibleWidth * k * 10 >= SDL_FULLWIDTH * 9 ||
-                       visibleHeight * k * 10 >= SDL_FULLHEIGHT * 9)) {
+        if (k >= 2 && (visibleWidth * k * 10 >= PresentW * 9 ||
+                       visibleHeight * k * 10 >= PresentH * 9)) {
             compute_integer_layout(layout);
             layout->name = "auto-integer";
         } else if ((fill - fit) * 100 <= fill * 16) {
@@ -1687,7 +1729,7 @@ int PhoneMEOverlayHandleSDLEvent(SDL_Event *event) {
     key = event->key.keysym.sym;
 
     if (!OverlayVisible) {
-        if (event->type == SDL_KEYDOWN && (key == SDLK_q || key == SDLK_ESCAPE)) {
+        if (event->type == SDL_KEYDOWN && PhoneMEInputIsMenuKey(key)) {
             OverlayVisible = 1;
             OverlayPage = OVERLAY_PAGE_MAIN;
             OverlayRow = 0;
@@ -2040,6 +2082,13 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
     static int lastDstX = -1, lastDstY = -1, lastDstW = -1, lastDstH = -1;
     static const char *lastName = NULL;
 
+    /* desktop: the game goes straight to the window unless the menu or the
+     * error screen (drawn on the 240x240 canvas) is up */
+    LastPresentDirect = DesktopMode && !OverlayVisible && !FatalVisible;
+    PresentTarget = LastPresentDirect ? Native_SDL_Window : Native_SDL_Screen;
+    PresentW = PresentTarget->w;
+    PresentH = PresentTarget->h;
+
     visibleSurface = sourceSurface;
     if (rotateSource) {
         SDL_LockSurface(Native_SDL_PScreen);
@@ -2083,45 +2132,107 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
         lastName = layout.name;
     }
     /* clear only the bars around the picture */
-    {
-        SDL_Rect r;
-        if (layout.dstY > 0) {
-            r.x = 0; r.y = 0; r.w = SDL_FULLWIDTH; r.h = (Uint16) layout.dstY;
-            SDL_FillRect(Native_SDL_Screen, &r, 0);
-        }
-        if (layout.dstY + layout.dstH < SDL_FULLHEIGHT) {
-            r.x = 0; r.y = (Sint16) (layout.dstY + layout.dstH);
-            r.w = SDL_FULLWIDTH; r.h = (Uint16) (SDL_FULLHEIGHT - layout.dstY - layout.dstH);
-            SDL_FillRect(Native_SDL_Screen, &r, 0);
-        }
-        if (layout.dstX > 0) {
-            r.x = 0; r.y = (Sint16) layout.dstY; r.w = (Uint16) layout.dstX; r.h = (Uint16) layout.dstH;
-            SDL_FillRect(Native_SDL_Screen, &r, 0);
-        }
-        if (layout.dstX + layout.dstW < SDL_FULLWIDTH) {
-            r.x = (Sint16) (layout.dstX + layout.dstW); r.y = (Sint16) layout.dstY;
-            r.w = (Uint16) (SDL_FULLWIDTH - layout.dstX - layout.dstW); r.h = (Uint16) layout.dstH;
-            SDL_FillRect(Native_SDL_Screen, &r, 0);
-        }
-    }
-    SDL_LockSurface(Native_SDL_Screen);
+    clear_bars(PresentTarget, layout.dstX, layout.dstY, layout.dstW, layout.dstH);
+    SDL_LockSurface(PresentTarget);
 
     srcPixels = (unsigned short *)visibleSurface->pixels;
-    dstPixels = (unsigned short *)Native_SDL_Screen->pixels;
+    dstPixels = (unsigned short *)PresentTarget->pixels;
     srcPitchPixels = visibleSurface->pitch / 2;
-    dstPitchPixels = Native_SDL_Screen->pitch / 2;
+    dstPitchPixels = PresentTarget->pitch / 2;
 
-    /* tap tables are rebuilt only when the layout or the filter changes */
-    if (scale_prepare(&PresentScaler, layout.srcX, layout.srcY, layout.srcW, layout.srcH,
-                      layout.dstW, layout.dstH, PresentFilter)) {
-        scale_run(&PresentScaler, srcPixels, srcPitchPixels,
-                  dstPixels + layout.dstY * dstPitchPixels + layout.dstX, dstPitchPixels);
+    {
+        int filter = PresentFilter;
+        int sx = layout.srcX, sy = layout.srcY, sw = layout.srcW, sh = layout.srcH;
+        /* Scale2x pre-pass (x2, or x4 for 4x+ enlargements), then sharp */
+        if (filter == SCALE_FILTER_EPX) {
+            static uint16_t *epx[2];
+            static size_t epxSize[2];
+            int pass, passes = 0;
+            filter = SCALE_FILTER_SHARP;
+            if (layout.dstW >= sw * 2 && layout.dstH >= sh * 2) passes = 1;
+            if (layout.dstW >= sw * 4 && layout.dstH >= sh * 4) passes = 2;
+            for (pass = 0; pass < passes; pass++) {
+                size_t need = (size_t) sw * sh * 4 * sizeof(uint16_t);
+                if (epxSize[pass] < need) {
+                    uint16_t *n = (uint16_t *) realloc(epx[pass], need);
+                    if (n == NULL) break;
+                    epx[pass] = n;
+                    epxSize[pass] = need;
+                }
+                scale2x_565(srcPixels + sy * srcPitchPixels + sx, srcPitchPixels, sw, sh,
+                            epx[pass], sw * 2);
+                srcPixels = epx[pass];
+                srcPitchPixels = sw * 2;
+                sx = sy = 0;
+                sw *= 2;
+                sh *= 2;
+            }
+        }
+        /* tap tables are rebuilt only when the layout or the filter changes */
+        if (scale_prepare(&PresentScaler, sx, sy, sw, sh,
+                          layout.dstW, layout.dstH, filter)) {
+            scale_run(&PresentScaler, srcPixels, srcPitchPixels,
+                      dstPixels + layout.dstY * dstPitchPixels + layout.dstX, dstPitchPixels);
+        }
     }
 
-    SDL_UnlockSurface(Native_SDL_Screen);
+    SDL_UnlockSurface(PresentTarget);
     fps_draw();
     overlay_draw();
     fatal_draw();
+}
+
+static void desktop_set_mode(int w, int h, int fullscreen) {
+    SDL_Surface *n;
+    if (fullscreen) {
+        n = SDL_SetVideoMode(DesktopW, DesktopH, 16, SDL_SWSURFACE | SDL_FULLSCREEN);
+    } else {
+        n = SDL_SetVideoMode(w, h, 16, SDL_SWSURFACE | SDL_RESIZABLE);
+    }
+    if (n == NULL || n->format->BitsPerPixel != 16) {
+        /* back to the last windowed size */
+        n = SDL_SetVideoMode(WindowedW, WindowedH, 16, SDL_SWSURFACE | SDL_RESIZABLE);
+        fullscreen = 0;
+    }
+    if (n == NULL) return;
+    Native_SDL_Window = n;
+    WindowFullscreen = fullscreen;
+    SDL_ShowCursor(fullscreen ? SDL_DISABLE : SDL_ENABLE);
+    if (DisplayDebug) fprintf(stderr, "lfjport: window %dx%d%s\n", n->w, n->h,
+                              fullscreen ? " (full screen)" : "");
+}
+
+void PhoneMEOverlayRefresh(void);
+
+/* Desktop window events: resize, expose, full screen (F11 / Alt+Enter or
+ * the launcher's key). Returns 1 when the event was handled here. */
+int PhoneMEDisplayHandleSDLEvent(SDL_Event *event) {
+    if (!DesktopMode || Native_SDL_Window == NULL) return 0;
+    if (event->type == SDL_VIDEORESIZE) {
+        int w = event->resize.w, h = event->resize.h;
+        if (WindowFullscreen) return 1;
+        if (w < 120) w = 120;
+        if (h < 120) h = 120;
+        if (w > SCALE_MAX_DIM) w = SCALE_MAX_DIM;
+        if (h > SCALE_MAX_DIM) h = SCALE_MAX_DIM;
+        WindowedW = w;
+        WindowedH = h;
+        desktop_set_mode(w, h, 0);
+        PhoneMEOverlayRefresh();
+        return 1;
+    }
+    if (event->type == SDL_VIDEOEXPOSE) {
+        SDL_Flip(Native_SDL_Window);
+        return 1;
+    }
+    if (event->type == SDL_KEYDOWN &&
+        PhoneMEInputIsFullscreenKey(event->key.keysym.sym, event->key.keysym.mod)) {
+        if (!WindowFullscreen && (DesktopW > SCALE_MAX_DIM || DesktopH > SCALE_MAX_DIM)) return 1;
+        desktop_set_mode(WindowedW, WindowedH, !WindowFullscreen);
+        PhoneMEOverlayRefresh();
+        return 1;
+    }
+    return 0;
 }
 
 void PhoneMEOverlayRefresh(void) {
@@ -2198,20 +2309,49 @@ int lfjport_ui_init()
   PhoneMEProfileInit();
   {
     const char *ws = getenv("PHONEME_WINDOW_SCALE");
+    const char *wsize = getenv("PHONEME_WINDOW_SIZE");
+    int winW = 0, winH = 0;
     WindowScale = ws != NULL ? atoi(ws) : 1;
     if (WindowScale < 1) WindowScale = 1;
     if (WindowScale > 8) WindowScale = 8;
-  }
-  if (WindowScale > 1) {
-    Native_SDL_Window = SDL_SetVideoMode(SDL_FULLWIDTH * WindowScale,
-                                         SDL_FULLHEIGHT * WindowScale, 16, SDL_SWSURFACE);
-    if (Native_SDL_Window != NULL && Native_SDL_Window->format->BitsPerPixel == 16) {
-      Native_SDL_Screen = SDL_CreateRGBSurface(SDL_SWSURFACE, SDL_FULLWIDTH, SDL_FULLHEIGHT,
-                                               16, 0xF800, 0x07E0, 0x001F, 0);
-    } else {
-      fprintf(stderr, "lfjport_ui_init: %dx window unavailable, using 1x\n", WindowScale);
-      Native_SDL_Window = NULL;
-      WindowScale = 1;
+    DesktopMode = WindowScale > 1 || (wsize != NULL && wsize[0] != '\0');
+    if (DesktopMode) {
+      const SDL_VideoInfo *vi = SDL_GetVideoInfo();   /* before any video mode: the monitor */
+      const char *title = getenv("PHONEME_WINDOW_TITLE");
+      DesktopW = vi != NULL && vi->current_w > 0 ? vi->current_w : 1280;
+      DesktopH = vi != NULL && vi->current_h > 0 ? vi->current_h : 1024;
+      if (!parse_screen_size(wsize, &winW, &winH)) {
+        /* the game's own screen times the scale, shrunk to fit the monitor */
+        int gw = OriginalWidth, gh = OriginalHeight, k = WindowScale;
+        while (k > 1 && (gw * k > DesktopW * 95 / 100 || gh * k > DesktopH * 88 / 100)) k--;
+        winW = gw * k;
+        winH = gh * k;
+      }
+      if (winW > SCALE_MAX_DIM) winW = SCALE_MAX_DIM;
+      if (winH > SCALE_MAX_DIM) winH = SCALE_MAX_DIM;
+      if (winW < 120) winW = 120;
+      if (winH < 120) winH = 120;
+      WindowedW = winW;
+      WindowedH = winH;
+      SDL_WM_SetCaption(title != NULL && title[0] ? title : "phoneME", "phoneME");
+      if (getenv("PHONEME_FULLSCREEN") != NULL && atoi(getenv("PHONEME_FULLSCREEN")) != 0 &&
+          DesktopW <= SCALE_MAX_DIM && DesktopH <= SCALE_MAX_DIM) {
+        Native_SDL_Window = SDL_SetVideoMode(DesktopW, DesktopH, 16, SDL_SWSURFACE | SDL_FULLSCREEN);
+        WindowFullscreen = Native_SDL_Window != NULL;
+      }
+      if (Native_SDL_Window == NULL)
+        Native_SDL_Window = SDL_SetVideoMode(winW, winH, 16, SDL_SWSURFACE | SDL_RESIZABLE);
+      if (Native_SDL_Window != NULL && Native_SDL_Window->format->BitsPerPixel == 16) {
+        Native_SDL_Screen = SDL_CreateRGBSurface(SDL_SWSURFACE, SDL_FULLWIDTH, SDL_FULLHEIGHT,
+                                                 16, 0xF800, 0x07E0, 0x001F, 0);
+        if (!WindowFullscreen) SDL_ShowCursor(SDL_ENABLE);
+        if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: desktop window %dx%d (monitor %dx%d)\n",
+                                  Native_SDL_Window->w, Native_SDL_Window->h, DesktopW, DesktopH);
+      } else {
+        fprintf(stderr, "lfjport_ui_init: desktop window unavailable, using 240x240\n");
+        Native_SDL_Window = NULL;
+        DesktopMode = 0;
+      }
     }
   }
   if (Native_SDL_Window == NULL)

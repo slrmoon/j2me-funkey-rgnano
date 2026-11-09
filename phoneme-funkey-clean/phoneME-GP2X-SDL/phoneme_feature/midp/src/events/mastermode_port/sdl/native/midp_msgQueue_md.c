@@ -35,6 +35,67 @@
 
 static int GP2X_Default_keys[19];
 static int KeyDebug = 0;
+
+/*
+ * Desktop keyboard map (PHONEME_PC_KEYS, written by the Windows launcher):
+ * "sym=code;sym=code;..." with SDL 1.2 key symbols and phone key codes
+ * (-1 up .. -7 soft2, '0'..'9', '*', '#', vendor soft keys such as -21, ...).
+ * Special codes: PC_KEY_MENU opens the runtime menu, PC_KEY_FULLSCREEN
+ * toggles full screen. When set it replaces the built-in keyboard table;
+ * one PC key has one meaning, several PC keys may send the same phone key.
+ */
+#define PC_KEY_MENU       1000
+#define PC_KEY_FULLSCREEN 1001
+#define PC_KEY_SYMS       SDLK_LAST
+static int PcKeysLoaded = 0;
+static int PcKeysActive = 0;
+static int PcKeyCode[PC_KEY_SYMS];
+static unsigned char PcKeyHas[PC_KEY_SYMS];
+
+static void PcKeysLoad(void)
+{
+  const char *spec;
+  if (PcKeysLoaded) return;
+  PcKeysLoaded = 1;
+  spec = getenv("PHONEME_PC_KEYS");
+  if (spec == NULL || spec[0] == '\0') return;
+  while (*spec) {
+    char *end;
+    long sym = strtol(spec, &end, 10);
+    if (end != spec && *end == '=') {
+      const char *v = end + 1;
+      long code = strtol(v, &end, 10);
+      if (end != v && sym > 0 && sym < PC_KEY_SYMS) {
+        PcKeyCode[sym] = (int) code;
+        PcKeyHas[sym] = 1;
+        PcKeysActive = 1;
+      }
+    }
+    while (*end && *end != ';') end++;
+    spec = *end ? end + 1 : end;
+  }
+}
+
+/* menu key: the PC map's PC_KEY_MENU keys, else Q / Escape as before */
+int PhoneMEInputIsMenuKey(int sym)
+{
+  PcKeysLoad();
+  if (PcKeysActive) {
+    return sym > 0 && sym < PC_KEY_SYMS && PcKeyHas[sym] && PcKeyCode[sym] == PC_KEY_MENU;
+  }
+  return sym == SDLK_q || sym == SDLK_ESCAPE;
+}
+
+/* full screen: the PC map's PC_KEY_FULLSCREEN keys, else F11; Alt+Enter always */
+int PhoneMEInputIsFullscreenKey(int sym, int mod)
+{
+  PcKeysLoad();
+  if (sym == SDLK_RETURN && (mod & KMOD_ALT)) return 1;
+  if (PcKeysActive) {
+    return sym > 0 && sym < PC_KEY_SYMS && PcKeyHas[sym] && PcKeyCode[sym] == PC_KEY_FULLSCREEN;
+  }
+  return sym == SDLK_F11;
+}
 static int EventDebug = 0;
 static int PhoneKeyProfile = 0;
 static int JoyAxisKeys[8];
@@ -100,6 +161,7 @@ static const RuntimeKeyProfilePreset RuntimeKeyProfiles[] = {
 #define RUNTIME_KEY_PROFILE_COUNT ((int)(sizeof(RuntimeKeyProfiles) / sizeof(RuntimeKeyProfiles[0])))
 
 int PhoneMEOverlayHandleSDLEvent(SDL_Event *event);
+int PhoneMEDisplayHandleSDLEvent(SDL_Event *event);
 int PhoneMEOverlayConsumeShutdown(void);
 void PhoneMEOverlayRefresh(void);
 int PhoneMEOverlayIsVisible(void);
@@ -374,6 +436,25 @@ static int SetPhysicalKeyEvent(int Physical, int Key, int Pressed,
 int KeyboardCheck(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent)
 { int Key = KEYMAP_KEY_INVALID;
   int Physical = event->key.keysym.sym;
+  PcKeysLoad();
+  if (PcKeysActive) {
+    int sym = event->key.keysym.sym;
+    if (sym > 0 && sym < PC_KEY_SYMS && PcKeyHas[sym] &&
+        PcKeyCode[sym] != PC_KEY_MENU && PcKeyCode[sym] != PC_KEY_FULLSCREEN) {
+      Key = PcKeyCode[sym];
+    }
+    /* Alt+Enter is the full screen switch, not fire */
+    if (sym == SDLK_RETURN && (event->key.keysym.mod & KMOD_ALT)) Key = KEYMAP_KEY_INVALID;
+    if (KeyDebug) {
+      fprintf(stderr, "PC key %s sym=%d -> %s(%d)\n",
+              (event->key.state == SDL_PRESSED) ? "down" : "up", sym, KeyName(Key), Key);
+    }
+    if (Key == KEYMAP_KEY_INVALID) {
+      return 0;
+    }
+    return SetPhysicalKeyEvent(Physical, Key, event->key.state == SDL_PRESSED,
+                               pNewSignal, pNewMidpEvent);
+  }
   switch(event->key.keysym.sym)
         { case SDLK_TAB:
           case SDLK_LCTRL:  Key = KEYMAP_KEY_SOFT1; break;
@@ -587,6 +668,10 @@ int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMid
 { if (event->type == SDL_QUIT)
      { return RequestGracefulShutdown(pNewSignal, pNewMidpEvent);
      }
+  /* desktop window: resize, expose, full screen switch */
+  if (PhoneMEDisplayHandleSDLEvent(event)) {
+    return 0;
+  }
   if (PhoneMEOverlayHandleSDLEvent(event)) {
     PhoneMEOverlayRefresh();
     if (PhoneMEOverlayIsVisible()) {
