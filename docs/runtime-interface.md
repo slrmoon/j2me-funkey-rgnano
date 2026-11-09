@@ -160,6 +160,12 @@ file (or a console window).
 
 ## Files shared with the launcher
 
+Every launcher handles these three files the same way, so the runtime menu
+works alike everywhere: FunKey (`/mnt/FunKey/.pm/debug.cfg`, `.pm/keybinds/<game>.cfg`), Linux
+(`~/.local/share/funkey-j2me`: `debug.cfg`, `run/<game>/game.cfg`),
+Windows (`data\debug.cfg`, `data\run\<game>\game.cfg`, read back into
+its settings when the game ends) and the browser (IndexedDB, `/cfg`).
+
 `PHONEME_CONFIG_PATH` — written by the runtime menu ("Display",
 "Controls", "Sound"), `KEY=VALUE` lines; a launcher reads it at the next
 start and turns it into the variables above: `SCALE` (zoom preset id),
