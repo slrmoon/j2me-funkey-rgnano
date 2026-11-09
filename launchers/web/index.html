@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phoneME Web</title>
+<style>
+  :root { --bg: #111; --fg: #ddd; --muted: #888; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #f4f4f4; --fg: #222; --muted: #666; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px system-ui, sans-serif; display: flex; flex-direction: column;
+         align-items: center; padding: 16px; box-sizing: border-box; }
+  canvas { image-rendering: pixelated; background: #000; outline: none;
+           width: min(100%, 720px); aspect-ratio: 1; height: auto; }
+  #status, #log { color: var(--muted); max-width: 720px; width: 100%; }
+  #log { white-space: pre-wrap; font: 12px monospace; max-height: 30vh; overflow: auto; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">Loading…</div>
+<div id="log"></div>
+<script>
+// Prototype launcher: runs one game (?jar=<file>&main=<MIDlet class>) from
+// this folder. The runtime files (lib/, appdb/) come from midp-files.data.
+const params = new URLSearchParams(location.search);
+const jar = params.get('jar') || 'game.jar';
+const mainClass = params.get('main') || '';
+const logEl = document.getElementById('log');
+function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
+var Module = {
+  canvas: document.getElementById('canvas'),
+  arguments: ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', mainClass],
+  print: log,
+  printErr: log,
+  setStatus: s => { document.getElementById('status').textContent = s || 'Running'; },
+  preRun: [function () {
+    Module.addRunDependency('game');
+    fetch(jar).then(r => {
+      if (!r.ok) throw new Error(jar + ': ' + r.status);
+      return r.arrayBuffer();
+    }).then(buf => {
+      FS.mkdir('/game');
+      FS.writeFile('/game/game.jar', new Uint8Array(buf));
+      FS.mkdir('/rms');
+      Object.assign(ENV, {
+        MIDP_HOME: '/midp',
+        PHONEME_RMS_HOME: '/rms',
+        PHONEME_HEAP_MB: params.get('heap') || '16',
+        PHONEME_LCD_SIZE: params.get('lcd') || '240x240',
+        PHONEME_ENABLE_AUDIO: '1',
+      });
+      Module.removeRunDependency('game');
+    }).catch(e => log('cannot load the game: ' + e));
+  }],
+};
+// The runtime reads the module's own bytes (function signatures, see
+// emscripten_sig.js), so the page fetches them and hands them over.
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = () => fail(new Error(src));
+    document.body.appendChild(s);
+  });
+}
+fetch('runMidlet.wasm').then(r => r.arrayBuffer()).then(buf => {
+  Module.wasmBinary = buf;
+  return loadScript('midp-files.js');
+}).then(() => loadScript('runMidlet.js')).catch(e => log('cannot start: ' + e));
+</script>
+</body>
+</html>

@@ -24,7 +24,7 @@ BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/out/web}
 MAKE_JOBS=${MAKE_JOBS:-$(nproc 2>/dev/null || echo 1)}
 HOST_LINK_EXTRA=${HOST_LINK_EXTRA:-}
 EMSCRIPTEN_LINK_FLAGS=${EMSCRIPTEN_LINK_FLAGS:--O2 -sNODERAWFS=1 -sASYNCIFY}
-EMSCRIPTEN_MIDP_LINK_FLAGS=${EMSCRIPTEN_MIDP_LINK_FLAGS:--O2 -sASYNCIFY -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB}
+EMSCRIPTEN_MIDP_LINK_FLAGS=${EMSCRIPTEN_MIDP_LINK_FLAGS:--O2 -sASYNCIFY -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=FS,ENV,addRunDependency,removeRunDependency}
 
 if [ -z "${JDK_DIR:-}" ]; then
     for d in "$ROOT"/zulu7*-linux_x64; do
@@ -118,4 +118,15 @@ make -C "$MEHOME/midp/build/emscripten_sdl" -j1 \
     EMSCRIPTEN_LINK_FLAGS="$EMSCRIPTEN_MIDP_LINK_FLAGS" \
     USE_LIBFLOAT=false
 
-echo "=== done: $BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet.js"
+# the page: launchers/web/index.html, runMidlet.js/.wasm and the runtime
+# files (lib/, appdb/ as /midp in the browser's file system)
+SITE=$BUILD_OUTPUT_DIR/site
+mkdir -p "$SITE"
+cp "$BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet" "$SITE/runMidlet.js"
+cp "$BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet.wasm" "$SITE/"
+cp "$ROOT/launchers/web/index.html" "$SITE/"
+(cd "$BUILD_OUTPUT_DIR/midp" &&
+ python3 /usr/share/emscripten/tools/file_packager.py "$SITE/midp-files.data" \
+     --preload lib@/midp/lib appdb@/midp/appdb --js-output="$SITE/midp-files.js" >/dev/null)
+
+echo "=== done: $SITE (serve it over http; add a game jar)"

@@ -1071,31 +1071,30 @@ enum {
 #if defined(__EMSCRIPTEN__)
   // WebAssembly checks the exact signature of every indirect call, so the
   // variadic func_t types above cannot be used: a call through them traps.
-  // The VM entries also differ in whether they take the Thread* (in product
-  // builds JVM_SINGLE_ARG_TRAPS is empty), so the number of parameters is
-  // asked from the wasm function table once per entry and cached.
+  // phoneME's natives often do not match their call site either (entries
+  // without the Thread* in product builds, "native int" methods whose C side
+  // returns void...), so the real signature is looked up in the wasm table
+  // (os/linux/emscripten_sig.js) once per entry, cached, and used for the
+  // call. Results are returned raw: r1/r2 hold the callee's bits.
   extern "C" int emscripten_run_script_int(const char *script);
 
-  static int wasm_entry_arity(address entry_point) {
-    enum { CACHE_SIZE = 256 };
+  static int wasm_entry_signature(address entry_point) {
+    enum { CACHE_SIZE = 512 };
     static address keys[CACHE_SIZE];
-    static signed char arity[CACHE_SIZE];
-    unsigned h = (((unsigned)(uintptr_t)entry_point) * 2654435761u) >> 24;
+    static short sig[CACHE_SIZE];
+    unsigned h = (((unsigned)(uintptr_t)entry_point) * 2654435761u) >> 23;
+    char script[48];
     for (int i = 0; i < CACHE_SIZE; i++) {
       unsigned k = (h + i) & (CACHE_SIZE - 1);
-      if (keys[k] == entry_point) return arity[k];
+      if (keys[k] == entry_point) return sig[k];
       if (keys[k] == NULL) {
-        char script[64];
-        jvm_sprintf(script, "wasmTable.get(%u).length",
-                    (unsigned)(uintptr_t)entry_point);
+        jvm_sprintf(script, "Module.fkSig(%u)", (unsigned)(uintptr_t)entry_point);
         keys[k] = entry_point;
-        arity[k] = (signed char)emscripten_run_script_int(script);
-        return arity[k];
+        sig[k] = (short)emscripten_run_script_int(script);
+        return sig[k];
       }
     }
-    char script[64];
-    jvm_sprintf(script, "wasmTable.get(%u).length",
-                (unsigned)(uintptr_t)entry_point);
+    jvm_sprintf(script, "Module.fkSig(%u)", (unsigned)(uintptr_t)entry_point);
     return emscripten_run_script_int(script);
   }
 
@@ -1115,55 +1114,52 @@ enum {
                                   va_list ap,
                                   jint &r1, jint &r2)
   {
+    (void)return_value_type;
     jint all[3];
     all[0] = (jint)NATIVE_ARG;
     for (int i = 0; i < num_args && i < 2; i++) {
       all[1 + i] = va_arg(ap, jint);
     }
+    int sig = wasm_entry_signature(entry_point);
+    int n = sig & 15;
     // The Thread* is dropped for entries that do not take it, and extra
     // arguments for entries that ignore them (timer_tick gets the thread
     // twice, but takes nothing in product builds).
-    int n = wasm_entry_arity(entry_point);
     const jint *a = (n == num_args + 1) ? all : all + 1;
-    if (n > num_args + 1) {
-      tty->print_cr("call_vm: entry %p takes %d arguments, %d given",
-                    entry_point, n, (int)num_args);
+    if (sig < 0 || n > num_args + 1) {
+      tty->print_cr("call_vm: entry %p: signature %d, %d arguments given",
+                    entry_point, sig, (int)num_args);
       SHOULD_NOT_REACH_HERE();
       return;
     }
-    switch (return_value_type) {
-    case T_INT:
+    r1 = r2 = 0;
+    switch (sig >> 4) {
+    case 0:
+      WASM_NATIVE_CALL(void, (void))
+      break;
+    case 1:
       WASM_NATIVE_CALL(jint, r1 =)
       break;
-    case T_LONG: {
+    case 2: {
       jlong_accessor acc;
       WASM_NATIVE_CALL(jlong, acc.long_value =)
       r1 = acc.words[0];
       r2 = acc.words[1];
       break;
     }
-#if ENABLE_FLOAT
-    case T_FLOAT: {
+    case 3: {
       jfloat val;
       WASM_NATIVE_CALL(jfloat, val =)
       r1 = float_bits(val);
       break;
     }
-    case T_DOUBLE: {
+    case 4: {
       jdouble_accessor acc;
       WASM_NATIVE_CALL(jdouble, acc.double_value =)
       r1 = acc.words[0];
       r2 = acc.words[1];
       break;
     }
-#endif
-    case T_OBJECT:
-    case T_ARRAY:
-      WASM_NATIVE_CALL(OopDesc*, r1 = (jint))
-      break;
-    case T_VOID:
-      WASM_NATIVE_CALL(void, (void))
-      break;
     default:
       SHOULD_NOT_REACH_HERE();
     }

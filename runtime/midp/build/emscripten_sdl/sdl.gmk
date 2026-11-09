@@ -11,7 +11,9 @@ EXTRA_INCLUDES += $(SDL_GFX_INCLUDES)
 
 # gcc.gmk's "-lpthread -lm" is fine: Emscripten links stub pthreads.
 LIBS += $(SDL_GFX_LIB) -lm
-LD_FLAGS += $(EMSCRIPTEN_LINK_FLAGS)
+# The VM's own link flags come along (JVM_LINK_FLAGS); its node-only file
+# system is not for the browser.
+LD_FLAGS := $(filter-out -sNODERAWFS=1,$(LD_FLAGS)) $(EMSCRIPTEN_LINK_FLAGS)
 
 # clang does not know gcc.gmk's -fconserve-space (ROMImage.cpp)
 EXTRA_CPPFLAGS := $(filter-out -fconserve-space,$(EXTRA_CPPFLAGS))
