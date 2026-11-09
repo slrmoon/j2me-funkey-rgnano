@@ -124,7 +124,8 @@ SITE=$BUILD_OUTPUT_DIR/site
 mkdir -p "$SITE"
 cp "$BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet" "$SITE/runMidlet.js"
 cp "$BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet.wasm" "$SITE/"
-cp "$ROOT/launchers/web/index.html" "$SITE/"
+sed "s/__BUILD__/$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || date +%s)-$(date +%s)/" \
+    "$ROOT/launchers/web/index.html" > "$SITE/index.html"
 (cd "$BUILD_OUTPUT_DIR/midp" &&
  python3 /usr/share/emscripten/tools/file_packager.py "$SITE/midp-files.data" \
      --preload lib@/midp/lib appdb@/midp/appdb --js-output="$SITE/midp-files.js" >/dev/null)

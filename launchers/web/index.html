@@ -82,6 +82,8 @@
 // click (browsers allow sound only after one). Record stores live in
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
+// build id (scripts/build-web.sh): a new build is never mixed with cached files
+const V = '?v=__BUILD__';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -235,6 +237,41 @@ function loadScript(src) {
   });
 }
 
+// KEY=VALUE file of the runtime menu -> {KEY: VALUE}
+function readCfg(path) {
+  const out = {};
+  try {
+    for (const line of FS.readFile(path, { encoding: 'utf8' }).split('\n')) {
+      const i = line.indexOf('=');
+      if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    }
+  } catch (e) {}
+  return out;
+}
+
+// the settings the runtime menu saved, as the FunKey launcher passes them
+function applyRuntimeCfg(gameCfg) {
+  const d = readCfg('/cfg/debug.cfg');
+  const debugEnv = { KEYS: 'PHONEME_KEY_DEBUG', EVENTS: 'PHONEME_EVENT_DEBUG',
+    DISPLAY: 'PHONEME_DISPLAY_DEBUG', AUDIO: 'PHONEME_AUDIO_TRACE', FPS: 'PHONEME_SHOW_FPS' };
+  for (const k in debugEnv) {
+    if (d[k] === '1') ENV[debugEnv[k]] = '1'; else delete ENV[debugEnv[k]];
+  }
+  const g = readCfg(gameCfg);
+  if (g.DISPLAY_MODE) ENV.PHONEME_SCALE_MODE = g.DISPLAY_MODE;
+  if (g.FILTER) ENV.PHONEME_SCALE_FILTER = g.FILTER;
+  if (g.FPS_LIMIT) ENV.PHONEME_FPS_LIMIT = g.FPS_LIMIT;
+  if (g.VOLUME) ENV.PHONEME_SOUND_VOLUME = g.VOLUME;
+  if (g.SYNTH) ENV.PHONEME_SYNTH = g.SYNTH;
+  const z = /^zoom-(\d+)$/.exec(g.SCALE || '');   // zoom-150 = 150%, zoom-1875 = 187.5%
+  if (z) ENV.PHONEME_SCALE_RATIO = String(z[1].length <= 3 ? Number(z[1]) * 10 : Number(z[1]));
+  if (g.PAN_X !== undefined) ENV.PHONEME_PAN = g.PAN_X + ',' + (g.PAN_Y || '0');
+  if (!params.get('lcd')) {
+    if (g.VIEW === 'full') { ENV.PHONEME_SOURCE_SIZE = 'full'; }
+    else if (/^\d+x\d+$/.test(g.VIEW || '')) { ENV.PHONEME_SOURCE_SIZE = g.VIEW; ENV.PHONEME_LCD_SIZE = g.VIEW; }
+  }
+}
+
 let syncing = false;
 function saveRms() {
   if (syncing || typeof FS === 'undefined') return;
@@ -251,6 +288,7 @@ $('start').addEventListener('click', async () => {
   status('Starting ' + game.name + '…');
   const rmsDir = '/rms/' + game.name.replace(/[^A-Za-z0-9_.-]/g, '_');
   window.Module = {
+    locateFile: path => path + V,   // midp-files.data
     canvas: $('canvas'),
     arguments: ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', game.main],
     print: log,
@@ -262,11 +300,11 @@ $('start').addEventListener('click', async () => {
       FS.mkdir('/rms');
       FS.mkdir(rmsDir);
       FS.mount(IDBFS, {}, rmsDir);
-      Module.addRunDependency('rms');
-      FS.syncfs(true, err => {
-        if (err) log('cannot read saves: ' + err);
-        Module.removeRunDependency('rms');
-      });
+      // the runtime menu's files, as on the FunKey: debug switches of all
+      // games and this game's display/sound choices (kept in IndexedDB)
+      FS.mkdir('/cfg');
+      FS.mount(IDBFS, {}, '/cfg');
+      const gameCfg = '/cfg/' + rmsDir.slice(5) + '.cfg';
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
@@ -274,8 +312,16 @@ $('start').addEventListener('click', async () => {
         PHONEME_LCD_SIZE: params.get('lcd') || '240x240',
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
+        PHONEME_DEBUG_CONFIG: '/cfg/debug.cfg',
+        PHONEME_CONFIG_PATH: gameCfg,
       });
-      if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
+      Module.addRunDependency('saves');
+      FS.syncfs(true, err => {
+        if (err) log('cannot read saves: ' + err);
+        applyRuntimeCfg(gameCfg);
+        if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
+        Module.removeRunDependency('saves');
+      });
     }],
     onRuntimeInitialized() {
       ov.style.display = 'none';
@@ -305,9 +351,9 @@ $('start').addEventListener('click', async () => {
   };
   try {
     // the runtime reads its own module bytes (emscripten_sig.js)
-    Module.wasmBinary = await (await fetch('runMidlet.wasm')).arrayBuffer();
-    await loadScript('midp-files.js');
-    await loadScript('runMidlet.js');
+    Module.wasmBinary = await (await fetch('runMidlet.wasm' + V)).arrayBuffer();
+    await loadScript('midp-files.js' + V);
+    await loadScript('runMidlet.js' + V);
   } catch (e) {
     status(e.message);
   }

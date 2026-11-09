@@ -18,7 +18,11 @@
 #   SP=save.sp      DoJa scratchpad file (default: game.sp by the jar)
 #   VERIFY=1        check bytecode like a phone does (off by default:
 #                   modded games often fail it but run fine)
-# Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/funkey-j2me/rms/<game>.
+# Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/funkey-j2me/rms/<game>,
+# the log to .../funkey-j2me/logs/<game>.log (runtime menu > Debug > Log
+# file). Choices made in the runtime menu (Esc) are kept as on the FunKey:
+# display/sound per game in .../run/<game>/game.cfg, debug switches for all
+# games in .../debug.cfg; the variables above win over them.
 #
 # Keys: arrows, Enter/Space = fire, F1/Tab = left soft key,
 # F2/Esc/Backspace = right soft key, 0-9 / numpad, * #. Menu: see README.
@@ -27,7 +31,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
 fi
 
@@ -110,14 +114,68 @@ else
 fi
 
 export MIDP_HOME=$HERE
-# "Restart game" in the runtime menu leaves this file and exits; run_vm
-# then starts the game again
+# The runtime menu, as on the FunKey (docs/runtime-interface.md): "Restart
+# game" leaves restart-request and exits, and run_vm starts the game again;
+# its display/sound choices go to game.cfg, debug switches to debug.cfg,
+# both read before every start.
 export PHONEME_RESTART_FLAG=$DATA/run/$NAME/restart-request
+export PHONEME_CONFIG_PATH=$DATA/run/$NAME/game.cfg
+export PHONEME_DEBUG_CONFIG=$DATA/debug.cfg
+LOGFILE=$DATA/logs/$NAME.log
+USER_MODE=${MODE:-} USER_FILTER=${FILTER:-} USER_FPS=${FPS:-} USER_LCD=${LCD:-}
+cfg_value() {  # cfg_value <file> <KEY>
+    [ -f "$1" ] && tr -d '\r' < "$1" | sed -n "s/^$2=//p" | tail -n 1
+    return 0
+}
+apply_runtime_cfg() {
+    local pair v var
+    for pair in KEYS:PHONEME_KEY_DEBUG EVENTS:PHONEME_EVENT_DEBUG \
+                DISPLAY:PHONEME_DISPLAY_DEBUG AUDIO:PHONEME_AUDIO_TRACE \
+                PROFILE:PHONEME_PROFILE FPS:PHONEME_SHOW_FPS; do
+        v=$(cfg_value "$PHONEME_DEBUG_CONFIG" "${pair%%:*}")
+        var=${pair#*:}
+        if [ "$v" = 1 ]; then export "$var=1"; elif [ "$v" = 0 ]; then unset "$var"; fi
+    done
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" DISPLAY_MODE)
+    [ -n "$v" ] && [ -z "$USER_MODE" ] && export PHONEME_SCALE_MODE=$v
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" FILTER)
+    [ -n "$v" ] && [ -z "$USER_FILTER" ] && export PHONEME_SCALE_FILTER=$v
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" FPS_LIMIT)
+    [ -n "$v" ] && [ -z "$USER_FPS" ] && export PHONEME_FPS_LIMIT=$v
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" VOLUME)
+    [ -n "$v" ] && export PHONEME_SOUND_VOLUME=$v
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" SYNTH)
+    [ -n "$v" ] && export PHONEME_SYNTH=$v
+    # zoom-150 = 150%, zoom-1875 = 187.5%
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" SCALE)
+    case "$v" in
+        zoom-[0-9][0-9][0-9]) export PHONEME_SCALE_RATIO=$((10#${v#zoom-} * 10)) ;;
+        zoom-[0-9][0-9][0-9][0-9]) export PHONEME_SCALE_RATIO=$((10#${v#zoom-})) ;;
+    esac
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" PAN_X)
+    [ -n "$v" ] && export PHONEME_PAN="$v,$(cfg_value "$PHONEME_CONFIG_PATH" PAN_Y)"
+    v=$(cfg_value "$PHONEME_CONFIG_PATH" VIEW)
+    if [ -z "$USER_LCD" ]; then
+        case "$v" in
+            full) export PHONEME_SOURCE_SIZE=full; unset PHONEME_LCD_SIZE ;;
+            [0-9]*x[0-9]*) export PHONEME_SOURCE_SIZE=$v PHONEME_LCD_SIZE=$v ;;
+        esac
+    fi
+    LOG_ON=$(cfg_value "$PHONEME_DEBUG_CONFIG" LOG)
+}
 run_vm() {
     local rc
     while :; do
         rm -f "$PHONEME_RESTART_FLAG"
-        ./runMidlet "$@" && rc=0 || rc=$?
+        apply_runtime_cfg
+        if [ "${LOG_ON:-1}" = 1 ]; then
+            # the terminal and the log file
+            mkdir -p "$DATA/logs"
+            [ -f "$LOGFILE" ] && mv -f "$LOGFILE" "${LOGFILE%.log}.prev.log"
+            ./runMidlet "$@" > >(tee "$LOGFILE") 2>&1 && rc=0 || rc=$?
+        else
+            ./runMidlet "$@" && rc=0 || rc=$?
+        fi
         [ -f "$PHONEME_RESTART_FLAG" ] || break
     done
     rm -f "$PHONEME_RESTART_FLAG"
