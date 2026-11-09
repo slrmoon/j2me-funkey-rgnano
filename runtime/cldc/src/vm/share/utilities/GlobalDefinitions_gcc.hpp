@@ -110,6 +110,14 @@ inline unsigned int _rotr(unsigned int x, unsigned int y) {
   return (x >> y) | (x << (32 - y));
 }
 
+#elif defined(__EMSCRIPTEN__)
+
+#  define BREAKPOINT __builtin_trap()
+#  define panic()    __builtin_trap()
+inline unsigned int _rotr(unsigned int x, unsigned int y) {
+  return (x >> y) | (x << (32 - y));
+}
+
 #elif defined(SPARC)
 
 #  define BREAKPOINT __asm__ ("ta 0x1")

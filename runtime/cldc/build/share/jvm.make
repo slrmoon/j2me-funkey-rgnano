@@ -210,9 +210,11 @@ ifndef target_arch
   target_arch = $(host_arch)
 endif
 
-# very minimal CPU specific ASM stubs
+# very minimal CPU specific ASM stubs (none for WebAssembly)
 ifeq ($(ENABLE_C_INTERPRETER), true)
+ifneq ($(target_arch), wasm32)
 Obj_Files           +=         AsmStubs_$(target_arch)$(OBJ_SUFFIX)
+endif
 endif
 
 LOOP_GENERATOR       = ../../loopgen/app/loopgen$(HOST_EXE_SUFFIX)
@@ -315,6 +317,9 @@ EXE_SUFFIX_gcc       = .exe
 endif
 ifeq ($(IsTarget)+$(os_family), true+win32)
 EXE_SUFFIX_gcc       = .exe
+endif
+ifeq ($(IsTarget)+$(TARGET_TOOLCHAIN), true+emscripten)
+EXE_SUFFIX_gcc       = .js
 endif
 
 EXE_SUFFIX           = $(EXE_SUFFIX_$(compiler))
@@ -1479,6 +1484,15 @@ else
 
 endif
 
+# WebAssembly target built with Emscripten (see build/emscripten_c)
+ifeq ($(IsTarget)+$(TARGET_TOOLCHAIN), true+emscripten)
+ ASM_gcc           = emcc
+ CPP_gcc           = em++
+ CC_gcc            = emcc
+ LINK_gcc          = em++
+ LIBMGR_gcc        = emar
+endif
+
 LIB_FLAGS          = cqs
 
 ifeq ($(os), darwin)
@@ -1568,6 +1582,12 @@ CPP_DEF_FLAGS           += -DREQUIRES_JVMCONFIG_H=1 \
                            $(SAVE_TEMPS_CFLAGS) $(ENABLE_CFLAGS) \
                            $(ROMIZING_CFLAGS) \
                            $(BUILD_VERSION_CFLAGS) $(USER_CFLAGS)
+
+# clang (Emscripten) does not know these GCC options
+ifeq ($(IsTarget)+$(TARGET_TOOLCHAIN), true+emscripten)
+CPLUSPLUS_FLAGS         := $(filter-out -fno-optional-diags,$(CPLUSPLUS_FLAGS))
+CPP_OPT_FLAGS           := $(filter-out -fexpensive-optimizations,$(CPP_OPT_FLAGS))
+endif
 
 CC_FLAGS_EXPORT          = $(CPP_DEF_FLAGS)
 CC_OPT_FLAGS             = $(CPP_OPT_FLAGS)

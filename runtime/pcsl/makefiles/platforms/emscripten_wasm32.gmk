@@ -1,0 +1,22 @@
+#
+# WebAssembly (Emscripten). PCSL_OS/PCSL_CPU match the CLDC build
+# (os_family linux, arch c) of build/emscripten_c.
+#
+PCSL_OS=linux
+PCSL_CPU=c
+
+# the C interpreter needs no executable heap: malloc-based chunks
+PCSL_CHUNKMEM_IMPL=pcsl_chunkheap
+PCSL_CHUNKMEM_DIR=$(PCSL_DIR)/memory/heap
+
+FILE_MODULE=posix
+# no sockets in a browser
+NETWORK_MODULE=stubs
+
+include $(PCSL_DIR)/makefiles/share/gcc.gmk
+include $(PCSL_DIR)/makefiles/share/linux.gmk
+
+CC  = emcc
+CPP = em++
+LD  = em++
+AR  = emar rcs

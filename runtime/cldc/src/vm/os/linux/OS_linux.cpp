@@ -284,6 +284,33 @@ void Os::stop_ticks() {
   }
 }
 
+#elif defined(__EMSCRIPTEN__)
+
+/*
+ * WebAssembly: no signals, no threads. The C interpreter calls
+ * os_emscripten_poll_ticks() now and then (check_timer_tick) and that
+ * produces the real_time_tick()s from the clock.
+ */
+bool Os::start_ticks() {
+  if (!EnableTicks || Deterministic) {
+    return true;
+  }
+  ticker_running = true;
+  return true;
+}
+
+void Os::suspend_ticks() {
+  ticker_running = false;
+}
+
+void Os::resume_ticks() {
+  start_ticks();
+}
+
+void Os::stop_ticks() {
+  suspend_ticks();
+}
+
 #else // ENABLE_TIMER_THREAD
 
 bool Os::start_ticks() {
@@ -325,7 +352,7 @@ void Os::stop_ticks() {
 
 #endif // ENABLE_TIMER_THREAD
 
-#if !ENABLE_TIMER_THREAD
+#if !ENABLE_TIMER_THREAD && !defined(__EMSCRIPTEN__)
 extern "C" void handle_vtalrm_signal(int signo, siginfo_t* sigi, void* uc) {
   GUARANTEE(!is_processing_timer_tick, "Sanity");
   AZZERT_ONLY(TemporaryModifyGlobal(&is_processing_timer_tick,
@@ -1073,7 +1100,7 @@ void Os::initialize() {
 
   int sa_flags = SA_RESTART;
 
-#if !defined(ARM)
+#if !defined(ARM) && !defined(__EMSCRIPTEN__)
   // force execution of signals on separate stack, as otherwise
   // results can be unpredictable if we'll modify stack in
   // Java heap and VM will not know. We handle signals either when
@@ -1095,6 +1122,8 @@ void Os::initialize() {
 
 #if ENABLE_TIMER_THREAD
   main_thread_handle = pthread_self();
+#elif defined(__EMSCRIPTEN__)
+  // ticks come from os_emscripten_poll_ticks()
 #else
   // setup vtalarm signal handler to provide a source of
   // timer-based interrupts for Java thread switching and dynamical
@@ -1235,3 +1264,17 @@ static inline void rt_tick_event() {
   _compiler_timer_has_ticked = true;
 #endif
 }
+
+#if defined(__EMSCRIPTEN__)
+extern "C" double emscripten_get_now(void);   /* <emscripten.h> clashes here */
+extern "C" void os_emscripten_poll_ticks() {
+  static double next_tick;
+  double now;
+  if (!ticker_running) return;
+  now = emscripten_get_now();
+  if (now >= next_tick) {
+    next_tick = now + TickInterval;
+    rt_tick_event();
+  }
+}
+#endif

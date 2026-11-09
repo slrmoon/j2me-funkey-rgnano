@@ -73,6 +73,12 @@ jboolean JVMSPI_IsRestrictedPackage(const char* pkg_name, int name_length) {
 }
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include "emscripten_args.h"
+#define main vm_main
+static int vm_main(int argc, char **argv);
+#endif
+
 int main(int argc, char **argv) {
   int code = 0;
 
@@ -130,3 +136,8 @@ end:
 
   return code;
 }
+
+#ifdef __EMSCRIPTEN__
+#undef main
+EMSCRIPTEN_MAIN(vm_main)
+#endif

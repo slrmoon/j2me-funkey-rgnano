@@ -477,7 +477,19 @@ enum {
     return shared_call_vm_internal(callback, NULL, rv_type, 2, arg1, arg2);
   }
 
+#if defined(__EMSCRIPTEN__)
+  extern "C" void os_emscripten_poll_ticks();
+  static int poll_ticks_countdown;
+#endif
+
   static inline void check_timer_tick() {
+#if defined(__EMSCRIPTEN__)
+    /* no timer signal in WebAssembly: look at the clock now and then */
+    if (--poll_ticks_countdown < 0) {
+      poll_ticks_countdown = 1024;
+      os_emscripten_poll_ticks();
+    }
+#endif
 #if ENABLE_PAGE_PROTECTION
     // use g_jpc to prevent compiler from optimizing this memory access
     _protected_page[INTERPRETER_TIMER_TICK_SLOT] = (int)g_jpc;
@@ -1056,6 +1068,108 @@ enum {
     return unlock_object(object, lock);
   }
 
+#if defined(__EMSCRIPTEN__)
+  // WebAssembly checks the exact signature of every indirect call, so the
+  // variadic func_t types above cannot be used: a call through them traps.
+  // The VM entries also differ in whether they take the Thread* (in product
+  // builds JVM_SINGLE_ARG_TRAPS is empty), so the number of parameters is
+  // asked from the wasm function table once per entry and cached.
+  extern "C" int emscripten_run_script_int(const char *script);
+
+  static int wasm_entry_arity(address entry_point) {
+    enum { CACHE_SIZE = 256 };
+    static address keys[CACHE_SIZE];
+    static signed char arity[CACHE_SIZE];
+    unsigned h = (((unsigned)(uintptr_t)entry_point) * 2654435761u) >> 24;
+    for (int i = 0; i < CACHE_SIZE; i++) {
+      unsigned k = (h + i) & (CACHE_SIZE - 1);
+      if (keys[k] == entry_point) return arity[k];
+      if (keys[k] == NULL) {
+        char script[64];
+        jvm_sprintf(script, "wasmTable.get(%u).length",
+                    (unsigned)(uintptr_t)entry_point);
+        keys[k] = entry_point;
+        arity[k] = (signed char)emscripten_run_script_int(script);
+        return arity[k];
+      }
+    }
+    char script[64];
+    jvm_sprintf(script, "wasmTable.get(%u).length",
+                (unsigned)(uintptr_t)entry_point);
+    return emscripten_run_script_int(script);
+  }
+
+#define WASM_NATIVE_CALL(R, result)                                         \
+    switch (n) {                                                            \
+    case 0: result ((R(*)())entry_point)(); break;                          \
+    case 1: result ((R(*)(jint))entry_point)(a[0]); break;                  \
+    case 2: result ((R(*)(jint, jint))entry_point)(a[0], a[1]); break;      \
+    case 3: result ((R(*)(jint, jint, jint))entry_point)(a[0], a[1], a[2]); \
+            break;                                                          \
+    default: SHOULD_NOT_REACH_HERE(); return;                               \
+    }
+
+  static void invoke_native_entry(address entry_point,
+                                  BasicType return_value_type,
+                                  jint num_args,
+                                  va_list ap,
+                                  jint &r1, jint &r2)
+  {
+    jint all[3];
+    all[0] = (jint)NATIVE_ARG;
+    for (int i = 0; i < num_args && i < 2; i++) {
+      all[1 + i] = va_arg(ap, jint);
+    }
+    // The Thread* is dropped for entries that do not take it, and extra
+    // arguments for entries that ignore them (timer_tick gets the thread
+    // twice, but takes nothing in product builds).
+    int n = wasm_entry_arity(entry_point);
+    const jint *a = (n == num_args + 1) ? all : all + 1;
+    if (n > num_args + 1) {
+      tty->print_cr("call_vm: entry %p takes %d arguments, %d given",
+                    entry_point, n, (int)num_args);
+      SHOULD_NOT_REACH_HERE();
+      return;
+    }
+    switch (return_value_type) {
+    case T_INT:
+      WASM_NATIVE_CALL(jint, r1 =)
+      break;
+    case T_LONG: {
+      jlong_accessor acc;
+      WASM_NATIVE_CALL(jlong, acc.long_value =)
+      r1 = acc.words[0];
+      r2 = acc.words[1];
+      break;
+    }
+#if ENABLE_FLOAT
+    case T_FLOAT: {
+      jfloat val;
+      WASM_NATIVE_CALL(jfloat, val =)
+      r1 = float_bits(val);
+      break;
+    }
+    case T_DOUBLE: {
+      jdouble_accessor acc;
+      WASM_NATIVE_CALL(jdouble, acc.double_value =)
+      r1 = acc.words[0];
+      r2 = acc.words[1];
+      break;
+    }
+#endif
+    case T_OBJECT:
+    case T_ARRAY:
+      WASM_NATIVE_CALL(OopDesc*, r1 = (jint))
+      break;
+    case T_VOID:
+      WASM_NATIVE_CALL(void, (void))
+      break;
+    default:
+      SHOULD_NOT_REACH_HERE();
+    }
+  }
+#undef WASM_NATIVE_CALL
+#else
   static void invoke_native_entry(address entry_point,
                                   BasicType return_value_type,
                                   jint num_args,
@@ -1214,6 +1328,7 @@ enum {
       SHOULD_NOT_REACH_HERE();
     }
   }
+#endif // __EMSCRIPTEN__
 
   static bool resume_thread() {
     // restore values from current thread structure
@@ -4473,6 +4588,12 @@ static void init() {
 #undef MY_GUARANTEE
 
 // interpreter
+#if defined(__EMSCRIPTEN__)
+// Must not be inlined into primordial_to_current_thread(): Emscripten's
+// setjmp emulation routes every call made in the function that calls setjmp
+// through a JavaScript trampoline, which would slow each bytecode ~50x.
+__attribute__((noinline))
+#endif
 static void Interpret() {
   // Start a new thread or continue in another existing thread
   // after thread termination.
