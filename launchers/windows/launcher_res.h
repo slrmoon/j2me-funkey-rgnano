@@ -53,3 +53,4 @@
 #define IDC_SHOWFPS      1409
 #define IDC_OPENLOG      1410
 #define IDC_OPENLOGDIR   1411
+#define IDC_LOGAUDIO     1412

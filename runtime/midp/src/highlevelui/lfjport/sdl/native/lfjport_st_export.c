@@ -116,6 +116,7 @@ static int stringColor(SDL_Surface *dst, Sint16 x, Sint16 y, const char *s,
 #define SDL_FULLWIDTH	FULLWIDTH
 #define SDL_FULLHEIGHT	FULLHEIGHT
 void InitGP2XKeys(void);
+void PhoneMEInputInitDebug(void);
 int  InitAudioSubsystem(void);
 void FinalizeAudioSubsystem(void);
 void MediaSDL_SetMasterVolume(int volume);
@@ -2300,6 +2301,7 @@ int lfjport_ui_init()
   OriginalHeight = OriginalOrientation ? SDL_FULLWIDTH : SDL_FULLHEIGHT;
   configure_logical_screen_size();
   configure_present_scale_mode();
+  PhoneMEInputInitDebug();
   if (PhoneMEConfig("PHONEME_ENABLE_GP2X_KEYS") != NULL) {
     InitGP2XKeys();
     if (DisplayDebug) fprintf(stderr, "lfjport_ui_init: InitGP2XKeys ok\n");

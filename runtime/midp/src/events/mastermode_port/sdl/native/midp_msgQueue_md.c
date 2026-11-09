@@ -284,6 +284,15 @@ static int EnvKey(const char *Name, int Default)
   return (Value != NULL) ? atoi(Value) : Default;
 }
 
+/* key/event logs and the joystick switch: every input setup, not only the
+ * handheld one (on the desktop they were never read) */
+void PhoneMEInputInitDebug(void)
+{
+  KeyDebug = (PhoneMEConfig("PHONEME_KEY_DEBUG") != NULL);
+  EventDebug = (PhoneMEConfig("PHONEME_EVENT_DEBUG") != NULL);
+  IgnoreJoystick = (PhoneMEConfig("PHONEME_IGNORE_JOYSTICK") != NULL);
+}
+
 void InitGP2XKeys()
 { int i;
   const char *KeyProfile = PhoneMEConfig("PHONEME_KEY_PROFILE");

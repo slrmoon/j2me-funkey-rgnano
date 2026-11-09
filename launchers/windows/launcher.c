@@ -654,7 +654,9 @@ typedef struct {
     char vmargs[256];
     int mute, volume;
     char synth[16];
-    int log, console, log_keys, log_events, log_display, show_fps;
+    int log, console, log_keys, log_events, log_display, show_fps, log_audio;
+    int zoom;             /* "zoom" mode: 250..4000 (1/1000), 0 = default */
+    char pan[24];         /* zoom/crop: visible part "x,y", "" = centre */
     char phone[16];
     int keys[ACTION_COUNT][MAX_BIND];
     wchar_t games_dir[WBUF];   /* global only */
@@ -726,6 +728,9 @@ static void settings_apply(Settings *s, const char *key, const char *v) {
     else if (!_stricmp(key, "LOG_EVENTS")) s->log_events = atoi(v) != 0;
     else if (!_stricmp(key, "LOG_DISPLAY")) s->log_display = atoi(v) != 0;
     else if (!_stricmp(key, "SHOW_FPS")) s->show_fps = atoi(v) != 0;
+    else if (!_stricmp(key, "LOG_AUDIO")) s->log_audio = atoi(v) != 0;
+    else if (!_stricmp(key, "ZOOM")) s->zoom = atoi(v);
+    else if (!_stricmp(key, "PAN")) copy_str(s->pan, sizeof(s->pan), v);
     else if (!_stricmp(key, "PHONE")) copy_str(s->phone, sizeof(s->phone), v);
     else if (!_stricmp(key, "KEYS")) keys_parse(s, v);
     else if (!_stricmp(key, "GAMES_DIR") && v[0]) {
@@ -812,10 +817,12 @@ static int settings_save_file(const Settings *s, const wchar_t *path, int global
         "FPS = %s\r\nHEAP_MB = %d\r\nJIT = %d\r\nVERIFY = %d\r\nVMARGS = %s\r\n"
         "MUTE = %d\r\nVOLUME = %d\r\nSYNTH = %s\r\n"
         "LOG = %d\r\nCONSOLE = %d\r\nLOG_KEYS = %d\r\nLOG_EVENTS = %d\r\nLOG_DISPLAY = %d\r\n"
-        "SHOW_FPS = %d\r\nPHONE = %s\r\nKEYS = %s\r\n",
+        "SHOW_FPS = %d\r\nLOG_AUDIO = %d\r\nZOOM = %d\r\nPAN = %s\r\n"
+        "PHONE = %s\r\nKEYS = %s\r\n",
         s->scale, s->fullscreen, s->mode, s->filter, s->lcd, s->fps, s->heap, s->jit,
         s->verify, s->vmargs, s->mute, s->volume, s->synth, s->log, s->console,
-        s->log_keys, s->log_events, s->log_display, s->show_fps, s->phone, keys);
+        s->log_keys, s->log_events, s->log_display, s->show_fps, s->log_audio, s->zoom,
+        s->pan, s->phone, keys);
     if (global && n > 0 && n < (int)sizeof(buf)) {
         char *gd = utf8_of(s->games_dir);
         n += snprintf(buf + n, sizeof(buf) - (size_t)n, "GAMES_DIR = %s\r\n", gd);
@@ -985,10 +992,12 @@ typedef struct {
     wchar_t sp_orig[WBUF], sp_copy[WBUF];
     int show_errors;
     DWORD code;
-    /* to start the runtime again ("Restart game" in its menu) */
     wchar_t *cmd, *env;
-    wchar_t bindir[WBUF], logpath[WBUF], restart[WBUF];
+    wchar_t bindir[WBUF], logpath[WBUF];
     int console, log_on;
+    /* the runtime menu's files, read back when the game ends */
+    wchar_t jar[WBUF], restart[WBUF], game_cfg[WBUF];
+    Settings used;
 } RunInfo;
 
 /* starts bin\runMidlet.exe for ri: log file / console / nothing */
@@ -1051,25 +1060,176 @@ static void show_log_tail(HWND owner, const wchar_t *log, DWORD code) {
     MessageBoxW(owner, msg, APP_TITLE, MB_OK | MB_ICONWARNING);
 }
 
-static DWORD WINAPI run_waiter(LPVOID p) {
-    RunInfo *ri = (RunInfo *)p;
-    for (;;) {
-        WaitForSingleObject(ri->process, INFINITE);
-        GetExitCodeProcess(ri->process, &ri->code);
-        CloseHandle(ri->process);
-        /* "Restart game" in the runtime menu: it left the flag and quit */
-        if (!ri->restart[0] || !DeleteFileW(ri->restart)) break;
-        if (!start_vm(ri)) {
-            MessageBoxW(ri->notify, L"Cannot restart bin\\runMidlet.exe.", APP_TITLE,
-                        MB_OK | MB_ICONWARNING);
-            break;
+/* ---- the runtime menu's files, as on the FunKey (docs/runtime-interface.md):
+ * data\debug.cfg (PHONEME_DEBUG_CONFIG): debug switches of all games;
+ * data\run\<game>\game.cfg (PHONEME_CONFIG_PATH): display and sound choices
+ * the menu made for this game. Both are read back into the settings when
+ * the game ends, so the next start ("Restart game" too) uses them. */
+
+static const struct { const char *rt; const char *ini; } DebugKeys[] = {
+    { "LOG", "LOG" }, { "KEYS", "LOG_KEYS" }, { "EVENTS", "LOG_EVENTS" },
+    { "DISPLAY", "LOG_DISPLAY" }, { "AUDIO", "LOG_AUDIO" }, { "FPS", "SHOW_FPS" }
+};
+
+static int *debug_field(Settings *s, int i) {
+    switch (i) {
+    case 0: return &s->log;
+    case 1: return &s->log_keys;
+    case 2: return &s->log_events;
+    case 3: return &s->log_display;
+    case 4: return &s->log_audio;
+    default: return &s->show_fps;
+    }
+}
+
+static void debug_cfg_path(wchar_t *out) { _snwprintf(out, WBUF, L"%ls\\debug.cfg", g_data); }
+
+static void debug_cfg_write(const Settings *st) {
+    char buf[256];
+    int i, n = 0;
+    wchar_t path[WBUF];
+    Settings t = *st;
+    for (i = 0; i < (int)(sizeof(DebugKeys) / sizeof(DebugKeys[0])); i++)
+        n += snprintf(buf + n, sizeof(buf) - (size_t)n, "%s=%d\n", DebugKeys[i].rt, *debug_field(&t, i));
+    /* no launch log / profiler on Windows */
+    n += snprintf(buf + n, sizeof(buf) - (size_t)n, "LAUNCH=0\nPROFILE=0\n");
+    debug_cfg_path(path);
+    write_file(path, buf, (DWORD)n);
+}
+
+/* KEY=VALUE lines of a runtime file; cb(ctx, key, value) for each */
+static int kv_read(const wchar_t *path, void (*cb)(void *, const char *, const char *), void *ctx) {
+    unsigned char *d;
+    DWORD n;
+    char *p;
+    if (!read_file(path, &d, &n)) return 0;
+    for (p = (char *)d; *p; ) {
+        char *e = strchr(p, '\n'), *eq, *t;
+        if (e) *e = 0;
+        t = p + strlen(p);
+        while (t > p && (t[-1] == '\r' || t[-1] == ' ')) *--t = 0;
+        eq = strchr(p, '=');
+        if (eq) { *eq = 0; cb(ctx, p, eq + 1); }
+        if (!e) break;
+        p = e + 1;
+    }
+    free(d);
+    return 1;
+}
+
+static void debug_cb(void *ctx, const char *k, const char *v) {
+    Settings *s = (Settings *)ctx;
+    int i;
+    for (i = 0; i < (int)(sizeof(DebugKeys) / sizeof(DebugKeys[0])); i++)
+        if (!strcmp(k, DebugKeys[i].rt)) *debug_field(s, i) = atoi(v) != 0;
+}
+
+static void game_cfg_cb(void *ctx, const char *k, const char *v) {
+    Settings *s = (Settings *)ctx;
+    if (!strcmp(k, "DISPLAY_MODE")) copy_str(s->mode, sizeof(s->mode), v);
+    else if (!strcmp(k, "FILTER")) copy_str(s->filter, sizeof(s->filter), v);
+    else if (!strcmp(k, "FPS_LIMIT")) copy_str(s->fps, sizeof(s->fps), v);
+    else if (!strcmp(k, "VOLUME")) s->volume = atoi(v);
+    else if (!strcmp(k, "SYNTH")) copy_str(s->synth, sizeof(s->synth), v);
+    else if (!strcmp(k, "VIEW")) {
+        /* auto / full / WxH */
+        if (strchr(v, 'x') && v[0] >= '0' && v[0] <= '9') copy_str(s->lcd, sizeof(s->lcd), v);
+        else s->lcd[0] = 0;
+    } else if (!strcmp(k, "SCALE") && !strncmp(v, "zoom-", 5)) {
+        /* zoom-075 = 75%, zoom-150 = 150%, zoom-1875 = 187.5% */
+        int z = atoi(v + 5);
+        s->zoom = strlen(v + 5) <= 3 ? z * 10 : z;
+    } else if (!strcmp(k, "PAN_X")) {
+        const char *c = strchr(s->pan, ',');
+        snprintf(s->pan, sizeof(s->pan), "%s,%s", v, c ? c + 1 : "0");
+    } else if (!strcmp(k, "PAN_Y")) {
+        char x[12] = "0";
+        const char *c = strchr(s->pan, ',');
+        if (c) { size_t l = (size_t)(c - s->pan); if (l > 11) l = 11; memcpy(x, s->pan, l); x[l] = 0; }
+        snprintf(s->pan, sizeof(s->pan), "%s,%s", x, v);
+    }
+}
+
+static int debug_differs(const Settings *a, const Settings *b) {
+    Settings x = *a, y = *b;
+    int i;
+    for (i = 0; i < (int)(sizeof(DebugKeys) / sizeof(DebugKeys[0])); i++) if (*debug_field(&x, i) != *debug_field(&y, i)) return 1;
+    return 0;
+}
+
+static int game_cfg_differs(const Settings *a, const Settings *b) {
+    return strcmp(a->mode, b->mode) || strcmp(a->filter, b->filter) || strcmp(a->fps, b->fps) ||
+           a->volume != b->volume || strcmp(a->synth, b->synth) || strcmp(a->lcd, b->lcd) ||
+           a->zoom != b->zoom || strcmp(a->pan, b->pan);
+}
+
+static void runtime_files_import(RunInfo *ri) {
+    Settings now = ri->used, s;
+    wchar_t path[WBUF], gi[WBUF];
+    game_ini_path(ri->jar, gi);
+    debug_cfg_path(path);
+    kv_read(path, debug_cb, &now);
+    if (debug_differs(&now, &ri->used)) {
+        /* debug switches are for all games (as on the FunKey) */
+        int i;
+        settings_default(&s);
+        settings_load_file(&s, g_ini);
+        for (i = 0; i < (int)(sizeof(DebugKeys) / sizeof(DebugKeys[0])); i++) *debug_field(&s, i) = *debug_field(&now, i);
+        settings_save_file(&s, g_ini, 1);
+        if (file_exists(gi)) {
+            settings_for(&s, ri->jar);
+            for (i = 0; i < (int)(sizeof(DebugKeys) / sizeof(DebugKeys[0])); i++) *debug_field(&s, i) = *debug_field(&now, i);
+            settings_save_file(&s, gi, 0);
         }
     }
+    if (kv_read(ri->game_cfg, game_cfg_cb, &now)) {
+        /* the menu writes its zoom and pan always: they matter only for
+         * the zoom mode and away from the centre */
+        if (strcmp(now.mode, "zoom") != 0) now.zoom = ri->used.zoom;
+        if (!strcmp(now.pan, "0,0") && !ri->used.pan[0]) now.pan[0] = 0;
+    }
+    if (game_cfg_differs(&now, &ri->used)) {
+        /* display and sound choices: this game's own settings */
+        settings_for(&s, ri->jar);
+        copy_str(s.mode, sizeof(s.mode), now.mode);
+        copy_str(s.filter, sizeof(s.filter), now.filter);
+        copy_str(s.fps, sizeof(s.fps), now.fps);
+        s.volume = now.volume;
+        copy_str(s.synth, sizeof(s.synth), now.synth);
+        copy_str(s.lcd, sizeof(s.lcd), now.lcd);
+        s.zoom = now.zoom;
+        copy_str(s.pan, sizeof(s.pan), now.pan);
+        settings_save_file(&s, gi, 0);
+    }
+}
+
+static int run_game(HWND owner, const wchar_t *path, int wait);
+
+static DWORD WINAPI run_waiter(LPVOID p) {
+    RunInfo *ri = (RunInfo *)p;
+    int restart;
+    WaitForSingleObject(ri->process, INFINITE);
+    GetExitCodeProcess(ri->process, &ri->code);
+    CloseHandle(ri->process);
+    /* "Restart game" in the runtime menu: it left the flag and quit */
+    restart = ri->restart[0] && DeleteFileW(ri->restart);
+    runtime_files_import(ri);
     if (ri->sp_copy[0] && ri->sp_orig[0] && !CopyFileW(ri->sp_copy, ri->sp_orig, FALSE))
         MessageBoxW(ri->notify, L"Could not write the scratchpad (save) back to the game folder.",
                     APP_TITLE, MB_OK | MB_ICONWARNING);
     /* 1 = MIDP_SHUTDOWN_STATUS: the window was closed or the game quit */
-    if (ri->code != 0 && ri->code != 1 && ri->show_errors) show_log_tail(ri->notify, ri->log, ri->code);
+    if (!restart && ri->code != 0 && ri->code != 1 && ri->show_errors)
+        show_log_tail(ri->notify, ri->log, ri->code);
+    if (restart) {
+        /* again, with the settings the menu saved; that run reports the end */
+        HWND notify = ri->notify;
+        wchar_t jar[WBUF];
+        wcscpy(jar, ri->jar);
+        run_info_free(ri);
+        if (run_game(notify, jar, 1)) return 0;
+        if (notify) PostMessageW(notify, WM_APP_GAME_ENDED, 0, 0);
+        return 0;
+    }
     if (ri->notify) PostMessageW(ri->notify, WM_APP_GAME_ENDED, 0, 0);
     run_info_free(ri);
     return 0;
@@ -1121,11 +1281,21 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     if (r == NULL) { fail(L"Bad data folder %ls", rmsdir); zip_close(&zip); return 0; }
     env_set("PHONEME_RMS_HOME", r);
     free(r);
-    /* "Restart game" in the runtime menu leaves this file and exits */
+    /* the runtime menu: "Restart game" leaves restart-request and exits;
+     * its choices go to game.cfg and debug.cfg (read back at the end) */
     r = ascii_alias(rundir);
     if (r != NULL) {
         snprintf(s, sizeof(s), "%s\\restart-request", r);
         env_set("PHONEME_RESTART_FLAG", s);
+        snprintf(s, sizeof(s), "%s\\game.cfg", r);
+        env_set("PHONEME_CONFIG_PATH", s);
+        free(r);
+    }
+    debug_cfg_write(&st);
+    r = ascii_alias(g_data);
+    if (r != NULL) {
+        snprintf(s, sizeof(s), "%s\\debug.cfg", r);
+        env_set("PHONEME_DEBUG_CONFIG", s);
         free(r);
     }
     snprintf(s, sizeof(s), "%d", st.scale); env_set("PHONEME_WINDOW_SCALE", s);
@@ -1141,6 +1311,9 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     if (st.log_events) env_set("PHONEME_EVENT_DEBUG", "1");
     if (st.log_display) env_set("PHONEME_DISPLAY_DEBUG", "1");
     if (st.show_fps) env_set("PHONEME_SHOW_FPS", "1");
+    if (st.log_audio) env_set("PHONEME_AUDIO_TRACE", "1");
+    if (st.zoom > 0) { snprintf(s, sizeof(s), "%d", st.zoom); env_set("PHONEME_SCALE_RATIO", s); }
+    if (st.pan[0]) env_set("PHONEME_PAN", st.pan);
     pc_keys_env(&st, s, sizeof(s));
     env_set("PHONEME_PC_KEYS", s);
     if (st.lcd[0]) { env_set("PHONEME_LCD_SIZE", st.lcd); env_set("PHONEME_SOURCE_SIZE", st.lcd); }
@@ -1316,6 +1489,10 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     /* start */
     _snwprintf(ri->restart, WBUF, L"%ls\\restart-request", rundir);
     DeleteFileW(ri->restart);
+    _snwprintf(ri->game_cfg, WBUF, L"%ls\\game.cfg", rundir);
+    DeleteFileW(ri->game_cfg);
+    wcscpy(ri->jar, jar);
+    ri->used = st;
     ri->cmd = _wcsdup(cmd);
     ri->env = env_block();
     _snwprintf(ri->bindir, WBUF, L"%ls\\bin", g_home);
@@ -1455,6 +1632,7 @@ static void pages_load(void) {
     check(so, IDC_LOGEVENTS, g_set.log_events);
     check(so, IDC_LOGDISPLAY, g_set.log_display);
     check(so, IDC_SHOWFPS, g_set.show_fps);
+    check(so, IDC_LOGAUDIO, g_set.log_audio);
     g_loading = 0;
 }
 
@@ -1538,6 +1716,7 @@ static void pages_read(void) {
     g_set.log_events = checked(so, IDC_LOGEVENTS);
     g_set.log_display = checked(so, IDC_LOGDISPLAY);
     g_set.show_fps = checked(so, IDC_SHOWFPS);
+    g_set.log_audio = checked(so, IDC_LOGAUDIO);
     save_scope();
 }
 
@@ -2066,6 +2245,8 @@ static INT_PTR CALLBACK main_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         return FALSE;
     case WM_APP_GAME_ENDED:
+        /* the runtime menu may have changed settings (game.cfg, debug.cfg) */
+        scope_update();
         return TRUE;
     case WM_CLOSE:
         pages_read();
