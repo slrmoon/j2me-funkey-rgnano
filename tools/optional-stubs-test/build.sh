@@ -2,7 +2,7 @@
 # Builds StubTest.jar: checks that the optional JSR stubs (JSR 75, 82, 179,
 # 226, 239) load and refuse the way games expect; prints "StubTest: PASS".
 #
-#   JDK_DIR=/path/to/jdk7 BUILD_OUTPUT_DIR=.../build_output_xxx tools/optional-stubs-test/build.sh [out.jar]
+#   JDK_DIR=/path/to/jdk7 BUILD_OUTPUT_DIR=out/<target> tools/optional-stubs-test/build.sh [out.jar]
 set -e
 D=$(cd "$(dirname "$0")" && pwd)
 OUT=${1:-$PWD/StubTest.jar}

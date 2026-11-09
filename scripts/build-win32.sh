@@ -8,7 +8,7 @@
 #   apt install mingw-w64 gcc-multilib g++-multilib libc6-dev-i386 make git
 # The VM's host tools (romgen, loopgen, preverify) are 32-bit Linux programs,
 # as in build-linux-x86.sh. Ubuntu 24.04's static i386 libm lacks fmod:
-#   gcc -m32 -O2 -c ../tools/cloud-test/fmodshim.c -o /tmp/fmodshim.o
+#   gcc -m32 -O2 -c tools/cloud-test/fmodshim.c -o /tmp/fmodshim.o
 #   HOST_LINK_EXTRA=/tmp/fmodshim.o ./build-win32.sh
 #
 # SDL 1.2, SDL_gfx and zlib are built (static) into $MINGW_SYSROOT from
@@ -16,14 +16,15 @@
 # checkouts instead).
 #
 # Output: $BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet.exe plus lib/ and
-# appdb/; ../phoneme-funkey-opk-wrapper/package-win32.sh packs them with
+# appdb/; launchers/windows/package.sh packs them with
 # the launcher into a zip.
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MEHOME=$ROOT/phoneME-GP2X-SDL/phoneme_feature
-BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$MEHOME/build_output_win32}
+# repository root (scripts/..): JDK, FunKey SDK and .toolchains are looked up there
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+MEHOME=$ROOT/runtime
+BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/out/win32}
 MINGW_PREFIX=${MINGW_PREFIX:-i686-w64-mingw32-}
 MINGW_SYSROOT=${MINGW_SYSROOT:-$BUILD_OUTPUT_DIR/sysroot}
 MAKE_JOBS=${MAKE_JOBS:-$(nproc 2>/dev/null || echo 1)}

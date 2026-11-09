@@ -2,9 +2,10 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MEHOME=$ROOT/phoneME-GP2X-SDL/phoneme_feature
-BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$MEHOME/build_output}
+# repository root (scripts/..): JDK, FunKey SDK and .toolchains are looked up there
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+MEHOME=$ROOT/runtime
+BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/out/armv7}
 ARM_TRIPLET=${ARM_TRIPLET:-arm-linux-gnueabihf}
 ARM_ABI=${ARM_ABI:-hard}
 ARM_CLDC_PLATFORM=${ARM_CLDC_PLATFORM:-linux_arm_vfp}

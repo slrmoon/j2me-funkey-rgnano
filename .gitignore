@@ -1,26 +1,19 @@
+# build outputs (scripts/build-*.sh, launchers/*/package.sh)
+/out/
 *.opk
 *.log
-
-FunKey-sdk-2.3.0/
-zulu7.24.0.1-ca-jdk7.0.191-linux_x64/
-zulu7.24.0.1-jdk7.0.191-linux_x64/
-
-.toolchains/
-
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output/
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s/
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_x86_m3g/
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/build_output_win32/
-phoneme-funkey-opk-wrapper/stage/
-
-build/
-m3g_probe_results/
-m3g_ngl_probe_funkey
-
-# build outputs inside the phoneME tree
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/preverifier/build/linux/*.o
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/preverifier/build/linux/preverify
-phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/tools/output/
+__pycache__/
 *~
 out.raw
-__pycache__/
+
+# toolchains and JDKs unpacked next to the scripts
+/.toolchains/
+FunKey-sdk-*/
+zulu7*/
+
+# files the phoneME build writes into the source tree
+runtime/preverifier/build/linux/*.o
+runtime/preverifier/build/linux/preverify
+runtime/tools/output/
+m3g_probe_results/
+m3g_ngl_probe_funkey

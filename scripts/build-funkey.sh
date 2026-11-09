@@ -6,9 +6,10 @@ fi
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# repository root (scripts/..): JDK, FunKey SDK and .toolchains are looked up there
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-FUNKEY_SDK_DIR=${FUNKEY_SDK_DIR:-"$(cd "$(dirname "$0")" && pwd)/FunKey-sdk-2.3.0"}
+FUNKEY_SDK_DIR=${FUNKEY_SDK_DIR:-"$ROOT/FunKey-sdk-2.3.0"}
 
 if [ ! -d "$FUNKEY_SDK_DIR" ]; then
     echo "FunKey SDK not found: $FUNKEY_SDK_DIR" >&2
@@ -89,10 +90,10 @@ export ARM_CFLAGS=${ARM_CFLAGS:-"$SDK_TARGET_FLAGS -std=gnu89 -marm -march=armv7
 export ARM_ASM_FLAGS=${ARM_ASM_FLAGS:-"-march=armv7ve -mcpu=cortex-a7 -mfpu=neon-vfpv4"}
 export ARM_LINK_FLAGS=${ARM_LINK_FLAGS:-"$ARM_CFLAGS $SDK_TARGET_LDFLAGS -lz"}
 export MIDP_CMDLINE_CFLAGS=${MIDP_CMDLINE_CFLAGS:-"$ARM_CFLAGS"}
-export BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/phoneME-GP2X-SDL/phoneme_feature/build_output_funkey_s}
+export BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/out/funkey}
 export USE_LIBFLOAT=false
 export GCC_VERSION=
 
 echo "Build output: $BUILD_OUTPUT_DIR"
-echo "Handing off to build-ubuntu26-armv7.sh..."
-exec "$ROOT/build-ubuntu26-armv7.sh"
+echo "Handing off to build-armv7.sh..."
+exec "$ROOT/scripts/build-armv7.sh"

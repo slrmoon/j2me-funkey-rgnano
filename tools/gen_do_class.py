@@ -98,7 +98,7 @@ def build_class():
 
 
 def main():
-    out_dir = '/home/pq/funkey-github-ready/phoneme-funkey-opk-wrapper/packaging/funkey-s/doja-stubs/com/mascotcapsule/eruption/docomostar'
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'java', 'doja', 'stubs', 'com', 'mascotcapsule', 'eruption', 'docomostar')
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, 'do.class')
 

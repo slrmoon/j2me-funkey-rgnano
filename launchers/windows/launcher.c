@@ -18,7 +18,7 @@
  * ASCII: 8.3 short names where Windows has them, otherwise copies in the
  * data folder (the scratchpad is copied back when the game ends).
  *
- * Build: see package-win32.sh (windres launcher.rc; gcc -municode -mwindows
+ * Build: see package.sh (windres launcher.rc; gcc -municode -mwindows
  *        launcher.c -lz -lcomctl32 -lcomdlg32 -lshlwapi -lole32 -lshell32)
  */
 #define WIN32_LEAN_AND_MEAN

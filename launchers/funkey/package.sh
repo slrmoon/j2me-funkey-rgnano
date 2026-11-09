@@ -2,24 +2,21 @@
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PHONEME_ROOT_DEFAULT=$ROOT/../phoneme-funkey-clean/phoneME-GP2X-SDL
-if [ -d "$ROOT/phoneME-GP2X-SDL/phoneme_feature" ]; then
-    PHONEME_ROOT=${FUNKEY_PHONEME_ROOT:-$ROOT/phoneME-GP2X-SDL}
-else
-    PHONEME_ROOT=${FUNKEY_PHONEME_ROOT:-$PHONEME_ROOT_DEFAULT}
-fi
-PHONEME_ROOT=$(CDPATH= cd -- "$PHONEME_ROOT" && pwd)
-MEHOME=$PHONEME_ROOT/phoneme_feature
-MIDP_BIN=$MEHOME/build_output_funkey_s/midp/bin/arm
-MIDP_CLASSES=$MEHOME/build_output_funkey_s/midp/classes.zip
-TARGET_CLDC_BIN=$MEHOME/build_output_funkey_s/cldc/linux_arm_vfp/dist/bin
-CLDC_DIST=$MEHOME/build_output_funkey_s/cldc/linux_i386/dist
+# Packs the FunKey S / RG Nano runtime (built by scripts/build-funkey.sh into
+# out/funkey) and this launcher (pm-launch.c) into an OPK.
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH= cd -- "$HERE/../.." && pwd)
+MEHOME=$ROOT/runtime
+BUILD=${BUILD_OUTPUT_DIR:-$ROOT/out/funkey}
+MIDP_BIN=$BUILD/midp/bin/arm
+MIDP_CLASSES=$BUILD/midp/classes.zip
+TARGET_CLDC_BIN=$BUILD/cldc/linux_arm_vfp/dist/bin
+CLDC_DIST=$BUILD/cldc/linux_i386/dist
 PREVERIFY=$CLDC_DIST/bin/preverify
-RUNMIDLET_FALLBACK=${RUNMIDLET_FALLBACK:-$MEHOME/build_output_funkey_s/opk/phoneme-funkey-s/bin/runMidlet}
+RUNMIDLET_FALLBACK=${RUNMIDLET_FALLBACK:-$BUILD/opk/phoneme-funkey-s/bin/runMidlet}
 CLDC_VM_FALLBACK=${CLDC_VM_FALLBACK:-}
 JDK_DIR=${JDK_DIR:-$ROOT/zulu7.24.0.1-jdk7.0.191-linux_x64}
-PACKAGE_ROOT=$MEHOME/build_output_funkey_s/opk
+PACKAGE_ROOT=$BUILD/opk
 OPK_BASENAME=${FUNKEY_OPK_BASENAME:-${FUNKEY_OPK_NAME:-pm}}
 OPK_NAME=$OPK_BASENAME
 STAGE_NAME=${FUNKEY_STAGE_NAME:-$OPK_BASENAME}
@@ -29,9 +26,9 @@ SCAN_DIR=${FUNKEY_SCAN_DIR:-/mnt/java}
 RUNTIME_LOG=${FUNKEY_RUNTIME_LOG:-$APP_DIR/runmidlet.log}
 STAGE=$PACKAGE_ROOT/$STAGE_NAME
 OPK=$PACKAGE_ROOT/$OPK_BASENAME.opk
-HELLO_SRC=$ROOT/packaging/funkey-s/HelloMidlet.java
-DOJA_STUB_SRC=$ROOT/packaging/funkey-s/doja-stubs
-DOJA_API_SRC=$ROOT/packaging/funkey-s/doja-api
+HELLO_SRC=$HERE/HelloMidlet.java
+DOJA_STUB_SRC=$ROOT/java/doja/stubs
+DOJA_API_SRC=$ROOT/java/doja/api
 HELLO_BUILD=$PACKAGE_ROOT/hello-build
 FUNKEY_CC=${FUNKEY_CC:-}
 APP_JAR=${FUNKEY_MIDLET_JAR:-${1:-}}
@@ -40,7 +37,7 @@ APP_MAIN=${FUNKEY_MIDLET_MAIN:-}
 APP_TITLE=${FUNKEY_APP_TITLE:-J2ME}
 APP_COMMENT=${FUNKEY_APP_COMMENT:-Java ME runtime}
 RUNMIDLET_HEAP_ARG=${FUNKEY_RUNMIDLET_HEAP_ARG:-}
-APP_ICON_SRC=$ROOT/packaging/funkey-s/java-runtime-icon.png
+APP_ICON_SRC=$HERE/java-runtime-icon.png
 BUNDLE_MIDLET=${FUNKEY_BUNDLE_MIDLET:-0}
 RUNTIME_ONLY=${FUNKEY_RUNTIME_ONLY:-1}
 ENABLE_DOJA_SUPPORT=${FUNKEY_ENABLE_DOJA_SUPPORT:-1}
@@ -96,11 +93,11 @@ require_runtime_not_stale() {
 
     for artifact in \
         "$MIDP_CLASSES" \
-        "$MEHOME/build_output_funkey_s/midp/ROMImage.cpp" \
-        "$MEHOME/build_output_funkey_s/midp/obj/arm/ROMImage.o"; do
+        "$BUILD/midp/ROMImage.cpp" \
+        "$BUILD/midp/obj/arm/ROMImage.o"; do
         if [ -f "$artifact" ] && [ "$artifact" -nt "$runmidlet" ]; then
             echo "Stale runMidlet: $artifact is newer than $runmidlet" >&2
-            echo "Run phoneme-funkey-clean/build-funkey-s.sh before packaging OPK." >&2
+            echo "Run scripts/build-funkey.sh before packaging the OPK." >&2
             exit 1
         fi
     done
@@ -182,13 +179,13 @@ if [ -z "$FUNKEY_CC" ] && command -v arm-funkey-linux-musleabihf-gcc >/dev/null 
     FUNKEY_CC=$(command -v arm-funkey-linux-musleabihf-gcc)
 fi
 
-if [ -z "$FUNKEY_CC" ] && [ -x "${FUNKEY_SDK_DIR:-/home/pq/FunKey-sdk-2.3.0}/bin/arm-funkey-linux-musleabihf-gcc" ]; then
-    FUNKEY_CC=${FUNKEY_SDK_DIR:-/home/pq/FunKey-sdk-2.3.0}/bin/arm-funkey-linux-musleabihf-gcc
+if [ -z "$FUNKEY_CC" ] && [ -x "${FUNKEY_SDK_DIR:-$ROOT/FunKey-sdk-2.3.0}/bin/arm-funkey-linux-musleabihf-gcc" ]; then
+    FUNKEY_CC=${FUNKEY_SDK_DIR:-$ROOT/FunKey-sdk-2.3.0}/bin/arm-funkey-linux-musleabihf-gcc
 fi
 
 if [ ! -x "$MIDP_BIN/runMidlet" ] && [ ! -s "$RUNMIDLET_FALLBACK" ]; then
     echo "Missing FunKey runMidlet: $MIDP_BIN/runMidlet" >&2
-    echo "Run build-funkey-s.sh first." >&2
+    echo "Run scripts/build-funkey.sh first." >&2
     exit 1
 fi
 require_runtime_not_stale
@@ -305,15 +302,15 @@ rm -f "$STAGE/bin/cldc_vm"
 if [ -s "$TARGET_CLDC_BIN/cldc_vm" ] || { [ -n "$CLDC_VM_FALLBACK" ] && [ -s "$CLDC_VM_FALLBACK" ]; }; then
     copy_nonempty_file "$TARGET_CLDC_BIN/cldc_vm" "$STAGE/bin/cldc_vm" "$CLDC_VM_FALLBACK"
 fi
-cp -R "$MEHOME/build_output_funkey_s/midp/lib" "$STAGE/lib"
+cp -R "$BUILD/midp/lib" "$STAGE/lib"
 rm -rf "$STAGE/lib/freepats" "$STAGE/lib/soundfont"
 build_doja_support
-cp -R "$MEHOME/build_output_funkey_s/midp/appdb" "$STAGE/appdb"
+cp -R "$BUILD/midp/appdb" "$STAGE/appdb"
 echo "Compiling SDL launcher (browser mode)"
 
 FUNKEY_SDK_DIR=${FUNKEY_SDK_DIR:-$(dirname "$(dirname "$FUNKEY_CC")")}
 SYSROOT=$FUNKEY_SDK_DIR/arm-funkey-linux-musleabihf/sysroot
-LAUNCH_SRC=$ROOT/packaging/funkey-s/pm-launch.c
+LAUNCH_SRC=$HERE/pm-launch.c
 if [ -f "$LAUNCH_SRC" ]; then
     pm_dir_define=$(printf '%s' "$APP_DIR" | sed 's/"/\\"/g')
     browse_dir_define=$(printf '%s' "$SCAN_DIR" | sed 's/"/\\"/g')

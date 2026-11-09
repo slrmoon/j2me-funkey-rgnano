@@ -10,7 +10,7 @@ import sys
 import struct
 import zipfile
 
-OUT_DIR = '/home/pq/funkey-github-ready/phoneme-funkey-opk-wrapper/packaging/funkey-s/doja-stubs/com/mascotcapsule/eruption/docomostar'
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'java', 'doja', 'stubs', 'com', 'mascotcapsule', 'eruption', 'docomostar')
 PKG_INTERNAL = 'com/mascotcapsule/eruption/docomostar'
 
 def u1(value):

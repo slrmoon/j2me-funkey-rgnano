@@ -9,17 +9,18 @@
 #   apt install gcc-multilib g++-multilib libc6-dev-i386 zlib1g-dev:i386 \
 #       libsdl1.2-dev:i386 libsdl-image1.2-dev:i386 libsdl-gfx1.2-dev:i386
 # Ubuntu 24.04's static i386 libm lacks fmod/fmodf (romgen link fails):
-#   gcc -m32 -O2 -c ../tools/cloud-test/fmodshim.c -o /tmp/fmodshim.o
+#   gcc -m32 -O2 -c tools/cloud-test/fmodshim.c -o /tmp/fmodshim.o
 #   HOST_LINK_FLAGS="-m32 /tmp/fmodshim.o" ./build-linux-x86.sh
 #
 # Output: $BUILD_OUTPUT_DIR/midp/bin/i386/runMidlet plus lib/ and appdb/;
-# make-linux-x86-dist.sh packs them into a runnable folder.
+# launchers/linux/package.sh packs them into a runnable folder.
 
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MEHOME=$ROOT/phoneME-GP2X-SDL/phoneme_feature
-BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$MEHOME/build_output_linux_x86}
+# repository root (scripts/..): JDK, FunKey SDK and .toolchains are looked up there
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+MEHOME=$ROOT/runtime
+BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/out/linux-x86}
 MAKE_JOBS=${MAKE_JOBS:-$(nproc 2>/dev/null || echo 1)}
 # MIDP generates sources with tools it builds first, and CLDC's romgen and
 # loopgen both build classes.zip: parallel make races in both.

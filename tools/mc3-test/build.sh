@@ -2,7 +2,7 @@
 # Builds MC3Test.jar: a MascotCapsule Micro3D v3 smoke test (animated lit
 # figure, primitives, point sprites, a translated/clipped corner view).
 #
-#   JDK_DIR=/path/to/jdk7 BUILD_OUTPUT_DIR=.../build_output_xxx tools/mc3-test/build.sh [out.jar]
+#   JDK_DIR=/path/to/jdk7 BUILD_OUTPUT_DIR=out/<target> tools/mc3-test/build.sh [out.jar]
 #
 # BUILD_OUTPUT_DIR: a runtime build (its midp/classes.zip and preverify).
 set -e

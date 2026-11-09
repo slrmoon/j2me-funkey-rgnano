@@ -1,35 +1,35 @@
 #!/bin/bash
-# Pack the Windows runtime built by phoneme-funkey-clean/build-win32.sh into
+# Pack the Windows runtime built by scripts/build-win32.sh into
 # a folder and a .zip:
 #
-#   JDK_DIR=/path/to/jdk7 ./package-win32.sh [out_dir]
+#   JDK_DIR=/path/to/jdk7 launchers/windows/package.sh [out_dir]
 #
 # Result: <out_dir>/funkey-j2me-win32/{FunKeyJ2ME.exe,bin,lib,appdb,
 # games,README.txt} and <out_dir>/funkey-j2me-win32.zip
-# (default out_dir: ./dist). Needs i686-w64-mingw32-gcc and the MinGW
+# (default out_dir: out/dist). Needs i686-w64-mingw32-gcc and the MinGW
 # sysroot with zlib that build-win32.sh used (MINGW_SYSROOT).
 
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")" && pwd)
-MEHOME=${MEHOME:-$ROOT/../phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature}
-BUILD=${BUILD_OUTPUT_DIR:-$MEHOME/build_output_win32}
+HERE=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
+BUILD=${BUILD_OUTPUT_DIR:-$ROOT/out/win32}
 MINGW_SYSROOT=${MINGW_SYSROOT:-$BUILD/sysroot}
 MINGW_PREFIX=${MINGW_PREFIX:-i686-w64-mingw32-}
-OUT=${1:-$ROOT/dist}
+OUT=${1:-$ROOT/out/dist}
 NAME=funkey-j2me-win32
 STAGE=$OUT/$NAME
 MIDP=$BUILD/midp
 CLDC_DIST=$BUILD/cldc/mingw_i386/dist
-DOJA_STUB_SRC=$ROOT/packaging/funkey-s/doja-stubs
-DOJA_API_SRC=$ROOT/packaging/funkey-s/doja-api
+DOJA_STUB_SRC=$ROOT/java/doja/stubs
+DOJA_API_SRC=$ROOT/java/doja/api
 
 if [ -z "${JDK_DIR:-}" ] || [ ! -x "$JDK_DIR/bin/javac" ]; then
     echo "Set JDK_DIR to a JDK 7 directory." >&2
     exit 1
 fi
 if [ ! -f "$MIDP/bin/i386/runMidlet.exe" ]; then
-    echo "No runtime in $MIDP: run phoneme-funkey-clean/build-win32.sh first." >&2
+    echo "No runtime in $MIDP: run scripts/build-win32.sh first." >&2
     exit 1
 fi
 
@@ -58,16 +58,16 @@ find "$DOJA_STUB_SRC" "$DOJA_API_SRC" -name '*.java' | sort > "$TMP/sources.list
 find "$DOJA_STUB_SRC" -maxdepth 1 -name 'NOTICE-*' -exec cp {} "$STAGE/lib/" \;
 
 echo "Building the launcher (FunKeyJ2ME.exe)"
-(cd "$ROOT/packaging/win32" &&
+(cd "$HERE" &&
  "${MINGW_PREFIX}windres" launcher.rc -O coff -o "$TMP/launcher.res")
 "${MINGW_PREFIX}gcc" -O2 -Wall -municode -mwindows -I"$MINGW_SYSROOT/include" \
-    "$ROOT/packaging/win32/launcher.c" "$TMP/launcher.res" -o "$STAGE/FunKeyJ2ME.exe" \
+    "$HERE/launcher.c" "$TMP/launcher.res" -o "$STAGE/FunKeyJ2ME.exe" \
     -L"$MINGW_SYSROOT/lib" -static -lz -lcomctl32 -lcomdlg32 -lshlwapi -lole32 -lshell32 -luuid
 "${MINGW_PREFIX}strip" "$STAGE/FunKeyJ2ME.exe" 2>/dev/null || true
 
 # Windows line endings for the text files people open in Notepad;
 # settings.ini is written by the launcher itself
-sed 's/\r*$/\r/' "$ROOT/packaging/win32/README.txt" > "$STAGE/README.txt"
+sed 's/\r*$/\r/' "$HERE/README.txt" > "$STAGE/README.txt"
 mkdir -p "$STAGE/games"
 printf 'Put your games (.jar, i-appli .jar + .jam) here, sub-folders are fine.\r\n' \
     > "$STAGE/games/put-games-here.txt"

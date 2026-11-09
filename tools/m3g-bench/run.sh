@@ -15,10 +15,10 @@ set -e
 FR=${1:-20}; MODES=${2:-"n f e l lf le"}; REF=${REF:-HEAD}
 D=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$D/../.." && pwd)
-N=$ROOT/phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/jsr184/src/native
+N=$ROOT/runtime/jsr184/src/native
 W=${WORK:-/tmp/m3g-bench}
 mkdir -p "$W/old"
-(cd "$ROOT" && git show "$REF:phoneme-funkey-clean/phoneME-GP2X-SDL/phoneme_feature/jsr184/src/native/funkey/ngl_software.h") > "$W/old/ngl_software.h"
+(cd "$ROOT" && git show "$REF:runtime/jsr184/src/native/funkey/ngl_software.h") > "$W/old/ngl_software.h"
 cp "$N/funkey/ngl.h" "$W/old/"
 build() {  # build <old|new> <out>
     OV=""; [ "$1" = old ] && OV="-I$W/old"
