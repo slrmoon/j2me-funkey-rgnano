@@ -55,9 +55,10 @@
 <div id="stage">
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
   <div id="overlay">
-    <div>Open a J2ME game (.jar) — it stays on this computer.</div>
+    <div>Open a J2ME game (.jar) or an i-appli (.jar + .jam, and its .sp
+      if you have one) — the files stay on this computer.</div>
     <div class="row">
-      <label class="file">Choose .jar<input id="file" type="file" accept=".jar"></label>
+      <label class="file">Choose game<input id="file" type="file" accept=".jar,.jam,.sp" multiple></label>
       <button id="demo">MotherLoad (demo)</button>
     </div>
     <div id="picked"></div>
@@ -83,7 +84,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=561bf25-1794236389';
+const V = '?v=743c9d5-1794237317';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -129,45 +130,88 @@ function manifestValue(text, key) {
   return null;
 }
 
-async function pick(name, buf) {
-  const bytes = new Uint8Array(buf);
+// i-appli (DoJa) descriptor: "Key = Value" lines in Shift_JIS
+function jamValues(bytes) {
+  let text;
+  try { text = new TextDecoder('shift_jis').decode(bytes); }
+  catch (e) { text = new TextDecoder().decode(bytes); }
+  const out = {};
+  for (const line of text.split(/\r?\n/)) {
+    const i = line.indexOf('=');
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
+// files picked or dropped so far (a DoJa game is two or three files)
+const chosen = { jar: null, jam: null, sp: null };
+
+async function pick(files) {
+  for (const f of files) {
+    const ext = f.name.toLowerCase().split('.').pop();
+    if (ext === 'jar' || ext === 'jam' || ext === 'sp') chosen[ext] = f;
+  }
+  game = null;
+  $('start').disabled = true;
+  const jar = chosen.jar;
+  if (!jar) { $('picked').textContent = chosen.jam ? chosen.jam.name + ': now the .jar' : ''; return; }
+  const bytes = jar.bytes;
   let main = params.get('main'), mf = '';
   try {
     mf = await readManifest(bytes);
-    const m1 = manifestValue(mf, 'MIDlet-1');
-    if (!main && m1) main = (m1.split(',')[2] || '').trim();
-    if (!main && manifestValue(mf, 'AppClass')) {
-      throw new Error('i-appli (DoJa) games are not supported here yet');
-    }
   } catch (e) {
-    $('picked').textContent = name + ': ' + e.message;
+    $('picked').textContent = jar.name + ': ' + e.message;
     return;
   }
-  if (!main) { $('picked').textContent = name + ': no MIDlet-1 in the manifest'; return; }
-  game = { name: name.replace(/\.jar$/i, ''), bytes, main, jad: mf };
-  $('picked').textContent = name + ' — ' + main;
+  const m1 = manifestValue(mf, 'MIDlet-1');
+  if (!main && m1) main = (m1.split(',')[2] || '').trim();
+  const name = jar.name.replace(/\.jar$/i, '');
+  if (chosen.jam || !main) {
+    if (!chosen.jam) {
+      $('picked').textContent = jar.name + ': no MIDlet-1 — if it is an i-appli, add its .jam';
+      return;
+    }
+    const jam = jamValues(chosen.jam.bytes);
+    if (!jam.AppClass) { $('picked').textContent = chosen.jam.name + ': no AppClass'; return; }
+    const ascii = v => /^[\x20-\x7e]*$/.test(v || '') ? (v || '') : '';
+    game = { name, bytes, jad: '', main: jam.AppClass, doja: {
+      jam: chosen.jam.bytes, cls: jam.AppClass,
+      area: /^\d+x\d+$/.test(jam.DrawArea || '') ? jam.DrawArea : '240x240',
+      param: ascii(jam.AppParam), ver: ascii(jam.AppVer), spsize: ascii(jam.SPsize),
+      sp: chosen.sp ? chosen.sp.bytes : null } };
+    $('picked').textContent = jar.name + ' + ' + chosen.jam.name +
+      (chosen.sp ? ' + ' + chosen.sp.name : '') + ' — i-appli ' + jam.AppClass;
+  } else {
+    game = { name, bytes, main, jad: mf };
+    $('picked').textContent = jar.name + ' — ' + main;
+  }
   $('start').disabled = false;
   $('start').focus();
   status('Ready: ' + game.name);
 }
 
+async function readFiles(list) {
+  const out = [];
+  for (const f of list) out.push({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) });
+  return out;
+}
+
 $('file').addEventListener('change', async e => {
-  const f = e.target.files[0];
-  if (f) pick(f.name, await f.arrayBuffer());
+  pick(await readFiles(e.target.files));
+  e.target.value = '';
 });
 const ov = $('overlay');
 ov.addEventListener('dragover', e => { e.preventDefault(); ov.classList.add('drag'); });
 ov.addEventListener('dragleave', () => ov.classList.remove('drag'));
 ov.addEventListener('drop', async e => {
   e.preventDefault(); ov.classList.remove('drag');
-  const f = e.dataTransfer.files[0];
-  if (f) pick(f.name, await f.arrayBuffer());
+  pick(await readFiles(e.dataTransfer.files));
 });
 async function fetchJar(url) {
   status('Loading ' + url + '…');
   const r = await fetch(url);
   if (!r.ok) throw new Error(url + ': HTTP ' + r.status);
-  await pick(url.split('/').pop(), await r.arrayBuffer());
+  await pick([{ name: url.split('/').pop(), bytes: new Uint8Array(await r.arrayBuffer()) }]);
 }
 $('demo').addEventListener('click', () => fetchJar('MotherLoad.jar').catch(e => status(e.message)));
 if (params.get('jar')) fetchJar(params.get('jar')).catch(e => status(e.message));
@@ -201,18 +245,20 @@ async function unstash() {
   });
 }
 async function startAgain(auto) {
-  await stash({ name: game.name, main: game.main, bytes: game.bytes, jad: game.jad, auto });
+  await stash(Object.assign({}, game, { auto }));
   location.href = location.pathname + '?restart=1' + (params.get('fps') ? '&fps=1' : '');
 }
 if (params.get('restart')) {
   unstash().then(async g => {
     await stash(null);
     if (!g) return;
-    game = { name: g.name, bytes: g.bytes, main: g.main, jad: g.jad || '' };
+    const auto = g.auto;
+    delete g.auto;
+    game = g;
     $('picked').textContent = g.name + '.jar — ' + g.main;
     $('start').disabled = false;
     status('Ready: ' + g.name);
-    if (g.auto) $('start').click();
+    if (auto) $('start').click();
   }).catch(e => log('cannot restart: ' + e));
 }
 
@@ -279,6 +325,19 @@ function saveRms() {
   FS.syncfs(false, err => { syncing = false; if (err) log('saving failed: ' + err); });
 }
 
+// the command line of an i-appli (as launchers/linux/run.sh)
+function dojaArgs(spPath) {
+  const d = game.doja;
+  const hex = Array.from(d.jam, b => b.toString(16).padStart(2, '0')).join('');
+  return ['-UseVerifier', '=MaxMethodToCompile3000',
+    '-Ddoja.app.class=' + d.cls, '-Ddoja.app.param=' + d.param, '-Ddoja.app.ver=' + d.ver,
+    '-Dmicroedition.encoding=SJIS', '-Ddoja.scratchpad.path=' + spPath,
+    ...(params.get('trace') ? ['-Ddoja.trace=1'] : []),
+    '-Ddoja.spsize=' + d.spsize, '-Ddoja.jam.hex=' + hex, '-Ddoja.pictures=',
+    '-classpathext', '/game/game.jar:/midp/lib/doja-support.jar',
+    'internal', 'com.funkey.doja.DoJaMIDlet'];
+}
+
 let started = false;
 $('start').addEventListener('click', async () => {
   if (!game) return;
@@ -290,7 +349,8 @@ $('start').addEventListener('click', async () => {
   window.Module = {
     locateFile: path => path + V,   // midp-files.data
     canvas: $('canvas'),
-    arguments: ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', game.main],
+    arguments: game.doja ? dojaArgs(rmsDir + '/game.sp')
+                         : ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', game.main],
     print: log,
     printErr: log,
     setStatus: s => s && status(s),
@@ -299,7 +359,7 @@ $('start').addEventListener('click', async () => {
       FS.writeFile('/game/game.jar', game.bytes);
       // getAppProperty() reads a .jad next to the jar: made from the
       // manifest, as the other launchers do
-      FS.writeFile('/game/game.jad', game.jad);
+      if (!game.doja) FS.writeFile('/game/game.jad', game.jad);
       FS.mkdir('/rms');
       FS.mkdir(rmsDir);
       FS.mount(IDBFS, {}, rmsDir);
@@ -311,8 +371,8 @@ $('start').addEventListener('click', async () => {
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
-        PHONEME_HEAP_MB: params.get('heap') || '16',
-        PHONEME_LCD_SIZE: params.get('lcd') || '240x240',
+        PHONEME_HEAP_MB: params.get('heap') || (game.doja ? '32' : '16'),
+        PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x240'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
         PHONEME_DEBUG_CONFIG: '/cfg/debug.cfg',
@@ -322,8 +382,20 @@ $('start').addEventListener('click', async () => {
       FS.syncfs(true, err => {
         if (err) log('cannot read saves: ' + err);
         applyRuntimeCfg(gameCfg);
+        if (game.doja) {
+          // i-appli: the screen is the .jam DrawArea; the scratchpad lives
+          // with the saves (the picked .sp only the first time)
+          if (!params.get('lcd') && !ENV.PHONEME_SOURCE_SIZE) ENV.PHONEME_SOURCE_SIZE = game.doja.area;
+          const sp = rmsDir + '/game.sp';
+          if (!FS.analyzePath(sp).exists) FS.writeFile(sp, game.doja.sp || new Uint8Array(0));
+        }
         if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
-      if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
+        if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
+        // ?env=NAME=value (repeatable): any runtime setting, for testing
+        for (const e of params.getAll('env')) {
+          const i = e.indexOf('=');
+          if (i > 0) ENV[e.slice(0, i)] = e.slice(i + 1);
+        }
         Module.removeRunDependency('saves');
       });
     }],
