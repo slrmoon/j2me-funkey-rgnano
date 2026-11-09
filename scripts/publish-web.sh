@@ -12,7 +12,7 @@ SITE=${SITE:-$ROOT/out/web/site}
 REV=$(git -C "$ROOT" rev-parse --short HEAD)
 W=$(mktemp -d)
 trap 'git -C "$ROOT" worktree remove --force "$W" 2>/dev/null || true; rm -rf "$W"' EXIT
-git -C "$ROOT" fetch -q origin gh-pages
+git -C "$ROOT" fetch -q origin +gh-pages:refs/remotes/origin/gh-pages
 git -C "$ROOT" worktree add -q "$W" origin/gh-pages --detach
 cd "$W"
 git rm -rqf .
