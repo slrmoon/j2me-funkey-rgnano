@@ -83,7 +83,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=e833d46-1794227299';
+const V = '?v=0a72c9c-1794235175';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -131,9 +131,9 @@ function manifestValue(text, key) {
 
 async function pick(name, buf) {
   const bytes = new Uint8Array(buf);
-  let main = params.get('main');
+  let main = params.get('main'), mf = '';
   try {
-    const mf = await readManifest(bytes);
+    mf = await readManifest(bytes);
     const m1 = manifestValue(mf, 'MIDlet-1');
     if (!main && m1) main = (m1.split(',')[2] || '').trim();
     if (!main && manifestValue(mf, 'AppClass')) {
@@ -144,7 +144,7 @@ async function pick(name, buf) {
     return;
   }
   if (!main) { $('picked').textContent = name + ': no MIDlet-1 in the manifest'; return; }
-  game = { name: name.replace(/\.jar$/i, ''), bytes, main };
+  game = { name: name.replace(/\.jar$/i, ''), bytes, main, jad: mf };
   $('picked').textContent = name + ' — ' + main;
   $('start').disabled = false;
   $('start').focus();
@@ -201,14 +201,14 @@ async function unstash() {
   });
 }
 async function startAgain(auto) {
-  await stash({ name: game.name, main: game.main, bytes: game.bytes, auto });
+  await stash({ name: game.name, main: game.main, bytes: game.bytes, jad: game.jad, auto });
   location.href = location.pathname + '?restart=1' + (params.get('fps') ? '&fps=1' : '');
 }
 if (params.get('restart')) {
   unstash().then(async g => {
     await stash(null);
     if (!g) return;
-    game = { name: g.name, bytes: g.bytes, main: g.main };
+    game = { name: g.name, bytes: g.bytes, main: g.main, jad: g.jad || '' };
     $('picked').textContent = g.name + '.jar — ' + g.main;
     $('start').disabled = false;
     status('Ready: ' + g.name);
@@ -297,6 +297,9 @@ $('start').addEventListener('click', async () => {
     preRun: [function () {
       FS.mkdir('/game');
       FS.writeFile('/game/game.jar', game.bytes);
+      // getAppProperty() reads a .jad next to the jar: made from the
+      // manifest, as the other launchers do
+      FS.writeFile('/game/game.jad', game.jad);
       FS.mkdir('/rms');
       FS.mkdir(rmsDir);
       FS.mount(IDBFS, {}, rmsDir);
