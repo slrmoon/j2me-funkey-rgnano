@@ -52,6 +52,7 @@ var Module = {
         PHONEME_LCD_SIZE: params.get('lcd') || '240x240',
         PHONEME_ENABLE_AUDIO: '1',
       });
+      if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
       Module.removeRunDependency('game');
     }).catch(e => log('cannot load the game: ' + e));
   }],
