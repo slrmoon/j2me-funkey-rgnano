@@ -1,0 +1,21 @@
+#
+# SDL 1.2 port, Win32 target cross-built with MinGW-w64 (i686).
+# Sources are the same as linux_sdl_gcc (TARGET_OS stays linux for module
+# selection); Win32 differences are handled with _WIN32 in the sources.
+# The toolchain comes from GNU_TOOLS_DIR (a shim directory whose gcc/g++/ar
+# point at i686-w64-mingw32-*); SDL from MINGW_SYSROOT.
+#
+MINGW_SYSROOT ?= /usr/i686-w64-mingw32
+SDL_CONFIG    ?= $(MINGW_SYSROOT)/bin/sdl-config
+
+EXTRA_CFLAGS   += -D_REENTRANT -DFUNKEY_WIN32=1 -D__USE_MINGW_ANSI_STDIO=0
+EXTRA_INCLUDES += -I$(MINGW_SYSROOT)/include $(shell $(SDL_CONFIG) --cflags | sed 's/-Dmain=SDL_main//')
+
+# gcc.gmk's -lpthread -lm (already in LIBS after the VM/PCSL libraries) is
+# winpthreads here. Everything is linked statically: the exe needs only
+# system DLLs.
+LD_FLAGS += -static -static-libgcc -static-libstdc++
+LIBS += -L$(MINGW_SYSROOT)/lib -lSDL_gfx -lSDL -lz \
+        -Wl,-Bstatic -lpthread -lm \
+        -luser32 -lgdi32 -lwinmm -ldxguid -lws2_32 -lpsapi -limm32 \
+        -lole32 -loleaut32 -lversion -luuid
