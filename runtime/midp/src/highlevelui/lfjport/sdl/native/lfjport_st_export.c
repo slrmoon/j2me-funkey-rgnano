@@ -133,6 +133,7 @@ int  PhoneMEInputGetProfileIndex(void);
 void PhoneMEProfileInit(void);
 void PhoneMEInputApplyProfile(int index);
 int  PhoneMEInputIsMenuKey(int sym);
+int  PhoneMEInputMenuSym(int sym);
 int  PhoneMEInputIsFullscreenKey(int sym, int mod);
 
 SDL_Surface     *Native_SDL_Screen, *Native_SDL_HScreen, *Native_SDL_VScreen;
@@ -1769,6 +1770,7 @@ int PhoneMEOverlayHandleSDLEvent(SDL_Event *event) {
     if (event->type == SDL_KEYUP) {
         return 1;
     }
+    key = (SDLKey) PhoneMEInputMenuSym(key);
 
     if (OverlayCapture) {
         if (key == SDLK_q || key == SDLK_ESCAPE) {
@@ -2048,7 +2050,7 @@ int PhoneMEFatalPoll(void) {
                 break;
             }
             if (ev.type != SDL_KEYDOWN) continue;
-            key = ev.key.keysym.sym;
+            key = (SDLKey) PhoneMEInputMenuSym(ev.key.keysym.sym);
             if (key == SDLK_a || key == SDLK_RETURN || key == SDLK_SPACE) {
                 if (FatalVisible == 2) {
                     FatalVisible = 0;

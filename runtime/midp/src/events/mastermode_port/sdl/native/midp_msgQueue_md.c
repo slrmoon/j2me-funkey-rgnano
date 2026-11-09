@@ -87,6 +87,29 @@ int PhoneMEInputIsMenuKey(int sym)
   return sym == SDLK_q || sym == SDLK_ESCAPE;
 }
 
+/*
+ * Runtime menu and fatal notice: they read the device's own keys (FunKey
+ * buttons, arrows, Enter, Escape). A PC-map key (a rebound key, the browser
+ * page's on-screen buttons) comes as the menu key its phone key means:
+ * directions as arrows, fire as Enter, soft 2 / clear as back, the menu key
+ * as Escape. Other keys stay as they are.
+ */
+int PhoneMEInputMenuSym(int sym)
+{
+  PcKeysLoad();
+  if (!PcKeysActive || sym <= 0 || sym >= PC_KEY_SYMS || !PcKeyHas[sym]) return sym;
+  switch (PcKeyCode[sym]) {
+  case -1: return SDLK_UP;
+  case -2: return SDLK_DOWN;
+  case -3: return SDLK_LEFT;
+  case -4: return SDLK_RIGHT;
+  case -5: return SDLK_RETURN;
+  case -7: case -8: return SDLK_b;
+  case PC_KEY_MENU: return SDLK_ESCAPE;
+  default: return sym;
+  }
+}
+
 /* full screen: the PC map's PC_KEY_FULLSCREEN keys, else F11; Alt+Enter always */
 int PhoneMEInputIsFullscreenKey(int sym, int mod)
 {
