@@ -488,12 +488,15 @@ files stay on your computer. The page remembers the games you opened
 (Recent games), so after a reload one click starts them again, and keeps
 their saves in the browser; **Export saves** gives the same files as
 `rms/<game>` on the FunKey, so saves move both ways. It runs the VM in
-slave mode with a C interpreter (no JIT in WebAssembly): slower than the
-desktop builds, fine for 2D games, heavy 3D may be slow. **Buttons** shows
+slave mode with a C interpreter; hot methods are compiled to WebAssembly
+by its own JIT (`runtime/cldc/src/vm/cpu/c/WasmJit_c.hpp`), so Java-heavy
+games run several times faster than interpreted, still slower than the
+desktop builds. **Buttons** shows
 on-screen keys (soft keys, D-pad, keypad, menu; on by default on phones and
 tablets), **Keys** remaps the keyboard (several keys per phone key, soft key
 type per game). Page options: `?fps=1` (FPS counter), `?limit=off`,
-`?lcd=240x320`.
+`?lcd=240x320`, `?jit=0` (interpreter only, if a game misbehaves with the
+JIT).
 
 ## Repository structure
 

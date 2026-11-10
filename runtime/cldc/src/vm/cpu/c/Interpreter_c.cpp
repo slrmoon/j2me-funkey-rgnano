@@ -24,10 +24,24 @@
  * information or have any questions.
  */
 
+#if defined(__EMSCRIPTEN__)
+// only these two: <emscripten.h> clashes with the VM's definitions
+#include <emscripten/em_macros.h>
+#include <emscripten/em_js.h>
+#endif
 #include "incls/_precompiled.incl"
 #include "incls/_Interpreter_c.cpp.incl"
 #include <stdarg.h>
 #include <setjmp.h>
+
+// The browser build compiles hot methods to WebAssembly (WasmJit_c.hpp).
+#ifndef ENABLE_WASM_JIT
+#if defined(__EMSCRIPTEN__)
+#define ENABLE_WASM_JIT 1
+#else
+#define ENABLE_WASM_JIT 0
+#endif
+#endif
 
 extern "C" {
 
@@ -232,6 +246,10 @@ extern "C" {
   /* run code that works on the global state (see above) */
 #define VM_CALL(code)                                                  \
     do { VM_SYNC_OUT(); code; VM_SYNC_IN(); } while (0)
+
+#define WASM_JIT_PART 1
+#include "WasmJit_c.hpp"
+#undef WASM_JIT_PART
 
   /* the state-passing helpers */
 #define arg_address_from_sp(i)  arg_address_from_sp_(IS_A_ i)
@@ -2376,9 +2394,21 @@ enum {
 
   IS_INLINE void branch_(IS_P_ bool cond) {
     if (cond) {
-      g_jpc += GET_SIGNED_SHORT(0);
+      jint offset = GET_SIGNED_SHORT(0);
+      g_jpc += offset;
       // only check ticks on taken branches
       check_timer_tick();
+#if ENABLE_WASM_JIT
+      // a loop: count it, or go on in compiled code
+      if (offset < 0 && wasm_jit::jit_on > 0) {
+        address m = GET_FRAME(method);
+        if ((int)(uintptr_t)method_execution_entry(m) >= wasm_jit::first_fn ||
+            ++wasm_jit::counter_for(m)->count >= wasm_jit::jit_threshold) {
+          VM_CALL(wasm_jit::backedge(m,
+                      (int)(g_jpc - (m + Method::base_offset()))));
+        }
+      }
+#endif
     } else {
       ADVANCE(3);
     }
@@ -2439,6 +2469,13 @@ enum {
 
   IS_INLINE void invoke_method_(IS_P_ address method, int invoker_size) {
     address exec_entry = **(address**)(method + Method::variable_part_offset());
+#if ENABLE_WASM_JIT
+    if (wasm_jit::jit_on > 0 && is_plain_interpreter_entry(exec_entry) &&
+        ++wasm_jit::counter_for(method)->count >= wasm_jit::jit_threshold) {
+      VM_CALL(wasm_jit::hot_invoke(method));
+      exec_entry = **(address**)(method + Method::variable_part_offset());
+    }
+#endif
     jushort flagz = get_access_flags(method);
     jushort num_params = get_num_params(method);
     if (Verbose || !is_plain_interpreter_entry(exec_entry) ||
@@ -4903,6 +4940,12 @@ static void Interpret() {
   // Start a new thread or continue in another existing thread
   // after thread termination.
   // NOTE that it also can invoke longjmp, so it must be called after setjmp
+#if ENABLE_WASM_JIT
+  // no compiled code is on the native stack here (a longjmp may have
+  // left it)
+  if (wasm_jit::jit_on < 0) wasm_jit::read_settings();
+  wasm_jit::reset_nesting();
+#endif
   resume_thread();
   // process bytecodes in the infinite loop
   if (TraceBytecodes) {
@@ -5394,6 +5437,10 @@ unsigned char _dummy2[PROTECTED_PAGE_SIZE];
 #endif // ENABLE_PAGE_PROTECTION
 
 } // extern "C"
+
+#define WASM_JIT_PART 2
+#include "WasmJit_c.hpp"
+#undef WASM_JIT_PART
 
 // This file is compiled together with others into one translation unit
 // (MergedSrc): do not let its short macro names leak into them.

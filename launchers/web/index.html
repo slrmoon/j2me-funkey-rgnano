@@ -922,6 +922,7 @@ $('start').addEventListener('click', async () => {
         ENV.PHONEME_PC_KEYS = pcKeysSpec(game);
         if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
+        if (params.get('jit')) ENV.PHONEME_JIT = params.get('jit');
         // ?env=NAME=value (repeatable): any runtime setting, for testing
         for (const e of params.getAll('env')) {
           const i = e.indexOf('=');
