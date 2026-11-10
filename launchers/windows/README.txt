@@ -29,7 +29,7 @@ Display: window size (game screen times 1..8, shrunk to fit the monitor),
     Scale2x   rounded edges for pixel art
     Smooth    bilinear
     Pixel     plain nearest neighbour
-  the phone's screen size (Auto = 240x240, i-appli: the .jam DrawArea),
+  the phone's screen size (Auto = 240x320, i-appli: the .jam DrawArea),
   frame limit, Java memory, JIT, bytecode check, extra VM options.
   In the game: drag the window edges to resize; F11 or Alt+Enter = full
   screen.

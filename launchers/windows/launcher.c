@@ -1425,6 +1425,9 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
         int own_jad = 0;
 
         snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 16); env_set("PHONEME_HEAP_MB", s);
+        /* a common phone screen (the runtime's own default, 240x240, is the
+         * FunKey's) */
+        if (!st.lcd[0]) { env_set("PHONEME_LCD_SIZE", "240x320"); env_set("PHONEME_SOURCE_SIZE", "240x320"); }
         _snwprintf(tmp, WBUF, L"%ls.jad", base);
         if (read_file(tmp, &d, &n)) {
             desc = normalize_descriptor(d);

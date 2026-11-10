@@ -475,8 +475,10 @@ Esc = in-game menu, F11 = full screen. The Windows launcher can remap them.
 
 **Linux.** A 32-bit x86 program with an SDL window; it needs the glibc of
 the build machine or newer (build on Ubuntu 20.04 to run on 20.04 and
-later). `SCALE=4` makes the window bigger, `LCD=240x320` sets the screen
-size the game sees; the packed `README.txt` lists all options.
+later). `SCALE=4` makes the window bigger, `LCD=176x208` sets the screen
+size the game sees (240x320 by default on Linux, Windows and in the browser;
+240x240, the FunKey's screen, only on the FunKey); the packed `README.txt`
+lists all options.
 
 **Windows.** A native 32-bit build (Windows 7 or newer, also Windows 11 on
 ARM), cross-compiled with MinGW-w64: no WSL, no Java on the PC.

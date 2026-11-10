@@ -9,7 +9,7 @@
 #
 # Environment (all optional):
 #   SCALE=3         window size multiplier of the 240x240 screen (1..8)
-#   LCD=240x320     screen size the game sees (default: runtime default,
+#   LCD=240x320     screen size the game sees (default: 240x320,
 #                   DoJa: the .jam DrawArea)
 #   MODE=fit        fit | integer | crop | fill | center | zoom | auto
 #   FILTER=sharp    sharp | smooth | pixel
@@ -160,7 +160,8 @@ apply_runtime_cfg() {
     v=$(cfg_value "$PHONEME_CONFIG_PATH" VIEW)
     if [ -z "$USER_LCD" ]; then
         case "$v" in
-            full) export PHONEME_SOURCE_SIZE=full; unset PHONEME_LCD_SIZE ;;
+            full) export PHONEME_SOURCE_SIZE=full
+                  if [ -n "${DEFAULT_LCD:-}" ]; then export PHONEME_LCD_SIZE=$DEFAULT_LCD; else unset PHONEME_LCD_SIZE; fi ;;
             [0-9]*x[0-9]*) export PHONEME_SOURCE_SIZE=$v PHONEME_LCD_SIZE=$v ;;
         esac
     fi
@@ -240,6 +241,11 @@ if [ -n "$APP_CLASS" ]; then
 fi
 
 export PHONEME_HEAP_MB=${HEAP_MB:-16}
+# a common phone screen (the runtime's own default, 240x240, is the FunKey's)
+if [ -z "${LCD:-}" ]; then
+    DEFAULT_LCD=240x320
+    export PHONEME_LCD_SIZE=$DEFAULT_LCD PHONEME_SOURCE_SIZE=$DEFAULT_LCD
+fi
 # getAppProperty() reads a .jad next to the jar: use the game's own one,
 # otherwise make one from the manifest beside a link to the jar.
 RUNJAR=$JAR

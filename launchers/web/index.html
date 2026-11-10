@@ -861,7 +861,7 @@ $('start').addEventListener('click', async () => {
   if (started) { startAgain(true); return; }   // after the game ended
   started = true;
   $('start').disabled = true;
-  const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x240'));
+  const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x320'));
   if (lcd) $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
   status('Starting ' + game.name + '…');
   const rmsDir = rmsDirOf(game);
@@ -891,7 +891,7 @@ $('start').addEventListener('click', async () => {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
         PHONEME_HEAP_MB: params.get('heap') || (game.doja ? '32' : '16'),
-        PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x240'),
+        PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x320'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
         PHONEME_DEBUG_CONFIG: '/cfg/debug.cfg',
