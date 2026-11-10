@@ -7,7 +7,7 @@ the interface is in [runtime-interface.md](runtime-interface.md).
 | Folder | Launcher | Package |
 |---|---|---|
 | `launchers/funkey/` | `pm-launch.c`: SDL game browser on the handheld | `out/funkey/opk/pm.opk` |
-| `launchers/linux/` | `run.sh`, `test-games.py`, `test-doja.py` | `out/dist/phoneme-j2me-linux-x86.tar.gz` |
+| `launchers/linux/` | `phoneME` (`launcher.c`): game list and settings, `run.sh`, `test-games.py`, `test-doja.py` | `out/dist/phoneme-j2me-linux-x86.tar.gz` |
 | `launchers/windows/` | `phoneME.exe` (`launcher.c`): settings window | `out/dist/phoneme-j2me-win32.zip` |
 
 All packages include `lib/doja-support.jar`, built from `java/doja/stubs`
@@ -47,4 +47,6 @@ JDK_DIR=/path/to/zulu7... launchers/windows/package.sh [out_dir]
 
 They read `out/linux-x86` and `out/win32` and write to `out/dist` by
 default. The Windows script also builds `phoneME.exe` (needs the MinGW
-sysroot with zlib that `scripts/build-win32.sh` made in `out/win32/sysroot`).
+sysroot with zlib that `scripts/build-win32.sh` made in `out/win32/sysroot`);
+the Linux one builds `phoneME` from `launchers/linux/launcher.c` and needs
+the 32-bit SDL 1.2, SDL_gfx and zlib headers the runtime is built with.

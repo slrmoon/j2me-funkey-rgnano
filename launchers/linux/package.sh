@@ -60,7 +60,18 @@ cp "$HERE/keys.conf" "$STAGE/keys.conf"
 # helper for test-games.py: scripted keys, screenshots, faster clock
 ${CC:-gcc} -m32 -O2 -shared -fPIC $(sdl-config --cflags) \
     "$HERE/fktest.c" -o "$STAGE/lib/fktest.so" -ldl
-chmod +x "$STAGE/run.sh" "$STAGE/bin/runMidlet" "$STAGE/test-games.py" "$STAGE/test-doja.py"
+
+# the launcher (game list and settings); run.sh alone works without it
+echo "Building the launcher (phoneME)"
+mkdir -p "$STAGE/games"
+printf 'Put .jar games here (sub-folders are scanned too).\ni-appli: game.jam (and game.sp) next to game.jar.\n' \
+    > "$STAGE/games/put-games-here.txt"
+${CC:-gcc} -m32 -O2 $(sdl-config --cflags) "$HERE/launcher.c" \
+    -o "$STAGE/phoneME" $(sdl-config --libs) -lSDL_gfx -lz
+strip "$STAGE/phoneME" 2>/dev/null || true
+
+chmod +x "$STAGE/run.sh" "$STAGE/phoneME" "$STAGE/bin/runMidlet" \
+    "$STAGE/test-games.py" "$STAGE/test-doja.py"
 
 (cd "$OUT" && tar czf "$NAME.tar.gz" "$NAME")
 echo "Done: $STAGE"

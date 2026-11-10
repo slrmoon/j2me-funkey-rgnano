@@ -465,7 +465,7 @@ FunKey launcher there are three more, all with the same in-game menu
 | | Linux (x86) | Windows | Browser |
 |---|---|---|---|
 | Get it | `phoneme-j2me-linux-x86.tar.gz` (releases) | `phoneme-j2me-win32.zip` (releases) | <https://slrmoon.github.io/j2me-funkey-rgnano/> |
-| Start a game | `./run.sh game.jar` (i-appli: `.jam` next to it) | `phoneME.exe`: game list and settings window, or drop a jar on it | choose or drop the `.jar` (+ `.jam`, `.sp`) |
+| Start a game | `./phoneME`: game list and settings, or `./run.sh game.jar` | `phoneME.exe`: game list and settings window, or drop a jar on it | choose or drop the `.jar` (+ `.jam`, `.sp`) |
 | VM | JIT | JIT | interpreter (WebAssembly) |
 | Window | resizable, `SCALE=`, full screen (F11) | window size, full screen, filters, Scale2x | fills the page, full screen (F11) |
 | Saves | `~/.local/share/phoneme-j2me/rms/<game>` | `data\rms\<game>` | browser storage (IndexedDB), export / import as `.zip` |

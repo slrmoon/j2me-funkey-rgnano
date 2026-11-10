@@ -25,6 +25,25 @@ unzip or python3 is used to read jar manifests.
 
 Running
 -------
+    ./phoneME                          game list and settings
+    ./phoneME /path/to/game.jar        start that game right away
+
+The launcher lists the games of the "games" folder (sub-folders too; G
+picks another folder) by their own name, and has the settings the Windows
+launcher has: Display (window size, full screen, how the picture fills the
+window, filter, frame limit, screen size the game sees, zoom, heap,
+compiler, bytecode check), Sound (volume, MIDI synthesizer), Controls (the
+keyboard keys of every phone key, soft key type) and Logs. Enter starts
+the selected game, Tab turns the page, Esc quits. O gives the selected
+game its own settings, kept apart from the common ones.
+
+The settings go to ~/.local/share/phoneme-j2me/settings.ini (a game's own
+ones to .../games/<game>.ini), the debug switches to .../debug.cfg, which
+the runtime menu (Esc in a game) writes as well: both always show the same
+choices.
+
+Without the launcher (or over ssh) the script does the same:
+
     ./run.sh /path/to/game.jar
 
     SCALE=4 ./run.sh game.jar          bigger window (240x240 times 4)
