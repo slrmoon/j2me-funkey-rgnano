@@ -24,10 +24,14 @@
   .links { float: right; font-size: 13px; font-weight: 400; }
   .links a { color: var(--muted); margin-left: 12px; }
   .links a:hover { color: inherit; }
-  #stage { position: relative; width: 100%; aspect-ratio: 1; background: #000;
-           border-radius: 6px; overflow: hidden; max-height: 85vh; margin: 0 auto; }
+  /* the game's shape (3:4 until a game says otherwise), at most 85% of the
+     window's height: narrower than the page on a wide window */
+  #stage { position: relative; width: 100%; aspect-ratio: 3 / 4; background: #000;
+           border-radius: 6px; overflow: hidden; max-height: 85vh;
+           max-width: calc(85vh * 3 / 4); margin: 0 auto; }
   #play:fullscreen { background: #000; display: flex; flex-direction: column; padding: 0; }
-  #play:fullscreen #stage { flex: 1; min-height: 0; max-height: none; border-radius: 0; aspect-ratio: auto; }
+  #play:fullscreen #stage { flex: 1; min-height: 0; max-height: none; max-width: none !important;
+                           border-radius: 0; aspect-ratio: auto; }
   /* on-screen buttons */
   #pad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;
          user-select: none; -webkit-user-select: none; touch-action: none; }
@@ -185,7 +189,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=4060bdf-1794311147';
+const V = '?v=82e3f8e-1794315245';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -861,8 +865,11 @@ $('start').addEventListener('click', async () => {
   if (started) { startAgain(true); return; }   // after the game ended
   started = true;
   $('start').disabled = true;
-  const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x240'));
-  if (lcd) $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
+  const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x320'));
+  if (lcd) {
+    $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
+    $('stage').style.maxWidth = 'calc(85vh * ' + lcd[1] + ' / ' + lcd[2] + ')';
+  }
   status('Starting ' + game.name + '…');
   const rmsDir = rmsDirOf(game);
   window.Module = {
@@ -891,7 +898,7 @@ $('start').addEventListener('click', async () => {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
         PHONEME_HEAP_MB: params.get('heap') || (game.doja ? '32' : '16'),
-        PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x240'),
+        PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x320'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
         PHONEME_DEBUG_CONFIG: '/cfg/debug.cfg',
