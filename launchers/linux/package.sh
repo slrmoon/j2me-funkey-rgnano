@@ -4,8 +4,8 @@
 #
 #   JDK_DIR=/path/to/jdk7 launchers/linux/package.sh [out_dir]
 #
-# Result: <out_dir>/funkey-j2me-linux-x86/{bin,lib,appdb,run.sh,README.txt}
-# and <out_dir>/funkey-j2me-linux-x86.tar.gz (default out_dir: out/dist).
+# Result: <out_dir>/phoneme-j2me-linux-x86/{bin,lib,appdb,run.sh,README.txt}
+# and <out_dir>/phoneme-j2me-linux-x86.tar.gz (default out_dir: out/dist).
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 BUILD=${BUILD_OUTPUT_DIR:-$ROOT/out/linux-x86}
 OUT=${1:-$ROOT/out/dist}
-NAME=funkey-j2me-linux-x86
+NAME=phoneme-j2me-linux-x86
 STAGE=$OUT/$NAME
 MIDP=$BUILD/midp
 CLDC_DIST=$BUILD/cldc/linux_i386/dist

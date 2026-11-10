@@ -1,9 +1,9 @@
 /*
- * FunKeyJ2ME.exe: Windows launcher of the desktop runtime (bin\runMidlet.exe).
+ * phoneME.exe: Windows launcher of the desktop runtime (bin\runMidlet.exe).
  *
- *   FunKeyJ2ME.exe               settings window: game list, display,
+ *   phoneME.exe               settings window: game list, display,
  *                                controls (PC key map), sound and logs
- *   FunKeyJ2ME.exe game.jar      start the game right away (also: drop a
+ *   phoneME.exe game.jar      start the game right away (also: drop a
  *                                .jar / .jam on the exe)
  *
  * Settings live in settings.ini next to the exe; a game can have its own
@@ -42,7 +42,7 @@
 #include <zlib.h>
 #include "launcher_res.h"
 
-#define APP_TITLE L"FunKey J2ME"
+#define APP_TITLE L"phoneME J2ME"
 #define WBUF 2048
 #define WM_APP_GAME_ENDED (WM_APP + 1)
 
@@ -812,7 +812,7 @@ static int settings_save_file(const Settings *s, const wchar_t *path, int global
     int n;
     keys_format(s, keys, sizeof(keys));
     n = snprintf(buf, sizeof(buf),
-        "# FunKey J2ME settings (written by FunKeyJ2ME.exe; edit with the launcher)\r\n"
+        "# phoneME J2ME settings (written by phoneME.exe; edit with the launcher)\r\n"
         "SCALE = %d\r\nFULLSCREEN = %d\r\nMODE = %s\r\nFILTER = %s\r\nLCD = %s\r\n"
         "FPS = %s\r\nHEAP_MB = %d\r\nJIT = %d\r\nVERIFY = %d\r\nVMARGS = %s\r\n"
         "MUTE = %d\r\nVOLUME = %d\r\nSYNTH = %s\r\n"
@@ -1957,13 +1957,13 @@ static int capture_key(HWND owner, const wchar_t *action) {
         wc.lpfnWndProc = capture_proc;
         wc.hInstance = g_inst;
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        wc.lpszClassName = L"FunKeyCapture";
+        wc.lpszClassName = L"phoneMECapture";
         RegisterClassW(&wc);
         registered = 1;
     }
     _snwprintf(text, 256, L"\n\nPress the PC key for:  %ls\n\n(close this window to cancel)", action);
     GetWindowRect(owner, &r);
-    h = CreateWindowExW(WS_EX_DLGMODALFRAME, L"FunKeyCapture", APP_TITLE,
+    h = CreateWindowExW(WS_EX_DLGMODALFRAME, L"phoneMECapture", APP_TITLE,
                         WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
                         (r.left + r.right - W) / 2, (r.top + r.bottom - H) / 2, W, H,
                         owner, NULL, g_inst, NULL);
@@ -2281,7 +2281,12 @@ static int init_paths(void) {
     if (!write_file(tmp, "", 0)) {
         DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", tmp, WBUF);
         if (n == 0 || n >= WBUF) { fail(L"Cannot write to %ls", g_data); return 0; }
-        _snwprintf(g_data, WBUF, L"%ls\\funkey-j2me", tmp);
+        _snwprintf(g_data, WBUF, L"%ls\\phoneme-j2me", tmp);
+        {   /* (the folder was funkey-j2me before: keep its saves) */
+            WCHAR old[WBUF];
+            _snwprintf(old, WBUF, L"%ls\\funkey-j2me", tmp);
+            if (GetFileAttributesW(g_data) == INVALID_FILE_ATTRIBUTES) MoveFileW(old, g_data);
+        }
         mkdirs(g_data);
         /* settings next to the data then, too */
         _snwprintf(g_ini, WBUF, L"%ls\\settings.ini", g_data);

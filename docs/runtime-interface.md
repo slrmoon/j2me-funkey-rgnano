@@ -162,7 +162,7 @@ file (or a console window).
 
 Every launcher handles these three files the same way, so the runtime menu
 works alike everywhere: FunKey (`/mnt/FunKey/.pm/debug.cfg`, `.pm/keybinds/<game>.cfg`), Linux
-(`~/.local/share/funkey-j2me`: `debug.cfg`, `run/<game>/game.cfg`),
+(`~/.local/share/phoneme-j2me`: `debug.cfg`, `run/<game>/game.cfg`),
 Windows (`data\debug.cfg`, `data\run\<game>\game.cfg`, read back into
 its settings when the game ends) and the browser (IndexedDB, `/cfg`).
 

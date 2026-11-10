@@ -7,8 +7,8 @@ the interface is in [runtime-interface.md](runtime-interface.md).
 | Folder | Launcher | Package |
 |---|---|---|
 | `launchers/funkey/` | `pm-launch.c`: SDL game browser on the handheld | `out/funkey/opk/pm.opk` |
-| `launchers/linux/` | `run.sh`, `test-games.py`, `test-doja.py` | `out/dist/funkey-j2me-linux-x86.tar.gz` |
-| `launchers/windows/` | `FunKeyJ2ME.exe` (`launcher.c`): settings window | `out/dist/funkey-j2me-win32.zip` |
+| `launchers/linux/` | `run.sh`, `test-games.py`, `test-doja.py` | `out/dist/phoneme-j2me-linux-x86.tar.gz` |
+| `launchers/windows/` | `phoneME.exe` (`launcher.c`): settings window | `out/dist/phoneme-j2me-win32.zip` |
 
 All packages include `lib/doja-support.jar`, built from `java/doja/stubs`
 (the DoJa runtime) and `java/doja/api` (generated API skeletons).
@@ -46,5 +46,5 @@ JDK_DIR=/path/to/zulu7... launchers/windows/package.sh [out_dir]
 ```
 
 They read `out/linux-x86` and `out/win32` and write to `out/dist` by
-default. The Windows script also builds `FunKeyJ2ME.exe` (needs the MinGW
+default. The Windows script also builds `phoneME.exe` (needs the MinGW
 sysroot with zlib that `scripts/build-win32.sh` made in `out/win32/sysroot`).

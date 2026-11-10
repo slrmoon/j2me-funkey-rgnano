@@ -464,11 +464,11 @@ FunKey launcher there are three more, all with the same in-game menu
 
 | | Linux (x86) | Windows | Browser |
 |---|---|---|---|
-| Get it | `funkey-j2me-linux-x86.tar.gz` (releases) | `funkey-j2me-win32.zip` (releases) | <https://slrmoon.github.io/j2me-funkey-rgnano/> |
-| Start a game | `./run.sh game.jar` (i-appli: `.jam` next to it) | `FunKeyJ2ME.exe`: game list and settings window, or drop a jar on it | choose or drop the `.jar` (+ `.jam`, `.sp`) |
+| Get it | `phoneme-j2me-linux-x86.tar.gz` (releases) | `phoneme-j2me-win32.zip` (releases) | <https://slrmoon.github.io/j2me-funkey-rgnano/> |
+| Start a game | `./run.sh game.jar` (i-appli: `.jam` next to it) | `phoneME.exe`: game list and settings window, or drop a jar on it | choose or drop the `.jar` (+ `.jam`, `.sp`) |
 | VM | JIT | JIT | interpreter (WebAssembly) |
 | Window | resizable, `SCALE=`, full screen (F11) | window size, full screen, filters, Scale2x | fills the page, full screen (F11) |
-| Saves | `~/.local/share/funkey-j2me/rms/<game>` | `data\rms\<game>` | browser storage (IndexedDB), export / import as `.zip` |
+| Saves | `~/.local/share/phoneme-j2me/rms/<game>` | `data\rms\<game>` | browser storage (IndexedDB), export / import as `.zip` |
 
 Keys on a PC: arrows, Enter/Space = fire, F1/F2 = soft keys, 0-9, `*`, `#`,
 Esc = in-game menu, F11 = full screen. The Windows launcher can remap them.
@@ -480,7 +480,7 @@ size the game sees; the packed `README.txt` lists all options.
 
 **Windows.** A native 32-bit build (Windows 7 or newer, also Windows 11 on
 ARM), cross-compiled with MinGW-w64: no WSL, no Java on the PC.
-`FunKeyJ2ME.exe` has the game list, display (window size, full screen,
+`phoneME.exe` has the game list, display (window size, full screen,
 filters), PC key map and log options. See `launchers/windows/README.txt`.
 
 **Browser.** The same runtime compiled to WebAssembly with Emscripten; the
@@ -505,7 +505,7 @@ java/doja/               i-appli (DoJa) API and runtime classes, all targets
 launchers/
   funkey/                FunKey S / RG Nano: launcher pm-launch.c, OPK packaging
   linux/                 desktop Linux: run.sh, test-games.py, test-doja.py
-  windows/               Windows: FunKeyJ2ME.exe (settings window), packaging
+  windows/               Windows: phoneME.exe (settings window), packaging
   web/                   the browser page (index.html)
 scripts/                 per-target build scripts used by build.sh,
                          publish-web.sh (gh-pages)
@@ -575,8 +575,8 @@ JDK_DIR=/path/to/zulu7... ./build.sh web
 | Target | Runtime | Package |
 |---|---|---|
 | `funkey` | `out/funkey/midp/bin/arm/runMidlet` | `out/funkey/opk/pm.opk` |
-| `linux` | `out/linux-x86/midp/bin/i386/runMidlet` | `out/dist/funkey-j2me-linux-x86.tar.gz` |
-| `windows` | `out/win32/midp/bin/i386/runMidlet.exe` | `out/dist/funkey-j2me-win32.zip` |
+| `linux` | `out/linux-x86/midp/bin/i386/runMidlet` | `out/dist/phoneme-j2me-linux-x86.tar.gz` |
+| `windows` | `out/win32/midp/bin/i386/runMidlet.exe` | `out/dist/phoneme-j2me-win32.zip` |
 | `web` | `out/web/midp/bin/i386/runMidlet.wasm` | `out/web/site/` (serve over http) |
 
 The browser version is built and published to GitHub Pages by

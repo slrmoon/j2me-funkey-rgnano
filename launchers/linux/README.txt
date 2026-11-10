@@ -1,4 +1,4 @@
-FunKey J2ME runtime for desktop Linux (32-bit x86)
+phoneME J2ME runtime for desktop Linux (32-bit x86)
 ==================================================
 
 The same phoneME runtime as on the FunKey S / RG Nano (M3G software 3D,
@@ -39,7 +39,7 @@ keys were pressed and how often; games are listed by their own name
 (MIDlet-Name / AppName) with the file below it.
 
 i-appli (DoJa) games: put game.jam (and game.sp, if any) next to game.jar.
-Saves are kept in ~/.local/share/funkey-j2me/rms/<game>.
+Saves are kept in ~/.local/share/phoneme-j2me/rms/<game>.
 
 Keys
 ----

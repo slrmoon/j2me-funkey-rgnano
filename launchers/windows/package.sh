@@ -4,8 +4,8 @@
 #
 #   JDK_DIR=/path/to/jdk7 launchers/windows/package.sh [out_dir]
 #
-# Result: <out_dir>/funkey-j2me-win32/{FunKeyJ2ME.exe,bin,lib,appdb,
-# games,README.txt} and <out_dir>/funkey-j2me-win32.zip
+# Result: <out_dir>/phoneme-j2me-win32/{phoneME.exe,bin,lib,appdb,
+# games,README.txt} and <out_dir>/phoneme-j2me-win32.zip
 # (default out_dir: out/dist). Needs i686-w64-mingw32-gcc and the MinGW
 # sysroot with zlib that build-win32.sh used (MINGW_SYSROOT).
 
@@ -17,7 +17,7 @@ BUILD=${BUILD_OUTPUT_DIR:-$ROOT/out/win32}
 MINGW_SYSROOT=${MINGW_SYSROOT:-$BUILD/sysroot}
 MINGW_PREFIX=${MINGW_PREFIX:-i686-w64-mingw32-}
 OUT=${1:-$ROOT/out/dist}
-NAME=funkey-j2me-win32
+NAME=phoneme-j2me-win32
 STAGE=$OUT/$NAME
 MIDP=$BUILD/midp
 CLDC_DIST=$BUILD/cldc/mingw_i386/dist
@@ -57,13 +57,13 @@ find "$DOJA_STUB_SRC" "$DOJA_API_SRC" -name '*.java' | sort > "$TMP/sources.list
 (cd "$TMP/verified" && "$JDK_DIR/bin/jar" cf "$STAGE/lib/doja-support.jar" .)
 find "$DOJA_STUB_SRC" -maxdepth 1 -name 'NOTICE-*' -exec cp {} "$STAGE/lib/" \;
 
-echo "Building the launcher (FunKeyJ2ME.exe)"
+echo "Building the launcher (phoneME.exe)"
 (cd "$HERE" &&
  "${MINGW_PREFIX}windres" launcher.rc -O coff -o "$TMP/launcher.res")
 "${MINGW_PREFIX}gcc" -O2 -Wall -municode -mwindows -I"$MINGW_SYSROOT/include" \
-    "$HERE/launcher.c" "$TMP/launcher.res" -o "$STAGE/FunKeyJ2ME.exe" \
+    "$HERE/launcher.c" "$TMP/launcher.res" -o "$STAGE/phoneME.exe" \
     -L"$MINGW_SYSROOT/lib" -static -lz -lcomctl32 -lcomdlg32 -lshlwapi -lole32 -lshell32 -luuid
-"${MINGW_PREFIX}strip" "$STAGE/FunKeyJ2ME.exe" 2>/dev/null || true
+"${MINGW_PREFIX}strip" "$STAGE/phoneME.exe" 2>/dev/null || true
 
 # Windows line endings for the text files people open in Notepad;
 # settings.ini is written by the launcher itself

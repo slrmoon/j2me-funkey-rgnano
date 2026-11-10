@@ -773,11 +773,12 @@ void checkForSystemSignal(MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent,
        /* nothing pending: yield the CPU instead of spinning */
 #ifdef __EMSCRIPTEN__
        /* browser: every wait is a timer of at least 4 ms, so 1 ms steps
-        * overshot Thread.sleep() by up to 4 ms; wait the time left at
-        * once (minus a last short step, so keys still come in) */
+        * overshot Thread.sleep() by up to 4 ms; wait in frame-sized steps
+        * (keys still come in, and a thread sleeping for ages, as Doom RPG
+        * has, does not stop the page) and the rest at once */
        if (timeout > 0)
           { jlong left = stopTime - JVM_JavaMilliSeconds();
-            SDL_Delay((Uint32)(left > 20 ? left - 16 : left));
+            SDL_Delay((Uint32)(left > 20 ? 16 : (left > 0 ? left : 1)));
           }
        else SDL_Delay(10);
 #else

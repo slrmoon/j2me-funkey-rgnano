@@ -142,6 +142,23 @@ int pcsl_file_open(const pcsl_string * fileName, int flags, void **handle) {
         return -1;
     }
 
+    if (fd == 0) {
+        /*
+         * A process started without standard input (the Windows launcher)
+         * gets descriptor 0 for its first file, and callers take a zero
+         * handle for "not open": record stores were never written. Move
+         * the file to another descriptor and leave 0 on NUL.
+         */
+        int moved = _dup(fd);
+        _close(fd);
+        if (moved < 0) {
+            *handle = NULL;
+            return -1;
+        }
+        (void) _open("NUL", O_RDONLY);
+        fd = moved;
+    }
+
     *handle = (void *)fd;
     return 0;
 	

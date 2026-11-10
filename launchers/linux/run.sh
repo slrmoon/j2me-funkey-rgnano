@@ -18,8 +18,8 @@
 #   SP=save.sp      DoJa scratchpad file (default: game.sp by the jar)
 #   VERIFY=1        check bytecode like a phone does (off by default:
 #                   modded games often fail it but run fine)
-# Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/funkey-j2me/rms/<game>,
-# the log to .../funkey-j2me/logs/<game>.log (runtime menu > Debug > Log
+# Saves (RMS) go to ${XDG_DATA_HOME:-~/.local/share}/phoneme-j2me/rms/<game>,
+# the log to .../phoneme-j2me/logs/<game>.log (runtime menu > Debug > Log
 # file). Choices made in the runtime menu (Esc) are kept as on the FunKey:
 # display/sound per game in .../run/<game>/game.cfg, debug switches for all
 # games in .../debug.cfg; the variables above win over them.
@@ -39,7 +39,10 @@ JAR=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 BASE=${JAR%.*}
 NAME=$(basename "$BASE")
 DIR=$(dirname "$JAR")
-DATA=${XDG_DATA_HOME:-$HOME/.local/share}/funkey-j2me
+DATA=${XDG_DATA_HOME:-$HOME/.local/share}/phoneme-j2me
+# (the folder was funkey-j2me before: keep its saves)
+OLD_DATA=${XDG_DATA_HOME:-$HOME/.local/share}/funkey-j2me
+[ -d "$OLD_DATA" ] && [ ! -e "$DATA" ] && mv "$OLD_DATA" "$DATA"
 # The VM cannot open a jar (or scratchpad) whose path has non-ASCII
 # characters (BatSwingⅢ/, ギャング弾.JAR: ClassNotFoundException for the
 # main class): such files are reached through ASCII links in $DATA/run.

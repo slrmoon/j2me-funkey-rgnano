@@ -15,10 +15,10 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "FileDescription", "FunKey J2ME launcher"
-            VALUE "ProductName", "FunKey J2ME runtime (phoneME)"
+            VALUE "FileDescription", "phoneME J2ME launcher"
+            VALUE "ProductName", "phoneME J2ME runtime"
             VALUE "FileVersion", "2.0"
-            VALUE "OriginalFilename", "FunKeyJ2ME.exe"
+            VALUE "OriginalFilename", "phoneME.exe"
         END
     END
     BLOCK "VarFileInfo"
@@ -29,7 +29,7 @@ END
 
 IDD_MAIN DIALOGEX 0, 0, 352, 268
 STYLE DS_SHELLFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
-CAPTION "FunKey J2ME"
+CAPTION "phoneME J2ME"
 FONT 9, "MS Shell Dlg 2"
 BEGIN
     CONTROL         "", IDC_TAB, "SysTabControl32", WS_TABSTOP, 6, 6, 340, 214

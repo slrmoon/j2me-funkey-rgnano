@@ -139,7 +139,20 @@ public class InternalMIDletSuiteImpl implements MIDletSuite {
             return null;
         }
 
+        separator = classPathExt.indexOf(';');
+        if (separator != -1) {
+            classPathExt = classPathExt.substring(0, separator);
+        }
+        /*
+         * ':' separates entries too, but not after a Windows drive letter
+         * (C:\games\game.jar): cut there, the .jad was never found and
+         * getAppProperty() gave null for everything (Doom RPG: no map).
+         */
         separator = classPathExt.indexOf(':');
+        if (separator == 1 && classPathExt.length() > 2 &&
+                (classPathExt.charAt(2) == '\\' || classPathExt.charAt(2) == '/')) {
+            separator = classPathExt.indexOf(':', 2);
+        }
         if (separator != -1) {
             classPathExt = classPathExt.substring(0, separator);
         }

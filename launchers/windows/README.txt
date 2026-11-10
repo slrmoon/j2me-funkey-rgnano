@@ -1,4 +1,4 @@
-FunKey J2ME runtime for Windows
+phoneME J2ME runtime for Windows
 ===============================
 
 The same phoneME runtime as on the FunKey S / RG Nano (M3G software 3D,
@@ -11,12 +11,12 @@ Java VM opens files through 8-bit file names.
 
 Starting games
 --------------
-Start FunKeyJ2ME.exe. The Games tab lists the games in the "games" folder
+Start phoneME.exe. The Games tab lists the games in the "games" folder
 (sub-folders too; "Games folder..." picks another one, e.g. an existing
 collection). Double-click a game or press Play. "Open a game..." starts
 any .jar / .jam, and you can drop a .jar onto the window.
 
-Dropping a .jar (or .jam) onto FunKeyJ2ME.exe itself starts the game right
+Dropping a .jar (or .jam) onto phoneME.exe itself starts the game right
 away, with its settings, without the window.
 
 i-appli (DoJa) games: game.jam (and game.sp, if any) next to game.jar.
@@ -59,14 +59,14 @@ Default keys
 
 Files
 -----
-    settings.ini          settings (written by FunKeyJ2ME.exe)
+    settings.ini          settings (written by phoneME.exe)
     data\rms\<game>       saves (record stores)
     data\logs\<game>.log  runtime log of the last run
     data\games\<game>.ini own settings of a game
     data\run\<game>       temporary copies (games in folders with non-Latin
                           names, jars without a .jad)
 When the folder is not writable (e.g. Program Files), settings and data go
-to %LOCALAPPDATA%\funkey-j2me instead.
+to %LOCALAPPDATA%\phoneme-j2me instead.
 
 Not available on Windows (yet): network connections (games get an
 IOException), the sampling profiler, the mass-test scripts of the Linux
