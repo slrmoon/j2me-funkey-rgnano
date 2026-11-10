@@ -99,6 +99,174 @@ extern "C" {
   static address  g_jpc;     /* Java program counter */
   static address  g_jlocals; /* current Java method locals pointer */
 
+  /*
+   * INTERP_LOCAL_STATE (WebAssembly): the bytecode loop keeps the four
+   * pointers above in local variables, so they live in registers instead
+   * of being loaded from and stored to memory by every bytecode.
+   *
+   * How it works: the "fast" bytecode handlers (BYTECODE_FAST) and the
+   * small helpers they use (PUSH, POP, iload, branch...) take the state
+   * as hidden reference parameters that have the SAME NAMES as the
+   * globals, so one body serves both: inside a fast handler g_jsp is the
+   * loop's local, anywhere else it is the global. The helpers are called
+   * through macros that pass the names along (PUSH(v) -> PUSH_(g_jpc,
+   * g_jsp, g_jlocals, g_jfp, 0, v); the 0 is a dummy that ends the list).
+   *
+   * Everything else - "slow" handlers (BYTECODE_IMPL), the VM, method
+   * entries - still works on the globals. Before code that uses the
+   * globals is called from a fast context the locals are written out, and
+   * read back afterwards: VM_CALL(...), or the bc_run_ wrapper of a slow
+   * handler. RULE: a fast handler or state-passing helper may call only
+   * state-passing helpers, functions that do not touch the four pointers,
+   * or VM_CALL(...). tools/check-interp-state.py checks this.
+   *
+   * Without INTERP_LOCAL_STATE the hidden parameters vanish and the code
+   * is what it was before.
+   */
+#if !defined(INTERP_LOCAL_STATE) && defined(__EMSCRIPTEN__)
+#define INTERP_LOCAL_STATE 1
+#endif
+
+#if INTERP_LOCAL_STATE
+  /* which of the four are kept in locals (bit mask, test knob):
+   * 1 jpc, 2 jsp, 4 jlocals, 8 jfp */
+#ifndef INTERP_LOCAL_SET
+#define INTERP_LOCAL_SET 15
+#endif
+#if INTERP_LOCAL_SET & 1
+#define IS_P_PC  address& g_jpc,
+#define IS_A_PC  g_jpc,
+#define IS_G_PC  ::g_jpc,
+#define IS_D_PC  address g_jpc = ::g_jpc;
+#define IS_O_PC  ::g_jpc = g_jpc;
+#define IS_I_PC  g_jpc = ::g_jpc;
+#else
+#define IS_P_PC
+#define IS_A_PC
+#define IS_G_PC
+#define IS_D_PC
+#define IS_O_PC
+#define IS_I_PC
+#endif
+#if INTERP_LOCAL_SET & 2
+#define IS_P_SP  address& g_jsp,
+#define IS_A_SP  g_jsp,
+#define IS_G_SP  ::g_jsp,
+#define IS_D_SP  address g_jsp = ::g_jsp;
+#define IS_O_SP  ::g_jsp = g_jsp;
+#define IS_I_SP  g_jsp = ::g_jsp;
+#else
+#define IS_P_SP
+#define IS_A_SP
+#define IS_G_SP
+#define IS_D_SP
+#define IS_O_SP
+#define IS_I_SP
+#endif
+#if INTERP_LOCAL_SET & 4
+#define IS_P_LC  address& g_jlocals,
+#define IS_A_LC  g_jlocals,
+#define IS_G_LC  ::g_jlocals,
+#define IS_D_LC  address g_jlocals = ::g_jlocals;
+#define IS_O_LC  ::g_jlocals = g_jlocals;
+#define IS_I_LC  g_jlocals = ::g_jlocals;
+#else
+#define IS_P_LC
+#define IS_A_LC
+#define IS_G_LC
+#define IS_D_LC
+#define IS_O_LC
+#define IS_I_LC
+#endif
+#if INTERP_LOCAL_SET & 8
+#define IS_P_FP  address& g_jfp,
+#define IS_A_FP  g_jfp,
+#define IS_G_FP  ::g_jfp,
+#define IS_D_FP  address g_jfp = ::g_jfp;
+#define IS_O_FP  ::g_jfp = g_jfp;
+#define IS_I_FP  g_jfp = ::g_jfp;
+#else
+#define IS_P_FP
+#define IS_A_FP
+#define IS_G_FP
+#define IS_D_FP
+#define IS_O_FP
+#define IS_I_FP
+#endif
+  // the hidden parameters end with a dummy int, so the lists above can
+  // all end with a comma
+#define IS_P   IS_P_PC IS_P_SP IS_P_LC IS_P_FP int
+#define IS_P_  IS_P,
+#define IS_A   IS_A_PC IS_A_SP IS_A_LC IS_A_FP 0
+#define IS_A_  IS_A,
+#define IS_GLOBALS IS_G_PC IS_G_SP IS_G_LC IS_G_FP 0
+#define IS_DECLARE_LOCALS IS_D_PC IS_D_SP IS_D_LC IS_D_FP
+#define IS_INLINE static inline __attribute__((always_inline))
+#define IS_FN     static inline __attribute__((always_inline))
+#if INTERP_POISON && INTERP_LOCAL_SET == 15
+  /* test build: while the loop runs with its locals, the globals hold an
+   * address that traps, so code that wrongly uses them fails at once */
+#define INTERP_POISON_ADDR ((address)0xFFFFFF00)
+#define VM_POISON()                                                    \
+    (void)((&g_jpc != &::g_jpc) &&                                     \
+     (::g_jfp = ::g_jsp = ::g_jpc = ::g_jlocals = INTERP_POISON_ADDR))
+#else
+#define VM_POISON() ((void)0)
+#endif
+#define VM_SYNC_OUT() do { IS_O_PC IS_O_SP IS_O_LC IS_O_FP } while (0)
+#define VM_SYNC_IN()                                                   \
+    do { IS_I_PC IS_I_SP IS_I_LC IS_I_FP VM_POISON(); } while (0)
+#else
+#define IS_P
+#define IS_P_
+#define IS_A
+#define IS_A_
+#define IS_DECLARE_LOCALS
+#define IS_INLINE static inline
+#define IS_FN     static
+#define VM_POISON()   ((void)0)
+#define VM_SYNC_OUT() ((void)0)
+#define VM_SYNC_IN()  ((void)0)
+#endif
+
+  /* run code that works on the global state (see above) */
+#define VM_CALL(code)                                                  \
+    do { VM_SYNC_OUT(); code; VM_SYNC_IN(); } while (0)
+
+  /* the state-passing helpers */
+#define arg_address_from_sp(i)  arg_address_from_sp_(IS_A_ i)
+#define int_from_sp(i)          int_from_sp_(IS_A_ i)
+#define address_from_sp(i)      address_from_sp_(IS_A_ i)
+#define POP()                   POP_(IS_A)
+#define OBJ_POP()               OBJ_POP_(IS_A)
+#define FLOAT_POP()             FLOAT_POP_(IS_A)
+#define LONG_POP()              LONG_POP_(IS_A)
+#define DOUBLE_POP()            DOUBLE_POP_(IS_A)
+#define PUSH(v)                 PUSH_(IS_A_ v)
+#define OBJ_PUSH(v)             OBJ_PUSH_(IS_A_ v)
+#define FLOAT_PUSH(v)           FLOAT_PUSH_(IS_A_ v)
+#define LONG_PUSH(v)            LONG_PUSH_(IS_A_ v)
+#define DOUBLE_PUSH(v)          DOUBLE_PUSH_(IS_A_ v)
+#define PEEK(n)                 PEEK_(IS_A_ n)
+#define OBJ_PEEK(n)             OBJ_PEEK_(IS_A_ n)
+#define check_timer_tick()      check_timer_tick_(IS_A)
+#define type_check(r, o, i)     type_check_(IS_A_ r, o, i)
+#define array_load(t)           array_load_(IS_A_ t)
+#define array_store(t)          array_store_(IS_A_ t)
+#define iload(n)                iload_(IS_A_ n)
+#define lload(n)                lload_(IS_A_ n)
+#define fload(n)                fload_(IS_A_ n)
+#define aload(n)                aload_(IS_A_ n)
+#define dload(n)                dload_(IS_A_ n)
+#define istore(n)               istore_(IS_A_ n)
+#define lstore(n)               lstore_(IS_A_ n)
+#define fstore(n)               fstore_(IS_A_ n)
+#define astore(n)               astore_(IS_A_ n)
+#define dstore(n)               dstore_(IS_A_ n)
+#define branch(c)               branch_(IS_A_ c)
+#define get_static_field_offset() get_static_field_offset_(IS_A)
+#define fast_ldc(t, w)          fast_ldc_(IS_A_ t, w)
+
   /* used to return from interpreter via longjmp */
   static jmp_buf interpreter_env;
   static bool inside_interpreter;
@@ -142,19 +310,19 @@ extern "C" {
 #define ADVANCE_FOR_RETURN() ADVANCE((int)(GET_FRAME(return_advance)))
 
 #define NULL_CHECK(obj) \
-    if (obj == NULL) {                           \
-      interpreter_throw_NullPointerException();  \
-      return;                                    \
+    if (obj == NULL) {                                    \
+      VM_CALL(interpreter_throw_NullPointerException());  \
+      return;                                             \
     }
 
 #define BOUNDS_CHECK(obj, idx) \
-    if (obj == NULL) {                                    \
-      interpreter_throw_NullPointerException();           \
-      return false;                                       \
-    }                                                     \
-    if (idx < 0 || idx >= GET_ARRAY_LENGTH(obj)) {        \
-      interpreter_throw_ArrayIndexOutOfBoundsException(); \
-      return false;                                       \
+    if (obj == NULL) {                                             \
+      VM_CALL(interpreter_throw_NullPointerException());           \
+      return false;                                                \
+    }                                                              \
+    if (idx < 0 || idx >= GET_ARRAY_LENGTH(obj)) {                 \
+      VM_CALL(interpreter_throw_ArrayIndexOutOfBoundsException()); \
+      return false;                                                \
     }
 
   // method locals accessors
@@ -254,15 +422,15 @@ enum {
     longjmp(interpreter_env, reason)
 
   // useful inlines
-  static inline address arg_address_from_sp(int index) {
+  IS_INLINE address arg_address_from_sp_(IS_P_ int index) {
     return (g_jsp + BytesPerWord * index);
   }
 
-  static inline jint int_from_sp(int index) {
+  IS_INLINE jint int_from_sp_(IS_P_ int index) {
     return *(jint*)arg_address_from_sp(index);
   }
 
-  static inline address address_from_sp(int index) {
+  IS_INLINE address address_from_sp_(IS_P_ int index) {
     return *(address*)arg_address_from_sp(index);
   }
 
@@ -353,72 +521,72 @@ enum {
   }
 
   // stack accessors
-  static inline jint POP() {
+  IS_INLINE jint POP_(IS_P) {
     jint value = *(jint*)g_jsp;
     g_jsp += sizeof(jint);
     return value;
   }
 
-  static inline address OBJ_POP() {
+  IS_INLINE address OBJ_POP_(IS_P) {
     address value = *(address*)g_jsp;
     g_jsp += sizeof(address);
     return value;
   }
 
-  static inline jfloat FLOAT_POP() {
+  IS_INLINE jfloat FLOAT_POP_(IS_P) {
     jfloat value = *(jfloat*)g_jsp;
     g_jsp += sizeof(jfloat);
     return value;
   }
 
-  static inline void PUSH(jint v) {
+  IS_INLINE void PUSH_(IS_P_ jint v) {
     g_jsp -= sizeof(jint);
     *(jint*)g_jsp = v;
   }
 
-  static inline void OBJ_PUSH(address v) {
+  IS_INLINE void OBJ_PUSH_(IS_P_ address v) {
     g_jsp -= sizeof(address);
     *(address*)g_jsp = v;
   }
 
-  static inline void FLOAT_PUSH(jfloat v) {
+  IS_INLINE void FLOAT_PUSH_(IS_P_ jfloat v) {
     g_jsp -= sizeof(jfloat);
     *(jfloat*)g_jsp = v;
   }
 
-  static inline jlong LONG_POP() {
+  IS_INLINE jlong LONG_POP_(IS_P) {
     jlong_accessor acc;
     acc.words[0] = POP();
     acc.words[1] = POP();
     return acc.long_value;
   }
 
-  static inline void LONG_PUSH(jlong val) {
+  IS_INLINE void LONG_PUSH_(IS_P_ jlong val) {
     jlong_accessor acc;
     acc.long_value = val;
     PUSH(acc.words[1]);
     PUSH(acc.words[0]);
   }
 
-  static inline jdouble DOUBLE_POP() {
+  IS_INLINE jdouble DOUBLE_POP_(IS_P) {
      jdouble_accessor acc;
      acc.words[0] = POP();
      acc.words[1] = POP();
      return acc.double_value;
   }
 
-  static inline void DOUBLE_PUSH(jdouble val) {
+  IS_INLINE void DOUBLE_PUSH_(IS_P_ jdouble val) {
     jdouble_accessor acc;
     acc.double_value = val;
     PUSH(acc.words[1]);
     PUSH(acc.words[0]);
   }
 
-  static inline jint PEEK(jint n)    {
+  IS_INLINE jint PEEK_(IS_P_ jint n)    {
     return *((jint*)g_jsp + n);
   }
 
-  static inline address OBJ_PEEK(jint n) {
+  IS_INLINE address OBJ_PEEK_(IS_P_ jint n) {
     return *((address*)g_jsp + n);
   }
 
@@ -482,7 +650,7 @@ enum {
   static int poll_ticks_countdown;
 #endif
 
-  static inline void check_timer_tick() {
+  IS_INLINE void check_timer_tick_(IS_P) {
 #if defined(__EMSCRIPTEN__)
     /* no timer signal in WebAssembly: look at the clock now and then */
     if (--poll_ticks_countdown < 0) {
@@ -495,7 +663,8 @@ enum {
     _protected_page[INTERPRETER_TIMER_TICK_SLOT] = (int)g_jpc;
 #else
     if (_rt_timer_ticks > 0) {
-      interpreter_call_vm_1((address)&timer_tick, T_VOID, (jint)NATIVE_ARG);
+      VM_CALL(interpreter_call_vm_1((address)&timer_tick, T_VOID,
+                                    (jint)NATIVE_ARG));
     }
 #endif
   }
@@ -1845,14 +2014,17 @@ enum {
     interpreter_call_vm((address)&arithmetic_exception, T_VOID);
   }
 
-  static inline bool type_check(address ref, address obj, jint idx) {
+  IS_INLINE bool type_check_(IS_P_ address ref, address obj, jint idx) {
     if (!obj) {
       return true;
     }
     OBJ_PUSH(ref);
     PUSH(idx);
     OBJ_PUSH(obj);
-    if (!interpreter_call_vm((address)&array_store_type_check, T_VOID)) {
+    bool failed;
+    VM_CALL(failed = interpreter_call_vm((address)&array_store_type_check,
+                                         T_VOID));
+    if (!failed) {
       // clear arguments from stack
       g_jsp += 3 * sizeof(jint);
       return true;
@@ -2005,7 +2177,7 @@ enum {
     interpreter_method_entry();
   }
 
-  static bool array_load(BasicType type) {
+  IS_FN bool array_load_(IS_P_ BasicType type) {
     jint    idx = POP();
     address ref = OBJ_POP();
     BOUNDS_CHECK(ref, idx);
@@ -2066,7 +2238,7 @@ enum {
     return true;
   }
 
-  static bool array_store(BasicType type) {
+  IS_FN bool array_store_(IS_P_ BasicType type) {
     switch (type) {
     case T_BYTE    :
       {
@@ -2150,35 +2322,35 @@ enum {
     return true;
   }
 
-  static inline void iload(int n) {
+  IS_INLINE void iload_(IS_P_ int n) {
     PUSH(GET_LOCAL(n));
   }
 
-  static inline void lload(int n) {
+  IS_INLINE void lload_(IS_P_ int n) {
     jlong_accessor acc;
     acc.words[1] = GET_LOCAL_LOW(n);
     acc.words[0] = GET_LOCAL_HIGH(n);
     LONG_PUSH(acc.long_value);
   }
 
-  static inline void fload(int n) {
+  IS_INLINE void fload_(IS_P_ int n) {
     PUSH(GET_LOCAL(n));
   }
 
-  static inline void aload(int n) {
+  IS_INLINE void aload_(IS_P_ int n) {
     PUSH(GET_LOCAL(n));
   }
 
-  static inline void dload(int n) {
+  IS_INLINE void dload_(IS_P_ int n) {
     PUSH(GET_LOCAL_LOW(n));
     PUSH(GET_LOCAL_HIGH(n));
   }
 
-  static inline void istore(int n) {
+  IS_INLINE void istore_(IS_P_ int n) {
     SET_LOCAL(n, POP());
   }
 
-  static inline void lstore(int n) {
+  IS_INLINE void lstore_(IS_P_ int n) {
     jlong_accessor acc;
     acc.long_value = LONG_POP();
 
@@ -2186,15 +2358,15 @@ enum {
     SET_LOCAL_HIGH(n, acc.words[0]);
   }
 
-  static inline void fstore(int n) {
+  IS_INLINE void fstore_(IS_P_ int n) {
     SET_LOCAL(n, POP());
   }
 
-  static inline void astore(int n) {
+  IS_INLINE void astore_(IS_P_ int n) {
     SET_LOCAL(n, POP());
   }
 
-  static inline void dstore(int n) {
+  IS_INLINE void dstore_(IS_P_ int n) {
     jdouble_accessor acc;
     acc.double_value = DOUBLE_POP();
 
@@ -2202,7 +2374,7 @@ enum {
     SET_LOCAL_HIGH(n, acc.words[0]);
   }
 
-  static inline void branch(bool cond) {
+  IS_INLINE void branch_(IS_P_ bool cond) {
     if (cond) {
       g_jpc += GET_SIGNED_SHORT(0);
       // only check ticks on taken branches
@@ -2212,7 +2384,7 @@ enum {
     }
   }
 
-  static address get_static_field_offset() {
+  IS_FN address get_static_field_offset_(IS_P) {
     address cpool = GET_FRAME(cpool);
     jushort idx = GET_SHORT(0);
     jushort class_id = first_ushort_from_cpool(cpool, idx);
@@ -2220,7 +2392,10 @@ enum {
     address obj = get_mirror_by_id(class_id);
     if (obj == get_cib_marker()) {
       address klass = get_class_by_id(class_id);
-      if (interpreter_call_vm_1((address)task_barrier, T_OBJECT, (jint)klass)) {
+      bool failed;
+      VM_CALL(failed = interpreter_call_vm_1((address)task_barrier, T_OBJECT,
+                                             (jint)klass));
+      if (failed) {
         return NULL;
       }
       obj = (address)GET_THREAD_INT(obj_value);
@@ -2229,7 +2404,10 @@ enum {
 #else
     address obj = get_class_by_id(class_id);
     if (!is_initialized_class(obj)) {
-      if (interpreter_call_vm_1((address)initialize_class, T_VOID, (jint)obj)) {
+      bool failed;
+      VM_CALL(failed = interpreter_call_vm_1((address)initialize_class,
+                                             T_VOID, (jint)obj));
+      if (failed) {
         return NULL;
       }
       GUARANTEE(cpool == GET_FRAME(cpool), "No GC should have happened");
@@ -2237,6 +2415,101 @@ enum {
 #endif
     return obj + second_ushort_from_cpool(cpool, idx); // offset
   }
+
+  /*
+   * Calls and returns on the local state. The common case - a Java method
+   * run by the interpreter, not synchronized, with room on the stack - is
+   * done here, as interpreter_method_entry() and return_internal() would
+   * do it; everything else goes to them through VM_CALL.
+   */
+  static inline bool is_plain_interpreter_entry(address entry) {
+    return entry == (address)&interpreter_fast_method_entry_0 ||
+           entry == (address)&interpreter_fast_method_entry_1 ||
+           entry == (address)&interpreter_fast_method_entry_2 ||
+           entry == (address)&interpreter_fast_method_entry_3 ||
+           entry == (address)&interpreter_fast_method_entry_4 ||
+           entry == (address)&interpreter_method_entry ||
+           entry == (address)&fixed_interpreter_method_entry ||
+           entry == (address)&fixed_interpreter_fast_method_entry_0 ||
+           entry == (address)&fixed_interpreter_fast_method_entry_1 ||
+           entry == (address)&fixed_interpreter_fast_method_entry_2 ||
+           entry == (address)&fixed_interpreter_fast_method_entry_3 ||
+           entry == (address)&fixed_interpreter_fast_method_entry_4;
+  }
+
+  IS_INLINE void invoke_method_(IS_P_ address method, int invoker_size) {
+    address exec_entry = **(address**)(method + Method::variable_part_offset());
+    jushort flagz = get_access_flags(method);
+    jushort num_params = get_num_params(method);
+    if (Verbose || !is_plain_interpreter_entry(exec_entry) ||
+        (flagz & JVM_ACC_SYNCHRONIZED) ||
+        g_jsp - get_max_stack(method) * 4 < _current_stack_limit
+#if ENABLE_WTK_PROFILER
+        || UseExactProfiler
+#endif
+        ) {
+      VM_CALL(invoke_java_method(method, invoker_size));
+      return;
+    }
+    // invoke_java_method()
+    SET_FRAME(locals_pointer, g_jlocals);
+    SET_FRAME(bcp_store, g_jpc);
+    SET_FRAME(return_advance, (address)invoker_size);
+    set_callee_method(method);
+    // interpreter_method_entry()
+    g_jlocals = g_jsp +
+      num_params * BytesPerStackElement + JavaFrame::arg_offset_from_sp(-1);
+    g_jsp -= (get_max_locals(method) - num_params) * BytesPerStackElement;
+    g_jsp -= JavaFrame::frame_desc_size();
+    address old_jfp = g_jfp;
+    g_jfp = g_jsp - JavaFrame::empty_stack_offset();
+    SET_FRAME(stored_int_value1, 0x0);
+    SET_FRAME(stored_int_value2, 0x0);
+    SET_FRAME(stack_bottom_pointer, g_jsp);
+    SET_FRAME(locals_pointer, g_jlocals);
+    SET_FRAME(method, method);
+    SET_FRAME(cpool, get_cpool(method));
+    SET_FRAME(caller_fp, old_jfp);
+    SET_FRAME(return_address, g_jpc);
+    g_jpc = method + Method::base_offset();
+  }
+#define invoke_method(m, n) invoke_method_(IS_A_ m, n)
+
+  static void return_internal(BasicType type);
+
+  IS_INLINE void return_method_(IS_P_ BasicType type) {
+    address caller_fp = GET_FRAME(caller_fp);
+    // monitors on the frame, or back to an EntryFrame: the full way
+    if (GET_FRAME(stack_bottom_pointer) !=
+          g_jfp + JavaFrame::empty_stack_offset() ||
+        *(address*)(caller_fp + FRAME_OFFSET(return_address)) ==
+          (address)EntryFrame::FakeReturnAddress
+#if ENABLE_WTK_PROFILER
+        || UseExactProfiler
+#endif
+        ) {
+      VM_CALL(return_internal(type));
+      return;
+    }
+    jint lo = 0, hi = 0;
+    if (type != T_VOID) {
+      lo = int_from_sp(0);
+      if (type == T_LONG || type == T_DOUBLE) {
+        hi = int_from_sp(1);
+      }
+    }
+    g_jsp = GET_FRAME(locals_pointer) - JavaFrame::arg_offset_from_sp(-1);
+    g_jfp = caller_fp;
+    g_jpc = GET_FRAME(bcp_store) + (int)(GET_FRAME(return_advance));
+    g_jlocals = GET_FRAME(locals_pointer);
+    if (type != T_VOID) {
+      if (type == T_LONG || type == T_DOUBLE) {
+        PUSH(hi);
+      }
+      PUSH(lo);
+    }
+  }
+#define return_method(t) return_method_(IS_A_ t)
 
   static void return_internal(BasicType type) {
     basic_value rv;
@@ -2346,7 +2619,7 @@ enum {
     }
   }
 
-  static void fast_ldc(BasicType type, bool wide) {
+  IS_FN void fast_ldc_(IS_P_ BasicType type, bool wide) {
     jushort idx = wide ? GET_SHORT(0) : GET_BYTE(0);
     // Get constant pool of current method
     address cpool = GET_FRAME(cpool);
@@ -2380,7 +2653,7 @@ enum {
     ADVANCE(wide ? 3 : 2);
   }
 
-  static void fast_invoke_internal(bool has_fixed_target_method,
+  IS_FN void fast_invoke_internal_(IS_P_ bool has_fixed_target_method,
                                    bool must_do_null_check, int invoker_size) {
     address method = NULL;
     // Get constant pool index
@@ -2404,7 +2677,9 @@ enum {
         address mirror = get_mirror_by_id(class_id);
         if (mirror == get_cib_marker()) {
           address klass = get_class_by_id(class_id);
-          if (interpreter_call_vm_1((address)task_barrier, T_OBJECT, (jint)klass)) {
+          bool failed;
+          VM_CALL(failed = interpreter_call_vm_1((address)task_barrier, T_OBJECT, (jint)klass));
+          if (failed) {
             return;
           }
           cpool = GET_FRAME(cpool);
@@ -2413,7 +2688,9 @@ enum {
 #else
         address klass = get_class_by_id(class_id);
         if (!is_initialized_class(klass)) {
-          if (interpreter_call_vm_1((address)initialize_class, T_VOID, (jint)klass)) {
+          bool failed;
+          VM_CALL(failed = interpreter_call_vm_1((address)initialize_class, T_VOID, (jint)klass));
+          if (failed) {
             return;
           }
           GUARANTEE(cpool == GET_FRAME(cpool), "No GC should have happened");
@@ -2445,101 +2722,133 @@ enum {
     }
 
     // Call method
-    invoke_java_method(method, invoker_size);
+    invoke_method(method, invoker_size);
   }
+
+#define fast_invoke_internal(a, b, c) fast_invoke_internal_(IS_A_ a, b, c)
 
   /* bytecodes implementation follows */
 
 #define START_BYTECODES
 #define END_BYTECODES
-#define BYTECODE_IMPL_NO_STEP(x) static void bc_impl_##x() {
 #if ENABLE_JAVA_DEBUGGER
-#define BYTECODE_IMPL(x) static void bc_impl_##x() {            \
-  if (_debugger_active & DEBUGGER_STEPPING) {                   \
-    interpreter_call_vm((address)&handle_single_step, T_VOID);  \
+#define BYTECODE_STEP_CHECK                                             \
+  if (_debugger_active & DEBUGGER_STEPPING) {                           \
+    VM_CALL(interpreter_call_vm((address)&handle_single_step, T_VOID)); \
   }
 #else
-#define BYTECODE_IMPL(x) static void bc_impl_##x() {
+#define BYTECODE_STEP_CHECK
 #endif
+
+#if INTERP_LOCAL_STATE
+  // Every bytecode x has bc_impl_x(), which works on the global state (the
+  // dispatch table, return points), and bc_run_x(state), which the loop in
+  // Interpret() calls with its local state. A slow handler's body is
+  // bc_impl_x; a fast one's is bc_run_x.
+#define BYTECODE_SLOW_HEAD(x)                                           \
+  static void bc_impl_##x();                                            \
+  IS_INLINE void bc_run_##x(IS_P) {                                     \
+    VM_SYNC_OUT(); bc_impl_##x(); VM_SYNC_IN();                         \
+  }                                                                     \
+  static void bc_impl_##x() {
+#define BYTECODE_FAST(x)                                                \
+  IS_INLINE void bc_run_##x(IS_P);                                      \
+  static void bc_impl_##x() {                                           \
+    bc_run_##x(IS_GLOBALS);                                           \
+  }                                                                     \
+  IS_INLINE void bc_run_##x(IS_P) {                                     \
+    BYTECODE_STEP_CHECK
+  // continue with the body of another bytecode
+#define BYTECODE_CHAIN(x) bc_run_##x(IS_A)
+  // the bytecode loop runs a handler
+#define BYTECODE_RUN(x) bc_run_##x(IS_A)
+#else
+#define BYTECODE_SLOW_HEAD(x) static void bc_impl_##x() {
+#define BYTECODE_FAST(x) BYTECODE_SLOW_HEAD(x) BYTECODE_STEP_CHECK
+#define BYTECODE_CHAIN(x) bc_impl_##x()
+#define BYTECODE_RUN(x) bc_impl_##x()
+#endif
+#define BYTECODE_IMPL_NO_STEP(x) BYTECODE_SLOW_HEAD(x)
+#define BYTECODE_IMPL(x) BYTECODE_SLOW_HEAD(x) BYTECODE_STEP_CHECK
 #define BYTECODE_IMPL_END }
 
   START_BYTECODES
 
-  BYTECODE_IMPL(nop)
+  BYTECODE_FAST(nop)
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aconst_null)
+  BYTECODE_FAST(aconst_null)
     PUSH(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_m1)
+  BYTECODE_FAST(iconst_m1)
     PUSH(-1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_0)
+  BYTECODE_FAST(iconst_0)
     PUSH(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_1)
+  BYTECODE_FAST(iconst_1)
     PUSH(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_2)
+  BYTECODE_FAST(iconst_2)
     PUSH(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_3)
+  BYTECODE_FAST(iconst_3)
     PUSH(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_4)
+  BYTECODE_FAST(iconst_4)
     PUSH(4);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iconst_5)
+  BYTECODE_FAST(iconst_5)
     PUSH(5);
     ADVANCE(1);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lconst_0)
+  BYTECODE_FAST(lconst_0)
     LONG_PUSH(0);
     ADVANCE(1);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lconst_1)
+  BYTECODE_FAST(lconst_1)
     LONG_PUSH(1);
     ADVANCE(1);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fconst_0)
+  BYTECODE_FAST(fconst_0)
     PUSH(0);
     ADVANCE(1);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fconst_1)
+  BYTECODE_FAST(fconst_1)
     PUSH(1065353216);
     ADVANCE(1);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fconst_2)
+  BYTECODE_FAST(fconst_2)
     PUSH(1073741824);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dconst_0)
+  BYTECODE_FAST(dconst_0)
     DOUBLE_PUSH(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dconst_1)
+  BYTECODE_FAST(dconst_1)
 #if HARDWARE_LITTLE_ENDIAN
     PUSH(1072693248);
     PUSH(0);
@@ -2550,12 +2859,12 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(bipush)
+  BYTECODE_FAST(bipush)
     PUSH(GET_SIGNED_BYTE(0));
     ADVANCE(2);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(sipush)
+  BYTECODE_FAST(sipush)
     PUSH(GET_SIGNED_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
@@ -2572,420 +2881,420 @@ enum {
     interpreter_call_vm_redo((address)&quicken, T_INT);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iload)
+  BYTECODE_FAST(iload)
     iload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iload_wide)
+  BYTECODE_FAST(iload_wide)
     iload(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lload)
+  BYTECODE_FAST(lload)
     lload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lload_wide)
+  BYTECODE_FAST(lload_wide)
     lload(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fload)
+  BYTECODE_FAST(fload)
     fload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fload_wide)
+  BYTECODE_FAST(fload_wide)
     fload(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload)
+  BYTECODE_FAST(dload)
     dload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload_wide)
+  BYTECODE_FAST(dload_wide)
     dload(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload)
+  BYTECODE_FAST(aload)
     aload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_wide)
+  BYTECODE_FAST(aload_wide)
     aload(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iload_0)
+  BYTECODE_FAST(iload_0)
     iload(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iload_1)
+  BYTECODE_FAST(iload_1)
     iload(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iload_2)
+  BYTECODE_FAST(iload_2)
     iload(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iload_3)
+  BYTECODE_FAST(iload_3)
     iload(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lload_0)
+  BYTECODE_FAST(lload_0)
     lload(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lload_1)
+  BYTECODE_FAST(lload_1)
     lload(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lload_2)
+  BYTECODE_FAST(lload_2)
     lload(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lload_3)
+  BYTECODE_FAST(lload_3)
     lload(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fload_0)
+  BYTECODE_FAST(fload_0)
     fload(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fload_1)
+  BYTECODE_FAST(fload_1)
     fload(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fload_2)
+  BYTECODE_FAST(fload_2)
     fload(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fload_3)
+  BYTECODE_FAST(fload_3)
     fload(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload_0)
+  BYTECODE_FAST(dload_0)
     dload(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload_1)
+  BYTECODE_FAST(dload_1)
     dload(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload_2)
+  BYTECODE_FAST(dload_2)
     dload(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload_3)
+  BYTECODE_FAST(dload_3)
     dload(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_0)
+  BYTECODE_FAST(aload_0)
     aload(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_1)
+  BYTECODE_FAST(aload_1)
     aload(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_2)
+  BYTECODE_FAST(aload_2)
     aload(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_3)
+  BYTECODE_FAST(aload_3)
     aload(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iaload)
+  BYTECODE_FAST(iaload)
     if (array_load(T_INT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(laload)
+  BYTECODE_FAST(laload)
     if (array_load(T_LONG)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(faload)
+  BYTECODE_FAST(faload)
     if (array_load(T_FLOAT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(daload)
+  BYTECODE_FAST(daload)
     if (array_load(T_DOUBLE)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aaload)
+  BYTECODE_FAST(aaload)
     if (array_load(T_OBJECT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(baload)
+  BYTECODE_FAST(baload)
     if (array_load(T_BYTE)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(caload)
+  BYTECODE_FAST(caload)
     if (array_load(T_CHAR)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(saload)
+  BYTECODE_FAST(saload)
     if (array_load(T_SHORT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(istore)
+  BYTECODE_FAST(istore)
     istore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(istore_wide)
+  BYTECODE_FAST(istore_wide)
     istore(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore)
+  BYTECODE_FAST(lstore)
     lstore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore_wide)
+  BYTECODE_FAST(lstore_wide)
     lstore(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fstore)
+  BYTECODE_FAST(fstore)
     fstore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fstore_wide)
+  BYTECODE_FAST(fstore_wide)
     fstore(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore)
+  BYTECODE_FAST(dstore)
     dstore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore_wide)
+  BYTECODE_FAST(dstore_wide)
     dstore(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(astore)
+  BYTECODE_FAST(astore)
     astore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(astore_wide)
+  BYTECODE_FAST(astore_wide)
     astore(GET_SHORT(0));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(istore_0)
+  BYTECODE_FAST(istore_0)
     istore(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(istore_1)
+  BYTECODE_FAST(istore_1)
     istore(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(istore_2)
+  BYTECODE_FAST(istore_2)
     istore(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(istore_3)
+  BYTECODE_FAST(istore_3)
     istore(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore_0)
+  BYTECODE_FAST(lstore_0)
     lstore(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore_1)
+  BYTECODE_FAST(lstore_1)
     lstore(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore_2)
+  BYTECODE_FAST(lstore_2)
     lstore(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore_3)
+  BYTECODE_FAST(lstore_3)
     lstore(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fstore_0)
+  BYTECODE_FAST(fstore_0)
     fstore(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fstore_1)
+  BYTECODE_FAST(fstore_1)
     fstore(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fstore_2)
+  BYTECODE_FAST(fstore_2)
     fstore(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fstore_3)
+  BYTECODE_FAST(fstore_3)
     fstore(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore_0)
+  BYTECODE_FAST(dstore_0)
     dstore(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore_1)
+  BYTECODE_FAST(dstore_1)
     dstore(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore_2)
+  BYTECODE_FAST(dstore_2)
     dstore(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore_3)
+  BYTECODE_FAST(dstore_3)
     dstore(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(astore_0)
+  BYTECODE_FAST(astore_0)
     astore(0);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(astore_1)
+  BYTECODE_FAST(astore_1)
     astore(1);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(astore_2)
+  BYTECODE_FAST(astore_2)
     astore(2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(astore_3)
+  BYTECODE_FAST(astore_3)
     astore(3);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iastore)
+  BYTECODE_FAST(iastore)
     if (array_store(T_INT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lastore)
+  BYTECODE_FAST(lastore)
     if (array_store(T_LONG)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fastore)
+  BYTECODE_FAST(fastore)
     if (array_store(T_FLOAT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dastore)
+  BYTECODE_FAST(dastore)
     if (array_store(T_DOUBLE)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aastore)
+  BYTECODE_FAST(aastore)
     if (array_store(T_OBJECT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(bastore)
+  BYTECODE_FAST(bastore)
     if (array_store(T_BYTE)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(castore)
+  BYTECODE_FAST(castore)
     if (array_store(T_CHAR)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(sastore)
+  BYTECODE_FAST(sastore)
     if (array_store(T_SHORT)) {
       ADVANCE(1);
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(pop)
+  BYTECODE_FAST(pop)
     POP();
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(pop2)
+  BYTECODE_FAST(pop2)
     POP();
     POP();
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dup)
+  BYTECODE_FAST(dup)
     jint v = PEEK(0);
     PUSH(v);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dup_x1)
+  BYTECODE_FAST(dup_x1)
     jint val1 = POP();
     jint val2 = POP();
     PUSH(val1);
@@ -2994,7 +3303,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dup_x2)
+  BYTECODE_FAST(dup_x2)
     jint val1 = POP();
     jint val2 = POP();
     jint val3 = POP();
@@ -3005,7 +3314,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dup2)
+  BYTECODE_FAST(dup2)
     jint val1 = POP();
     jint val2 = POP();
     PUSH(val2);
@@ -3015,7 +3324,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dup2_x1)
+  BYTECODE_FAST(dup2_x1)
     jint val1 = POP();
     jint val2 = POP();
     jint val3 = POP();
@@ -3027,7 +3336,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dup2_x2)
+  BYTECODE_FAST(dup2_x2)
     jint val1 = POP();
     jint val2 = POP();
     jint val3 = POP();
@@ -3041,7 +3350,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(swap)
+  BYTECODE_FAST(swap)
     jint val1 = POP();
     jint val2 = POP();
     PUSH(val1);
@@ -3049,14 +3358,14 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iadd)
+  BYTECODE_FAST(iadd)
     jint val1 = POP();
     jint val2 = POP();
     PUSH(val1 + val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ladd)
+  BYTECODE_FAST(ladd)
     jlong val1 = LONG_POP();
     jlong val2 = LONG_POP();
     LONG_PUSH(val1 + val2);
@@ -3064,14 +3373,14 @@ enum {
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(fadd)
+  BYTECODE_FAST(fadd)
     jfloat val1 = FLOAT_POP();
     jfloat val2 = FLOAT_POP();
     FLOAT_PUSH(jvm_fadd(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dadd)
+  BYTECODE_FAST(dadd)
     jdouble val1 = DOUBLE_POP();
     jdouble val2 = DOUBLE_POP();
     DOUBLE_PUSH(jvm_dadd(val1, val2));
@@ -3079,14 +3388,14 @@ enum {
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(isub)
+  BYTECODE_FAST(isub)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 - val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lsub)
+  BYTECODE_FAST(lsub)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 - val2);
@@ -3094,14 +3403,14 @@ enum {
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(fsub)
+  BYTECODE_FAST(fsub)
     jfloat val2 = FLOAT_POP();
     jfloat val1 = FLOAT_POP();
     FLOAT_PUSH(jvm_fsub(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dsub)
+  BYTECODE_FAST(dsub)
     jdouble val2 = DOUBLE_POP();
     jdouble val1 = DOUBLE_POP();
     DOUBLE_PUSH(jvm_dsub(val1, val2));
@@ -3109,39 +3418,39 @@ enum {
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(imul)
+  BYTECODE_FAST(imul)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 * val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lmul)
+  BYTECODE_FAST(lmul)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 * val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fmul)
+  BYTECODE_FAST(fmul)
     jfloat val2 = FLOAT_POP();
     jfloat val1 = FLOAT_POP();
     FLOAT_PUSH(jvm_fmul(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dmul)
+  BYTECODE_FAST(dmul)
     jdouble val1 = DOUBLE_POP();
     jdouble val2 = DOUBLE_POP();
     DOUBLE_PUSH(jvm_dmul(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(idiv)
+  BYTECODE_FAST(idiv)
     jint val2 = POP();
     jint val1 = POP();
     if (val2 == 0) {
-      interpreter_throw_ArithmeticException();
+      VM_CALL(interpreter_throw_ArithmeticException());
       return;
     }
     jint rv = val1;
@@ -3153,36 +3462,36 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ldiv)
+  BYTECODE_FAST(ldiv)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     if (val2 == 0) {
-      interpreter_throw_ArithmeticException();
+      VM_CALL(interpreter_throw_ArithmeticException());
       return;
     }
     LONG_PUSH(val1 / val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fdiv)
+  BYTECODE_FAST(fdiv)
     jfloat val2 = FLOAT_POP();
     jfloat val1 = FLOAT_POP();
     FLOAT_PUSH(jvm_fdiv(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ddiv)
+  BYTECODE_FAST(ddiv)
     jdouble val2 = DOUBLE_POP();
     jdouble val1 = DOUBLE_POP();
     DOUBLE_PUSH(jvm_ddiv(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(irem)
+  BYTECODE_FAST(irem)
     jint val2 = POP();
     jint val1 = POP();
     if (val2 == 0) {
-      interpreter_throw_ArithmeticException();
+      VM_CALL(interpreter_throw_ArithmeticException());
       return;
     }
     if (val1 == 0x80000000 && val2 == -1) {
@@ -3193,11 +3502,11 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lrem)
+  BYTECODE_FAST(lrem)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     if (val2 == 0) {
-      interpreter_throw_ArithmeticException();
+      VM_CALL(interpreter_throw_ArithmeticException());
       return;
     }
     LONG_PUSH(val1 % val2);
@@ -3205,14 +3514,14 @@ enum {
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(frem)
+  BYTECODE_FAST(frem)
     jfloat val2 = FLOAT_POP();
     jfloat val1 = FLOAT_POP();
     FLOAT_PUSH(jvm_frem(val1, val2));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(drem)
+  BYTECODE_FAST(drem)
     jdouble val2 = DOUBLE_POP();
     jdouble val1 = DOUBLE_POP();
     DOUBLE_PUSH(jvm_drem(val1, val2));
@@ -3220,61 +3529,61 @@ enum {
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(ineg)
+  BYTECODE_FAST(ineg)
     jint val = POP();
     PUSH(-val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lneg)
+  BYTECODE_FAST(lneg)
     jlong val = LONG_POP();
     LONG_PUSH(-val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(fneg)
+  BYTECODE_FAST(fneg)
     jfloat val = FLOAT_POP();
     FLOAT_PUSH(jvm_fmul(val, -1.0f));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dneg)
+  BYTECODE_FAST(dneg)
     jdouble val = DOUBLE_POP();
     DOUBLE_PUSH(jvm_dneg(val));
     ADVANCE(1);
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(ishl)
+  BYTECODE_FAST(ishl)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 << (val2 & 0x1f));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lshl)
+  BYTECODE_FAST(lshl)
     jint  val2 = POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 << (val2 & 0x3f));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ishr)
+  BYTECODE_FAST(ishr)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 >> (val2 & 0x1f));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lshr)
+  BYTECODE_FAST(lshr)
     jint  val2 = POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 >> (val2 & 0x3f));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iushr)
+  BYTECODE_FAST(iushr)
     jint val2 = POP() & 0x1f;
     jint val1 = POP();
     val1 = (juint)val1 >> val2;
@@ -3282,7 +3591,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lushr)
+  BYTECODE_FAST(lushr)
     jint  val2 = POP() & 0x3f;
     jlong val1 = LONG_POP();
     val1 = (julong)val1 >> val2;
@@ -3290,49 +3599,49 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iand)
+  BYTECODE_FAST(iand)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 & val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(land)
+  BYTECODE_FAST(land)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 & val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ior)
+  BYTECODE_FAST(ior)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 | val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lor)
+  BYTECODE_FAST(lor)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 | val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ixor)
+  BYTECODE_FAST(ixor)
     jint val2 = POP();
     jint val1 = POP();
     PUSH(val1 ^ val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lxor)
+  BYTECODE_FAST(lxor)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
     LONG_PUSH(val1 ^ val2);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iinc)
+  BYTECODE_FAST(iinc)
     jint n   = GET_BYTE(0);
     jint inc = GET_SIGNED_BYTE(1);
     jint val = GET_LOCAL(n);
@@ -3340,7 +3649,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iinc_wide)
+  BYTECODE_FAST(iinc_wide)
     jint   n   = GET_SHORT(0);
     jint   inc = GET_SIGNED_SHORT(2);
     jint   val = GET_LOCAL(n);
@@ -3348,91 +3657,91 @@ enum {
     ADVANCE(5);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(i2l)
+  BYTECODE_FAST(i2l)
     jlong val = POP();
     LONG_PUSH(val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(i2f)
+  BYTECODE_FAST(i2f)
     FLOAT_PUSH(jvm_i2f(POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(i2d)
+  BYTECODE_FAST(i2d)
     DOUBLE_PUSH(jvm_i2d(POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(l2i)
+  BYTECODE_FAST(l2i)
     jint val = (jint)LONG_POP();
     PUSH(val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(l2f)
+  BYTECODE_FAST(l2f)
     FLOAT_PUSH(jvm_l2f(LONG_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(l2d)
+  BYTECODE_FAST(l2d)
     DOUBLE_PUSH(jvm_l2d(LONG_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(f2i)
+  BYTECODE_FAST(f2i)
     PUSH(jvm_f2i(FLOAT_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(f2l)
+  BYTECODE_FAST(f2l)
     LONG_PUSH(jvm_f2l(FLOAT_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(f2d)
+  BYTECODE_FAST(f2d)
     DOUBLE_PUSH(jvm_f2d(FLOAT_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(d2i)
+  BYTECODE_FAST(d2i)
     PUSH(jvm_d2i(DOUBLE_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(d2l)
+  BYTECODE_FAST(d2l)
     LONG_PUSH(jvm_d2l(DOUBLE_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(d2f)
+  BYTECODE_FAST(d2f)
     FLOAT_PUSH(jvm_d2f(DOUBLE_POP()));
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(i2b)
+  BYTECODE_FAST(i2b)
     jbyte val = (jbyte)POP();
     PUSH(val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(i2c)
+  BYTECODE_FAST(i2c)
     jchar val = (jchar)POP();
     PUSH(val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(i2s)
+  BYTECODE_FAST(i2s)
     jshort val = (jshort)POP();
     PUSH(val);
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lcmp)
+  BYTECODE_FAST(lcmp)
     jlong val2 = LONG_POP();
     jlong val1 = LONG_POP();
 
@@ -3443,7 +3752,7 @@ enum {
   BYTECODE_IMPL_END
 
 #if ENABLE_FLOAT
-  BYTECODE_IMPL(fcmpl)
+  BYTECODE_FAST(fcmpl)
     jfloat rval = FLOAT_POP();
     jfloat lval = FLOAT_POP();
 
@@ -3451,7 +3760,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fcmpg)
+  BYTECODE_FAST(fcmpg)
     jfloat rval = FLOAT_POP();
     jfloat lval = FLOAT_POP();
 
@@ -3459,7 +3768,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dcmpl)
+  BYTECODE_FAST(dcmpl)
     jdouble rval = DOUBLE_POP();
     jdouble lval = DOUBLE_POP();
 
@@ -3467,7 +3776,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dcmpg)
+  BYTECODE_FAST(dcmpg)
     jdouble rval = DOUBLE_POP();
     jdouble lval = DOUBLE_POP();
 
@@ -3476,89 +3785,89 @@ enum {
   BYTECODE_IMPL_END
 #endif
 
-  BYTECODE_IMPL(ifeq)
+  BYTECODE_FAST(ifeq)
     jint val = POP();
     branch(val == 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ifne)
+  BYTECODE_FAST(ifne)
     jint val = POP();
     branch(val != 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(iflt)
+  BYTECODE_FAST(iflt)
     jint val = POP();
     branch(val < 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ifge)
+  BYTECODE_FAST(ifge)
     jint val = POP();
     branch(val >= 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ifgt)
+  BYTECODE_FAST(ifgt)
     jint val = POP();
     branch(val > 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ifle)
+  BYTECODE_FAST(ifle)
     jint val = POP();
     branch(val <= 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_icmpeq)
+  BYTECODE_FAST(if_icmpeq)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 == val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_icmpne)
+  BYTECODE_FAST(if_icmpne)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 != val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_icmplt)
+  BYTECODE_FAST(if_icmplt)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 < val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_icmpge)
+  BYTECODE_FAST(if_icmpge)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 >= val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_icmpgt)
+  BYTECODE_FAST(if_icmpgt)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 > val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_icmple)
+  BYTECODE_FAST(if_icmple)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 <= val2);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_acmpeq)
+  BYTECODE_FAST(if_acmpeq)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 == val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(if_acmpne)
+  BYTECODE_FAST(if_acmpne)
     jint val2 = POP();
     jint val1 = POP();
     branch(val1 != val2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(goto)
+  BYTECODE_FAST(goto)
     branch(true);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(tableswitch)
+  BYTECODE_FAST(tableswitch)
     jint index = POP();
     // method entry point is 4-byte aligned, jpc points to
     // tableswitch bytecode
@@ -3574,7 +3883,7 @@ enum {
     check_timer_tick();
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lookupswitch)
+  BYTECODE_FAST(lookupswitch)
     jint key = POP();
     // method entry point is 4-byte aligned, jpc points to
     // lookupswitch bytecode
@@ -3595,28 +3904,28 @@ enum {
     check_timer_tick();
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ireturn)
-    return_internal(T_INT);
+  BYTECODE_FAST(ireturn)
+    return_method(T_INT);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lreturn)
-    return_internal(T_LONG);
+  BYTECODE_FAST(lreturn)
+    return_method(T_LONG);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(freturn)
-    return_internal(T_FLOAT);
+  BYTECODE_FAST(freturn)
+    return_method(T_FLOAT);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dreturn)
-    return_internal(T_DOUBLE);
+  BYTECODE_FAST(dreturn)
+    return_method(T_DOUBLE);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(areturn)
-    return_internal(T_OBJECT);
+  BYTECODE_FAST(areturn)
+    return_method(T_OBJECT);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(return)
-    return_internal(T_VOID);
+  BYTECODE_FAST(return)
+    return_method(T_VOID);
   BYTECODE_IMPL_END
 
   BYTECODE_IMPL_NO_STEP(getstatic)
@@ -3685,7 +3994,7 @@ enum {
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(arraylength)
+  BYTECODE_FAST(arraylength)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     PUSH(GET_ARRAY_LENGTH(obj));
@@ -3758,17 +4067,17 @@ enum {
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ifnull)
+  BYTECODE_FAST(ifnull)
     jint val = POP();
     branch(val == 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(ifnonnull)
+  BYTECODE_FAST(ifnonnull)
     jint val = POP();
     branch(val != 0);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(goto_w)
+  BYTECODE_FAST(goto_w)
     jint offset = GET_INT(0);
     g_jpc += offset;
   BYTECODE_IMPL_END
@@ -3782,19 +4091,19 @@ enum {
 #endif
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_1_ldc)
+  BYTECODE_FAST(fast_1_ldc)
     fast_ldc(T_INT, false);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_1_ldc_w)
+  BYTECODE_FAST(fast_1_ldc_w)
     fast_ldc(T_INT, true);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_2_ldc_w)
+  BYTECODE_FAST(fast_2_ldc_w)
     fast_ldc(T_LONG, true);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_1_putstatic)
+  BYTECODE_FAST(fast_1_putstatic)
     address addr = get_static_field_offset();
     if (addr != NULL) {
       *(jint*)addr = POP();
@@ -3802,7 +4111,7 @@ enum {
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_2_putstatic)
+  BYTECODE_FAST(fast_2_putstatic)
     address addr = get_static_field_offset();
     if (addr != NULL) {
       long_to_addr(addr, LONG_POP());
@@ -3810,7 +4119,7 @@ enum {
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_a_putstatic)
+  BYTECODE_FAST(fast_a_putstatic)
     address addr = get_static_field_offset();
     if (addr != NULL) {
       *(address*)addr = OBJ_POP();
@@ -3819,7 +4128,7 @@ enum {
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_1_getstatic)
+  BYTECODE_FAST(fast_1_getstatic)
     address addr = get_static_field_offset();
     if (addr != NULL) {
       PUSH(*(jint*)addr);
@@ -3827,7 +4136,7 @@ enum {
     }
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_2_getstatic)
+  BYTECODE_FAST(fast_2_getstatic)
     address addr = get_static_field_offset();
     if (addr != NULL) {
       LONG_PUSH(long_from_addr(addr));
@@ -3855,7 +4164,7 @@ enum {
     bc_impl_fast_2_getstatic();
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_bputfield)
+  BYTECODE_FAST(fast_bputfield)
     jbyte value = POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3863,7 +4172,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_sputfield)
+  BYTECODE_FAST(fast_sputfield)
     jshort value = POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3871,7 +4180,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_iputfield)
+  BYTECODE_FAST(fast_iputfield)
     jint value = POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3879,7 +4188,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_lputfield)
+  BYTECODE_FAST(fast_lputfield)
     jlong value = LONG_POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3887,7 +4196,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_fputfield)
+  BYTECODE_FAST(fast_fputfield)
     jfloat value = FLOAT_POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3895,7 +4204,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_dputfield)
+  BYTECODE_FAST(fast_dputfield)
     jdouble value = DOUBLE_POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3903,7 +4212,7 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_aputfield)
+  BYTECODE_FAST(fast_aputfield)
     address value = OBJ_POP();
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -3913,75 +4222,75 @@ enum {
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_bgetfield)
+  BYTECODE_FAST(fast_bgetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     PUSH(*(jbyte*)(obj + GET_SHORT_NATIVE(0)));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_sgetfield)
+  BYTECODE_FAST(fast_sgetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     PUSH(*(jshort*)(obj + GET_SHORT_NATIVE(0)));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_cgetfield)
+  BYTECODE_FAST(fast_cgetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     PUSH(*(jushort*)(obj + GET_SHORT_NATIVE(0)));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_igetfield)
+  BYTECODE_FAST(fast_igetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     PUSH(*(jint*)(obj + GET_SHORT_NATIVE(0) * 4));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_lgetfield)
+  BYTECODE_FAST(fast_lgetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     LONG_PUSH(long_from_addr(obj + GET_SHORT_NATIVE(0) * 4));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_fgetfield)
+  BYTECODE_FAST(fast_fgetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     FLOAT_PUSH(*(jfloat*)(obj + GET_SHORT_NATIVE(0) * 4));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_dgetfield)
+  BYTECODE_FAST(fast_dgetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     DOUBLE_PUSH(double_from_addr(obj + GET_SHORT_NATIVE(0) * 4));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_agetfield)
+  BYTECODE_FAST(fast_agetfield)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     OBJ_PUSH(*(address*)(obj + GET_SHORT_NATIVE(0) * 4));
     ADVANCE(3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_invokevirtual)
+  BYTECODE_FAST(fast_invokevirtual)
     fast_invoke_internal(false, true, 3);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_invokestatic)
+  BYTECODE_FAST(fast_invokestatic)
     fast_invoke_internal(true, false, 3);
    BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_init_invokestatic)
+  BYTECODE_FAST(fast_init_invokestatic)
     fast_invoke_internal(true, false, 3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_invokeinterface)
+  BYTECODE_FAST(fast_invokeinterface)
     // read arguments
     jushort index = GET_SHORT(0);
     jubyte  num_params = GET_BYTE(2);
@@ -4014,7 +4323,7 @@ enum {
     for (itable = ci + ClassInfoDesc::header_size() + vlength*4; ; ilength--){
       // IMPL_NOTE: or < 0
       if (ilength <= 0) {
-       interpreter_throw_IncompatibleClassChangeError();
+       VM_CALL(interpreter_throw_IncompatibleClassChangeError());
        return;
       }
 
@@ -4029,7 +4338,7 @@ enum {
     // method table of the receiver class
     address table = int_from_addr(itable + 4) + ci;
     address method = *(address*)(table + method_index * 4);
-    invoke_java_method(method, 5);
+    invoke_method(method, 5);
   BYTECODE_IMPL_END
 
   static void bc_impl_fast_invokenative();
@@ -4126,11 +4435,11 @@ enum {
     bc_impl_instanceof();
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_invokevirtual_final)
+  BYTECODE_FAST(fast_invokevirtual_final)
     fast_invoke_internal(true, true, 3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_invokespecial)
+  BYTECODE_FAST(fast_invokespecial)
     // Get constant pool index
     jushort idx = GET_SHORT(0);
     // Get constant pool of current method
@@ -4151,17 +4460,17 @@ enum {
     address receiver = OBJ_PEEK(num_params - 1);
     NULL_CHECK(receiver);
 
-    invoke_java_method(method, 3);
+    invoke_method(method, 3);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_igetfield_1)
+  BYTECODE_FAST(fast_igetfield_1)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     PUSH(*(jint*)(obj + GET_BYTE(0) * 4));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(fast_agetfield_1)
+  BYTECODE_FAST(fast_agetfield_1)
     address obj = OBJ_POP();
     NULL_CHECK(obj);
     OBJ_PUSH(*(address*)(obj + GET_BYTE(0) * 4));
@@ -4170,12 +4479,12 @@ enum {
 
 #if !ENABLE_CPU_VARIANT
 
-  BYTECODE_IMPL(aload_0_fast_igetfield_1)
+  BYTECODE_FAST(aload_0_fast_igetfield_1)
     aload(0);
-    bc_impl_fast_igetfield_1();
+    BYTECODE_CHAIN(fast_igetfield_1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_0_fast_igetfield_4)
+  BYTECODE_FAST(aload_0_fast_igetfield_4)
     aload(0);
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -4183,7 +4492,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_0_fast_igetfield_8)
+  BYTECODE_FAST(aload_0_fast_igetfield_8)
     aload(0);
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -4191,12 +4500,12 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_0_fast_agetfield_1)
+  BYTECODE_FAST(aload_0_fast_agetfield_1)
     aload(0);
-    bc_impl_fast_agetfield_1();
+    BYTECODE_CHAIN(fast_agetfield_1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_0_fast_agetfield_4)
+  BYTECODE_FAST(aload_0_fast_agetfield_4)
     aload(0);
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -4204,7 +4513,7 @@ enum {
     ADVANCE(1);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(aload_0_fast_agetfield_8)
+  BYTECODE_FAST(aload_0_fast_agetfield_8)
     aload(0);
     address obj = OBJ_POP();
     NULL_CHECK(obj);
@@ -4219,7 +4528,7 @@ enum {
     int count = (jushort)GET_SHORT_NATIVE(1);
     int len = GET_ARRAY_LENGTH(ref);
     if (count < 0 || count > len) {
-      interpreter_throw_ArrayIndexOutOfBoundsException();
+      VM_CALL(interpreter_throw_ArrayIndexOutOfBoundsException());
       return;
     }
     jvm_memcpy(ref + Array::base_offset(), (g_jpc + 4), count * size_factor);
@@ -4228,29 +4537,29 @@ enum {
 
 #elif ENABLE_ARM11_JAZELLE_DLOAD_BUG_WORKAROUND
 
-  BYTECODE_IMPL(lload_safe)
+  BYTECODE_FAST(lload_safe)
     lload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(lstore_safe)
+  BYTECODE_FAST(lstore_safe)
     lstore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dload_safe)
+  BYTECODE_FAST(dload_safe)
     dload(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
-  BYTECODE_IMPL(dstore_safe)
+  BYTECODE_FAST(dstore_safe)
     dstore(GET_BYTE(0));
     ADVANCE(2);
   BYTECODE_IMPL_END
 
 #endif
 
-  BYTECODE_IMPL(pop_and_npe_if_null)
+  BYTECODE_FAST(pop_and_npe_if_null)
     NULL_CHECK(OBJ_POP());
     ADVANCE(1);
   BYTECODE_IMPL_END
@@ -4606,293 +4915,299 @@ static void Interpret() {
     // WebAssembly: an indirect call per bytecode is the slowest part of the
     // interpreter there; a switch lets the compiler inline the handlers
     // into this loop (a jump table instead of a call).
+    // The interpreter state is kept in these locals (INTERP_LOCAL_STATE,
+    // see the top of the file); they shadow the globals of the same name.
+    IS_DECLARE_LOCALS
+    VM_POISON();
     for (;;) {
       switch (*g_jpc) {
-        case Bytecodes::_nop: bc_impl_nop(); break;
-        case Bytecodes::_aconst_null: bc_impl_aconst_null(); break;
-        case Bytecodes::_iconst_m1: bc_impl_iconst_m1(); break;
-        case Bytecodes::_iconst_0: bc_impl_iconst_0(); break;
-        case Bytecodes::_iconst_1: bc_impl_iconst_1(); break;
-        case Bytecodes::_iconst_2: bc_impl_iconst_2(); break;
-        case Bytecodes::_iconst_3: bc_impl_iconst_3(); break;
-        case Bytecodes::_iconst_4: bc_impl_iconst_4(); break;
-        case Bytecodes::_iconst_5: bc_impl_iconst_5(); break;
-        case Bytecodes::_lconst_0: bc_impl_lconst_0(); break;
-        case Bytecodes::_lconst_1: bc_impl_lconst_1(); break;
-        case Bytecodes::_fconst_0: bc_impl_fconst_0(); break;
-        case Bytecodes::_fconst_1: bc_impl_fconst_1(); break;
-        case Bytecodes::_fconst_2: bc_impl_fconst_2(); break;
-        case Bytecodes::_dconst_0: bc_impl_dconst_0(); break;
-        case Bytecodes::_dconst_1: bc_impl_dconst_1(); break;
-        case Bytecodes::_bipush: bc_impl_bipush(); break;
-        case Bytecodes::_sipush: bc_impl_sipush(); break;
-        case Bytecodes::_ldc: bc_impl_ldc(); break;
-        case Bytecodes::_ldc_w: bc_impl_ldc_w(); break;
-        case Bytecodes::_ldc2_w: bc_impl_ldc2_w(); break;
-        case Bytecodes::_iload: bc_impl_iload(); break;
-        case Bytecodes::_lload: bc_impl_lload(); break;
-        case Bytecodes::_fload: bc_impl_fload(); break;
-        case Bytecodes::_dload: bc_impl_dload(); break;
-        case Bytecodes::_aload: bc_impl_aload(); break;
-        case Bytecodes::_iload_0: bc_impl_iload_0(); break;
-        case Bytecodes::_iload_1: bc_impl_iload_1(); break;
-        case Bytecodes::_iload_2: bc_impl_iload_2(); break;
-        case Bytecodes::_iload_3: bc_impl_iload_3(); break;
-        case Bytecodes::_lload_0: bc_impl_lload_0(); break;
-        case Bytecodes::_lload_1: bc_impl_lload_1(); break;
-        case Bytecodes::_lload_2: bc_impl_lload_2(); break;
-        case Bytecodes::_lload_3: bc_impl_lload_3(); break;
-        case Bytecodes::_fload_0: bc_impl_fload_0(); break;
-        case Bytecodes::_fload_1: bc_impl_fload_1(); break;
-        case Bytecodes::_fload_2: bc_impl_fload_2(); break;
-        case Bytecodes::_fload_3: bc_impl_fload_3(); break;
-        case Bytecodes::_dload_0: bc_impl_dload_0(); break;
-        case Bytecodes::_dload_1: bc_impl_dload_1(); break;
-        case Bytecodes::_dload_2: bc_impl_dload_2(); break;
-        case Bytecodes::_dload_3: bc_impl_dload_3(); break;
-        case Bytecodes::_aload_0: bc_impl_aload_0(); break;
-        case Bytecodes::_aload_1: bc_impl_aload_1(); break;
-        case Bytecodes::_aload_2: bc_impl_aload_2(); break;
-        case Bytecodes::_aload_3: bc_impl_aload_3(); break;
-        case Bytecodes::_iaload: bc_impl_iaload(); break;
-        case Bytecodes::_laload: bc_impl_laload(); break;
-        case Bytecodes::_faload: bc_impl_faload(); break;
-        case Bytecodes::_daload: bc_impl_daload(); break;
-        case Bytecodes::_aaload: bc_impl_aaload(); break;
-        case Bytecodes::_baload: bc_impl_baload(); break;
-        case Bytecodes::_caload: bc_impl_caload(); break;
-        case Bytecodes::_saload: bc_impl_saload(); break;
-        case Bytecodes::_istore: bc_impl_istore(); break;
-        case Bytecodes::_lstore: bc_impl_lstore(); break;
-        case Bytecodes::_fstore: bc_impl_fstore(); break;
-        case Bytecodes::_dstore: bc_impl_dstore(); break;
-        case Bytecodes::_astore: bc_impl_astore(); break;
-        case Bytecodes::_istore_0: bc_impl_istore_0(); break;
-        case Bytecodes::_istore_1: bc_impl_istore_1(); break;
-        case Bytecodes::_istore_2: bc_impl_istore_2(); break;
-        case Bytecodes::_istore_3: bc_impl_istore_3(); break;
-        case Bytecodes::_lstore_0: bc_impl_lstore_0(); break;
-        case Bytecodes::_lstore_1: bc_impl_lstore_1(); break;
-        case Bytecodes::_lstore_2: bc_impl_lstore_2(); break;
-        case Bytecodes::_lstore_3: bc_impl_lstore_3(); break;
-        case Bytecodes::_fstore_0: bc_impl_fstore_0(); break;
-        case Bytecodes::_fstore_1: bc_impl_fstore_1(); break;
-        case Bytecodes::_fstore_2: bc_impl_fstore_2(); break;
-        case Bytecodes::_fstore_3: bc_impl_fstore_3(); break;
-        case Bytecodes::_dstore_0: bc_impl_dstore_0(); break;
-        case Bytecodes::_dstore_1: bc_impl_dstore_1(); break;
-        case Bytecodes::_dstore_2: bc_impl_dstore_2(); break;
-        case Bytecodes::_dstore_3: bc_impl_dstore_3(); break;
-        case Bytecodes::_astore_0: bc_impl_astore_0(); break;
-        case Bytecodes::_astore_1: bc_impl_astore_1(); break;
-        case Bytecodes::_astore_2: bc_impl_astore_2(); break;
-        case Bytecodes::_astore_3: bc_impl_astore_3(); break;
-        case Bytecodes::_iastore: bc_impl_iastore(); break;
-        case Bytecodes::_lastore: bc_impl_lastore(); break;
-        case Bytecodes::_fastore: bc_impl_fastore(); break;
-        case Bytecodes::_dastore: bc_impl_dastore(); break;
-        case Bytecodes::_aastore: bc_impl_aastore(); break;
-        case Bytecodes::_bastore: bc_impl_bastore(); break;
-        case Bytecodes::_castore: bc_impl_castore(); break;
-        case Bytecodes::_sastore: bc_impl_sastore(); break;
-        case Bytecodes::_pop: bc_impl_pop(); break;
-        case Bytecodes::_pop2: bc_impl_pop2(); break;
-        case Bytecodes::_dup: bc_impl_dup(); break;
-        case Bytecodes::_dup_x1: bc_impl_dup_x1(); break;
-        case Bytecodes::_dup_x2: bc_impl_dup_x2(); break;
-        case Bytecodes::_dup2: bc_impl_dup2(); break;
-        case Bytecodes::_dup2_x1: bc_impl_dup2_x1(); break;
-        case Bytecodes::_dup2_x2: bc_impl_dup2_x2(); break;
-        case Bytecodes::_swap: bc_impl_swap(); break;
-        case Bytecodes::_iadd: bc_impl_iadd(); break;
-        case Bytecodes::_ladd: bc_impl_ladd(); break;
+        case Bytecodes::_nop: BYTECODE_RUN(nop); break;
+        case Bytecodes::_aconst_null: BYTECODE_RUN(aconst_null); break;
+        case Bytecodes::_iconst_m1: BYTECODE_RUN(iconst_m1); break;
+        case Bytecodes::_iconst_0: BYTECODE_RUN(iconst_0); break;
+        case Bytecodes::_iconst_1: BYTECODE_RUN(iconst_1); break;
+        case Bytecodes::_iconst_2: BYTECODE_RUN(iconst_2); break;
+        case Bytecodes::_iconst_3: BYTECODE_RUN(iconst_3); break;
+        case Bytecodes::_iconst_4: BYTECODE_RUN(iconst_4); break;
+        case Bytecodes::_iconst_5: BYTECODE_RUN(iconst_5); break;
+        case Bytecodes::_lconst_0: BYTECODE_RUN(lconst_0); break;
+        case Bytecodes::_lconst_1: BYTECODE_RUN(lconst_1); break;
+        case Bytecodes::_fconst_0: BYTECODE_RUN(fconst_0); break;
+        case Bytecodes::_fconst_1: BYTECODE_RUN(fconst_1); break;
+        case Bytecodes::_fconst_2: BYTECODE_RUN(fconst_2); break;
+        case Bytecodes::_dconst_0: BYTECODE_RUN(dconst_0); break;
+        case Bytecodes::_dconst_1: BYTECODE_RUN(dconst_1); break;
+        case Bytecodes::_bipush: BYTECODE_RUN(bipush); break;
+        case Bytecodes::_sipush: BYTECODE_RUN(sipush); break;
+        case Bytecodes::_ldc: BYTECODE_RUN(ldc); break;
+        case Bytecodes::_ldc_w: BYTECODE_RUN(ldc_w); break;
+        case Bytecodes::_ldc2_w: BYTECODE_RUN(ldc2_w); break;
+        case Bytecodes::_iload: BYTECODE_RUN(iload); break;
+        case Bytecodes::_lload: BYTECODE_RUN(lload); break;
+        case Bytecodes::_fload: BYTECODE_RUN(fload); break;
+        case Bytecodes::_dload: BYTECODE_RUN(dload); break;
+        case Bytecodes::_aload: BYTECODE_RUN(aload); break;
+        case Bytecodes::_iload_0: BYTECODE_RUN(iload_0); break;
+        case Bytecodes::_iload_1: BYTECODE_RUN(iload_1); break;
+        case Bytecodes::_iload_2: BYTECODE_RUN(iload_2); break;
+        case Bytecodes::_iload_3: BYTECODE_RUN(iload_3); break;
+        case Bytecodes::_lload_0: BYTECODE_RUN(lload_0); break;
+        case Bytecodes::_lload_1: BYTECODE_RUN(lload_1); break;
+        case Bytecodes::_lload_2: BYTECODE_RUN(lload_2); break;
+        case Bytecodes::_lload_3: BYTECODE_RUN(lload_3); break;
+        case Bytecodes::_fload_0: BYTECODE_RUN(fload_0); break;
+        case Bytecodes::_fload_1: BYTECODE_RUN(fload_1); break;
+        case Bytecodes::_fload_2: BYTECODE_RUN(fload_2); break;
+        case Bytecodes::_fload_3: BYTECODE_RUN(fload_3); break;
+        case Bytecodes::_dload_0: BYTECODE_RUN(dload_0); break;
+        case Bytecodes::_dload_1: BYTECODE_RUN(dload_1); break;
+        case Bytecodes::_dload_2: BYTECODE_RUN(dload_2); break;
+        case Bytecodes::_dload_3: BYTECODE_RUN(dload_3); break;
+        case Bytecodes::_aload_0: BYTECODE_RUN(aload_0); break;
+        case Bytecodes::_aload_1: BYTECODE_RUN(aload_1); break;
+        case Bytecodes::_aload_2: BYTECODE_RUN(aload_2); break;
+        case Bytecodes::_aload_3: BYTECODE_RUN(aload_3); break;
+        case Bytecodes::_iaload: BYTECODE_RUN(iaload); break;
+        case Bytecodes::_laload: BYTECODE_RUN(laload); break;
+        case Bytecodes::_faload: BYTECODE_RUN(faload); break;
+        case Bytecodes::_daload: BYTECODE_RUN(daload); break;
+        case Bytecodes::_aaload: BYTECODE_RUN(aaload); break;
+        case Bytecodes::_baload: BYTECODE_RUN(baload); break;
+        case Bytecodes::_caload: BYTECODE_RUN(caload); break;
+        case Bytecodes::_saload: BYTECODE_RUN(saload); break;
+        case Bytecodes::_istore: BYTECODE_RUN(istore); break;
+        case Bytecodes::_lstore: BYTECODE_RUN(lstore); break;
+        case Bytecodes::_fstore: BYTECODE_RUN(fstore); break;
+        case Bytecodes::_dstore: BYTECODE_RUN(dstore); break;
+        case Bytecodes::_astore: BYTECODE_RUN(astore); break;
+        case Bytecodes::_istore_0: BYTECODE_RUN(istore_0); break;
+        case Bytecodes::_istore_1: BYTECODE_RUN(istore_1); break;
+        case Bytecodes::_istore_2: BYTECODE_RUN(istore_2); break;
+        case Bytecodes::_istore_3: BYTECODE_RUN(istore_3); break;
+        case Bytecodes::_lstore_0: BYTECODE_RUN(lstore_0); break;
+        case Bytecodes::_lstore_1: BYTECODE_RUN(lstore_1); break;
+        case Bytecodes::_lstore_2: BYTECODE_RUN(lstore_2); break;
+        case Bytecodes::_lstore_3: BYTECODE_RUN(lstore_3); break;
+        case Bytecodes::_fstore_0: BYTECODE_RUN(fstore_0); break;
+        case Bytecodes::_fstore_1: BYTECODE_RUN(fstore_1); break;
+        case Bytecodes::_fstore_2: BYTECODE_RUN(fstore_2); break;
+        case Bytecodes::_fstore_3: BYTECODE_RUN(fstore_3); break;
+        case Bytecodes::_dstore_0: BYTECODE_RUN(dstore_0); break;
+        case Bytecodes::_dstore_1: BYTECODE_RUN(dstore_1); break;
+        case Bytecodes::_dstore_2: BYTECODE_RUN(dstore_2); break;
+        case Bytecodes::_dstore_3: BYTECODE_RUN(dstore_3); break;
+        case Bytecodes::_astore_0: BYTECODE_RUN(astore_0); break;
+        case Bytecodes::_astore_1: BYTECODE_RUN(astore_1); break;
+        case Bytecodes::_astore_2: BYTECODE_RUN(astore_2); break;
+        case Bytecodes::_astore_3: BYTECODE_RUN(astore_3); break;
+        case Bytecodes::_iastore: BYTECODE_RUN(iastore); break;
+        case Bytecodes::_lastore: BYTECODE_RUN(lastore); break;
+        case Bytecodes::_fastore: BYTECODE_RUN(fastore); break;
+        case Bytecodes::_dastore: BYTECODE_RUN(dastore); break;
+        case Bytecodes::_aastore: BYTECODE_RUN(aastore); break;
+        case Bytecodes::_bastore: BYTECODE_RUN(bastore); break;
+        case Bytecodes::_castore: BYTECODE_RUN(castore); break;
+        case Bytecodes::_sastore: BYTECODE_RUN(sastore); break;
+        case Bytecodes::_pop: BYTECODE_RUN(pop); break;
+        case Bytecodes::_pop2: BYTECODE_RUN(pop2); break;
+        case Bytecodes::_dup: BYTECODE_RUN(dup); break;
+        case Bytecodes::_dup_x1: BYTECODE_RUN(dup_x1); break;
+        case Bytecodes::_dup_x2: BYTECODE_RUN(dup_x2); break;
+        case Bytecodes::_dup2: BYTECODE_RUN(dup2); break;
+        case Bytecodes::_dup2_x1: BYTECODE_RUN(dup2_x1); break;
+        case Bytecodes::_dup2_x2: BYTECODE_RUN(dup2_x2); break;
+        case Bytecodes::_swap: BYTECODE_RUN(swap); break;
+        case Bytecodes::_iadd: BYTECODE_RUN(iadd); break;
+        case Bytecodes::_ladd: BYTECODE_RUN(ladd); break;
 #if ENABLE_FLOAT
-        case Bytecodes::_fadd: bc_impl_fadd(); break;
+        case Bytecodes::_fadd: BYTECODE_RUN(fadd); break;
 #endif
 #if ENABLE_FLOAT
-        case Bytecodes::_dadd: bc_impl_dadd(); break;
+        case Bytecodes::_dadd: BYTECODE_RUN(dadd); break;
 #endif
-        case Bytecodes::_isub: bc_impl_isub(); break;
-        case Bytecodes::_lsub: bc_impl_lsub(); break;
+        case Bytecodes::_isub: BYTECODE_RUN(isub); break;
+        case Bytecodes::_lsub: BYTECODE_RUN(lsub); break;
 #if ENABLE_FLOAT
-        case Bytecodes::_fsub: bc_impl_fsub(); break;
-#endif
-#if ENABLE_FLOAT
-        case Bytecodes::_dsub: bc_impl_dsub(); break;
-#endif
-        case Bytecodes::_imul: bc_impl_imul(); break;
-        case Bytecodes::_lmul: bc_impl_lmul(); break;
-        case Bytecodes::_fmul: bc_impl_fmul(); break;
-        case Bytecodes::_dmul: bc_impl_dmul(); break;
-        case Bytecodes::_idiv: bc_impl_idiv(); break;
-        case Bytecodes::_ldiv: bc_impl_ldiv(); break;
-        case Bytecodes::_fdiv: bc_impl_fdiv(); break;
-        case Bytecodes::_ddiv: bc_impl_ddiv(); break;
-        case Bytecodes::_irem: bc_impl_irem(); break;
-        case Bytecodes::_lrem: bc_impl_lrem(); break;
-#if ENABLE_FLOAT
-        case Bytecodes::_frem: bc_impl_frem(); break;
+        case Bytecodes::_fsub: BYTECODE_RUN(fsub); break;
 #endif
 #if ENABLE_FLOAT
-        case Bytecodes::_drem: bc_impl_drem(); break;
+        case Bytecodes::_dsub: BYTECODE_RUN(dsub); break;
 #endif
-        case Bytecodes::_ineg: bc_impl_ineg(); break;
-        case Bytecodes::_lneg: bc_impl_lneg(); break;
+        case Bytecodes::_imul: BYTECODE_RUN(imul); break;
+        case Bytecodes::_lmul: BYTECODE_RUN(lmul); break;
+        case Bytecodes::_fmul: BYTECODE_RUN(fmul); break;
+        case Bytecodes::_dmul: BYTECODE_RUN(dmul); break;
+        case Bytecodes::_idiv: BYTECODE_RUN(idiv); break;
+        case Bytecodes::_ldiv: BYTECODE_RUN(ldiv); break;
+        case Bytecodes::_fdiv: BYTECODE_RUN(fdiv); break;
+        case Bytecodes::_ddiv: BYTECODE_RUN(ddiv); break;
+        case Bytecodes::_irem: BYTECODE_RUN(irem); break;
+        case Bytecodes::_lrem: BYTECODE_RUN(lrem); break;
 #if ENABLE_FLOAT
-        case Bytecodes::_fneg: bc_impl_fneg(); break;
-#endif
-#if ENABLE_FLOAT
-        case Bytecodes::_dneg: bc_impl_dneg(); break;
-#endif
-        case Bytecodes::_ishl: bc_impl_ishl(); break;
-        case Bytecodes::_lshl: bc_impl_lshl(); break;
-        case Bytecodes::_ishr: bc_impl_ishr(); break;
-        case Bytecodes::_lshr: bc_impl_lshr(); break;
-        case Bytecodes::_iushr: bc_impl_iushr(); break;
-        case Bytecodes::_lushr: bc_impl_lushr(); break;
-        case Bytecodes::_iand: bc_impl_iand(); break;
-        case Bytecodes::_land: bc_impl_land(); break;
-        case Bytecodes::_ior: bc_impl_ior(); break;
-        case Bytecodes::_lor: bc_impl_lor(); break;
-        case Bytecodes::_ixor: bc_impl_ixor(); break;
-        case Bytecodes::_lxor: bc_impl_lxor(); break;
-        case Bytecodes::_iinc: bc_impl_iinc(); break;
-        case Bytecodes::_i2l: bc_impl_i2l(); break;
-        case Bytecodes::_i2f: bc_impl_i2f(); break;
-        case Bytecodes::_i2d: bc_impl_i2d(); break;
-        case Bytecodes::_l2i: bc_impl_l2i(); break;
-        case Bytecodes::_l2f: bc_impl_l2f(); break;
-#if ENABLE_FLOAT
-        case Bytecodes::_l2d: bc_impl_l2d(); break;
-#endif
-        case Bytecodes::_f2i: bc_impl_f2i(); break;
-        case Bytecodes::_f2l: bc_impl_f2l(); break;
-        case Bytecodes::_f2d: bc_impl_f2d(); break;
-        case Bytecodes::_d2i: bc_impl_d2i(); break;
-#if ENABLE_FLOAT
-        case Bytecodes::_d2l: bc_impl_d2l(); break;
-#endif
-        case Bytecodes::_d2f: bc_impl_d2f(); break;
-        case Bytecodes::_i2b: bc_impl_i2b(); break;
-        case Bytecodes::_i2c: bc_impl_i2c(); break;
-        case Bytecodes::_i2s: bc_impl_i2s(); break;
-        case Bytecodes::_lcmp: bc_impl_lcmp(); break;
-#if ENABLE_FLOAT
-        case Bytecodes::_fcmpl: bc_impl_fcmpl(); break;
+        case Bytecodes::_frem: BYTECODE_RUN(frem); break;
 #endif
 #if ENABLE_FLOAT
-        case Bytecodes::_fcmpg: bc_impl_fcmpg(); break;
+        case Bytecodes::_drem: BYTECODE_RUN(drem); break;
+#endif
+        case Bytecodes::_ineg: BYTECODE_RUN(ineg); break;
+        case Bytecodes::_lneg: BYTECODE_RUN(lneg); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_fneg: BYTECODE_RUN(fneg); break;
 #endif
 #if ENABLE_FLOAT
-        case Bytecodes::_dcmpl: bc_impl_dcmpl(); break;
+        case Bytecodes::_dneg: BYTECODE_RUN(dneg); break;
+#endif
+        case Bytecodes::_ishl: BYTECODE_RUN(ishl); break;
+        case Bytecodes::_lshl: BYTECODE_RUN(lshl); break;
+        case Bytecodes::_ishr: BYTECODE_RUN(ishr); break;
+        case Bytecodes::_lshr: BYTECODE_RUN(lshr); break;
+        case Bytecodes::_iushr: BYTECODE_RUN(iushr); break;
+        case Bytecodes::_lushr: BYTECODE_RUN(lushr); break;
+        case Bytecodes::_iand: BYTECODE_RUN(iand); break;
+        case Bytecodes::_land: BYTECODE_RUN(land); break;
+        case Bytecodes::_ior: BYTECODE_RUN(ior); break;
+        case Bytecodes::_lor: BYTECODE_RUN(lor); break;
+        case Bytecodes::_ixor: BYTECODE_RUN(ixor); break;
+        case Bytecodes::_lxor: BYTECODE_RUN(lxor); break;
+        case Bytecodes::_iinc: BYTECODE_RUN(iinc); break;
+        case Bytecodes::_i2l: BYTECODE_RUN(i2l); break;
+        case Bytecodes::_i2f: BYTECODE_RUN(i2f); break;
+        case Bytecodes::_i2d: BYTECODE_RUN(i2d); break;
+        case Bytecodes::_l2i: BYTECODE_RUN(l2i); break;
+        case Bytecodes::_l2f: BYTECODE_RUN(l2f); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_l2d: BYTECODE_RUN(l2d); break;
+#endif
+        case Bytecodes::_f2i: BYTECODE_RUN(f2i); break;
+        case Bytecodes::_f2l: BYTECODE_RUN(f2l); break;
+        case Bytecodes::_f2d: BYTECODE_RUN(f2d); break;
+        case Bytecodes::_d2i: BYTECODE_RUN(d2i); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_d2l: BYTECODE_RUN(d2l); break;
+#endif
+        case Bytecodes::_d2f: BYTECODE_RUN(d2f); break;
+        case Bytecodes::_i2b: BYTECODE_RUN(i2b); break;
+        case Bytecodes::_i2c: BYTECODE_RUN(i2c); break;
+        case Bytecodes::_i2s: BYTECODE_RUN(i2s); break;
+        case Bytecodes::_lcmp: BYTECODE_RUN(lcmp); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_fcmpl: BYTECODE_RUN(fcmpl); break;
 #endif
 #if ENABLE_FLOAT
-        case Bytecodes::_dcmpg: bc_impl_dcmpg(); break;
+        case Bytecodes::_fcmpg: BYTECODE_RUN(fcmpg); break;
 #endif
-        case Bytecodes::_ifeq: bc_impl_ifeq(); break;
-        case Bytecodes::_ifne: bc_impl_ifne(); break;
-        case Bytecodes::_iflt: bc_impl_iflt(); break;
-        case Bytecodes::_ifge: bc_impl_ifge(); break;
-        case Bytecodes::_ifgt: bc_impl_ifgt(); break;
-        case Bytecodes::_ifle: bc_impl_ifle(); break;
-        case Bytecodes::_if_icmpeq: bc_impl_if_icmpeq(); break;
-        case Bytecodes::_if_icmpne: bc_impl_if_icmpne(); break;
-        case Bytecodes::_if_icmplt: bc_impl_if_icmplt(); break;
-        case Bytecodes::_if_icmpge: bc_impl_if_icmpge(); break;
-        case Bytecodes::_if_icmpgt: bc_impl_if_icmpgt(); break;
-        case Bytecodes::_if_icmple: bc_impl_if_icmple(); break;
-        case Bytecodes::_if_acmpeq: bc_impl_if_acmpeq(); break;
-        case Bytecodes::_if_acmpne: bc_impl_if_acmpne(); break;
-        case Bytecodes::_goto: bc_impl_goto(); break;
-        case Bytecodes::_tableswitch: bc_impl_tableswitch(); break;
-        case Bytecodes::_lookupswitch: bc_impl_lookupswitch(); break;
-        case Bytecodes::_ireturn: bc_impl_ireturn(); break;
-        case Bytecodes::_lreturn: bc_impl_lreturn(); break;
-        case Bytecodes::_freturn: bc_impl_freturn(); break;
-        case Bytecodes::_dreturn: bc_impl_dreturn(); break;
-        case Bytecodes::_areturn: bc_impl_areturn(); break;
-        case Bytecodes::_return: bc_impl_return(); break;
-        case Bytecodes::_getstatic: bc_impl_getstatic(); break;
-        case Bytecodes::_putstatic: bc_impl_putstatic(); break;
-        case Bytecodes::_getfield: bc_impl_getfield(); break;
-        case Bytecodes::_putfield: bc_impl_putfield(); break;
-        case Bytecodes::_invokevirtual: bc_impl_invokevirtual(); break;
-        case Bytecodes::_invokespecial: bc_impl_invokespecial(); break;
-        case Bytecodes::_invokestatic: bc_impl_invokestatic(); break;
-        case Bytecodes::_invokeinterface: bc_impl_invokeinterface(); break;
-        case Bytecodes::_new: bc_impl_new(); break;
-        case Bytecodes::_newarray: bc_impl_newarray(); break;
-        case Bytecodes::_arraylength: bc_impl_arraylength(); break;
-        case Bytecodes::_athrow: bc_impl_athrow(); break;
-        case Bytecodes::_checkcast: bc_impl_checkcast(); break;
-        case Bytecodes::_instanceof: bc_impl_instanceof(); break;
-        case Bytecodes::_monitorenter: bc_impl_monitorenter(); break;
-        case Bytecodes::_monitorexit: bc_impl_monitorexit(); break;
-        case Bytecodes::_wide: bc_impl_wide(); break;
-        case Bytecodes::_anewarray: bc_impl_anewarray(); break;
-        case Bytecodes::_multianewarray: bc_impl_multianewarray(); break;
-        case Bytecodes::_ifnull: bc_impl_ifnull(); break;
-        case Bytecodes::_ifnonnull: bc_impl_ifnonnull(); break;
-        case Bytecodes::_goto_w: bc_impl_goto_w(); break;
-        case Bytecodes::_breakpoint: bc_impl_breakpoint(); break;
-        case Bytecodes::_fast_1_ldc: bc_impl_fast_1_ldc(); break;
-        case Bytecodes::_fast_1_ldc_w: bc_impl_fast_1_ldc_w(); break;
-        case Bytecodes::_fast_2_ldc_w: bc_impl_fast_2_ldc_w(); break;
-        case Bytecodes::_fast_1_putstatic: bc_impl_fast_1_putstatic(); break;
-        case Bytecodes::_fast_2_putstatic: bc_impl_fast_2_putstatic(); break;
-        case Bytecodes::_fast_a_putstatic: bc_impl_fast_a_putstatic(); break;
-        case Bytecodes::_fast_1_getstatic: bc_impl_fast_1_getstatic(); break;
-        case Bytecodes::_fast_2_getstatic: bc_impl_fast_2_getstatic(); break;
-        case Bytecodes::_fast_bputfield: bc_impl_fast_bputfield(); break;
-        case Bytecodes::_fast_sputfield: bc_impl_fast_sputfield(); break;
-        case Bytecodes::_fast_iputfield: bc_impl_fast_iputfield(); break;
-        case Bytecodes::_fast_lputfield: bc_impl_fast_lputfield(); break;
-        case Bytecodes::_fast_fputfield: bc_impl_fast_fputfield(); break;
-        case Bytecodes::_fast_dputfield: bc_impl_fast_dputfield(); break;
-        case Bytecodes::_fast_aputfield: bc_impl_fast_aputfield(); break;
-        case Bytecodes::_fast_bgetfield: bc_impl_fast_bgetfield(); break;
-        case Bytecodes::_fast_sgetfield: bc_impl_fast_sgetfield(); break;
-        case Bytecodes::_fast_igetfield: bc_impl_fast_igetfield(); break;
-        case Bytecodes::_fast_lgetfield: bc_impl_fast_lgetfield(); break;
-        case Bytecodes::_fast_fgetfield: bc_impl_fast_fgetfield(); break;
-        case Bytecodes::_fast_dgetfield: bc_impl_fast_dgetfield(); break;
-        case Bytecodes::_fast_agetfield: bc_impl_fast_agetfield(); break;
-        case Bytecodes::_fast_cgetfield: bc_impl_fast_cgetfield(); break;
-        case Bytecodes::_fast_invokevirtual: bc_impl_fast_invokevirtual(); break;
-        case Bytecodes::_fast_invokestatic: bc_impl_fast_invokestatic(); break;
-        case Bytecodes::_fast_invokeinterface: bc_impl_fast_invokeinterface(); break;
-        case Bytecodes::_fast_invokenative: bc_impl_fast_invokenative(); break;
-        case Bytecodes::_fast_new: bc_impl_fast_new(); break;
-        case Bytecodes::_fast_anewarray: bc_impl_fast_anewarray(); break;
-        case Bytecodes::_fast_checkcast: bc_impl_fast_checkcast(); break;
-        case Bytecodes::_fast_instanceof: bc_impl_fast_instanceof(); break;
-        case Bytecodes::_fast_invokevirtual_final: bc_impl_fast_invokevirtual_final(); break;
-        case Bytecodes::_fast_invokespecial: bc_impl_fast_invokespecial(); break;
-        case Bytecodes::_fast_igetfield_1: bc_impl_fast_igetfield_1(); break;
-        case Bytecodes::_fast_agetfield_1: bc_impl_fast_agetfield_1(); break;
+#if ENABLE_FLOAT
+        case Bytecodes::_dcmpl: BYTECODE_RUN(dcmpl); break;
+#endif
+#if ENABLE_FLOAT
+        case Bytecodes::_dcmpg: BYTECODE_RUN(dcmpg); break;
+#endif
+        case Bytecodes::_ifeq: BYTECODE_RUN(ifeq); break;
+        case Bytecodes::_ifne: BYTECODE_RUN(ifne); break;
+        case Bytecodes::_iflt: BYTECODE_RUN(iflt); break;
+        case Bytecodes::_ifge: BYTECODE_RUN(ifge); break;
+        case Bytecodes::_ifgt: BYTECODE_RUN(ifgt); break;
+        case Bytecodes::_ifle: BYTECODE_RUN(ifle); break;
+        case Bytecodes::_if_icmpeq: BYTECODE_RUN(if_icmpeq); break;
+        case Bytecodes::_if_icmpne: BYTECODE_RUN(if_icmpne); break;
+        case Bytecodes::_if_icmplt: BYTECODE_RUN(if_icmplt); break;
+        case Bytecodes::_if_icmpge: BYTECODE_RUN(if_icmpge); break;
+        case Bytecodes::_if_icmpgt: BYTECODE_RUN(if_icmpgt); break;
+        case Bytecodes::_if_icmple: BYTECODE_RUN(if_icmple); break;
+        case Bytecodes::_if_acmpeq: BYTECODE_RUN(if_acmpeq); break;
+        case Bytecodes::_if_acmpne: BYTECODE_RUN(if_acmpne); break;
+        case Bytecodes::_goto: BYTECODE_RUN(goto); break;
+        case Bytecodes::_tableswitch: BYTECODE_RUN(tableswitch); break;
+        case Bytecodes::_lookupswitch: BYTECODE_RUN(lookupswitch); break;
+        case Bytecodes::_ireturn: BYTECODE_RUN(ireturn); break;
+        case Bytecodes::_lreturn: BYTECODE_RUN(lreturn); break;
+        case Bytecodes::_freturn: BYTECODE_RUN(freturn); break;
+        case Bytecodes::_dreturn: BYTECODE_RUN(dreturn); break;
+        case Bytecodes::_areturn: BYTECODE_RUN(areturn); break;
+        case Bytecodes::_return: BYTECODE_RUN(return); break;
+        case Bytecodes::_getstatic: BYTECODE_RUN(getstatic); break;
+        case Bytecodes::_putstatic: BYTECODE_RUN(putstatic); break;
+        case Bytecodes::_getfield: BYTECODE_RUN(getfield); break;
+        case Bytecodes::_putfield: BYTECODE_RUN(putfield); break;
+        case Bytecodes::_invokevirtual: BYTECODE_RUN(invokevirtual); break;
+        case Bytecodes::_invokespecial: BYTECODE_RUN(invokespecial); break;
+        case Bytecodes::_invokestatic: BYTECODE_RUN(invokestatic); break;
+        case Bytecodes::_invokeinterface: BYTECODE_RUN(invokeinterface); break;
+        case Bytecodes::_new: BYTECODE_RUN(new); break;
+        case Bytecodes::_newarray: BYTECODE_RUN(newarray); break;
+        case Bytecodes::_arraylength: BYTECODE_RUN(arraylength); break;
+        case Bytecodes::_athrow: BYTECODE_RUN(athrow); break;
+        case Bytecodes::_checkcast: BYTECODE_RUN(checkcast); break;
+        case Bytecodes::_instanceof: BYTECODE_RUN(instanceof); break;
+        case Bytecodes::_monitorenter: BYTECODE_RUN(monitorenter); break;
+        case Bytecodes::_monitorexit: BYTECODE_RUN(monitorexit); break;
+        case Bytecodes::_wide: BYTECODE_RUN(wide); break;
+        case Bytecodes::_anewarray: BYTECODE_RUN(anewarray); break;
+        case Bytecodes::_multianewarray: BYTECODE_RUN(multianewarray); break;
+        case Bytecodes::_ifnull: BYTECODE_RUN(ifnull); break;
+        case Bytecodes::_ifnonnull: BYTECODE_RUN(ifnonnull); break;
+        case Bytecodes::_goto_w: BYTECODE_RUN(goto_w); break;
+        case Bytecodes::_breakpoint: BYTECODE_RUN(breakpoint); break;
+        case Bytecodes::_fast_1_ldc: BYTECODE_RUN(fast_1_ldc); break;
+        case Bytecodes::_fast_1_ldc_w: BYTECODE_RUN(fast_1_ldc_w); break;
+        case Bytecodes::_fast_2_ldc_w: BYTECODE_RUN(fast_2_ldc_w); break;
+        case Bytecodes::_fast_1_putstatic: BYTECODE_RUN(fast_1_putstatic); break;
+        case Bytecodes::_fast_2_putstatic: BYTECODE_RUN(fast_2_putstatic); break;
+        case Bytecodes::_fast_a_putstatic: BYTECODE_RUN(fast_a_putstatic); break;
+        case Bytecodes::_fast_1_getstatic: BYTECODE_RUN(fast_1_getstatic); break;
+        case Bytecodes::_fast_2_getstatic: BYTECODE_RUN(fast_2_getstatic); break;
+        case Bytecodes::_fast_bputfield: BYTECODE_RUN(fast_bputfield); break;
+        case Bytecodes::_fast_sputfield: BYTECODE_RUN(fast_sputfield); break;
+        case Bytecodes::_fast_iputfield: BYTECODE_RUN(fast_iputfield); break;
+        case Bytecodes::_fast_lputfield: BYTECODE_RUN(fast_lputfield); break;
+        case Bytecodes::_fast_fputfield: BYTECODE_RUN(fast_fputfield); break;
+        case Bytecodes::_fast_dputfield: BYTECODE_RUN(fast_dputfield); break;
+        case Bytecodes::_fast_aputfield: BYTECODE_RUN(fast_aputfield); break;
+        case Bytecodes::_fast_bgetfield: BYTECODE_RUN(fast_bgetfield); break;
+        case Bytecodes::_fast_sgetfield: BYTECODE_RUN(fast_sgetfield); break;
+        case Bytecodes::_fast_igetfield: BYTECODE_RUN(fast_igetfield); break;
+        case Bytecodes::_fast_lgetfield: BYTECODE_RUN(fast_lgetfield); break;
+        case Bytecodes::_fast_fgetfield: BYTECODE_RUN(fast_fgetfield); break;
+        case Bytecodes::_fast_dgetfield: BYTECODE_RUN(fast_dgetfield); break;
+        case Bytecodes::_fast_agetfield: BYTECODE_RUN(fast_agetfield); break;
+        case Bytecodes::_fast_cgetfield: BYTECODE_RUN(fast_cgetfield); break;
+        case Bytecodes::_fast_invokevirtual: BYTECODE_RUN(fast_invokevirtual); break;
+        case Bytecodes::_fast_invokestatic: BYTECODE_RUN(fast_invokestatic); break;
+        case Bytecodes::_fast_invokeinterface: BYTECODE_RUN(fast_invokeinterface); break;
+        case Bytecodes::_fast_invokenative: BYTECODE_RUN(fast_invokenative); break;
+        case Bytecodes::_fast_new: BYTECODE_RUN(fast_new); break;
+        case Bytecodes::_fast_anewarray: BYTECODE_RUN(fast_anewarray); break;
+        case Bytecodes::_fast_checkcast: BYTECODE_RUN(fast_checkcast); break;
+        case Bytecodes::_fast_instanceof: BYTECODE_RUN(fast_instanceof); break;
+        case Bytecodes::_fast_invokevirtual_final: BYTECODE_RUN(fast_invokevirtual_final); break;
+        case Bytecodes::_fast_invokespecial: BYTECODE_RUN(fast_invokespecial); break;
+        case Bytecodes::_fast_igetfield_1: BYTECODE_RUN(fast_igetfield_1); break;
+        case Bytecodes::_fast_agetfield_1: BYTECODE_RUN(fast_agetfield_1); break;
 #if !ENABLE_CPU_VARIANT
-        case Bytecodes::_aload_0_fast_igetfield_1: bc_impl_aload_0_fast_igetfield_1(); break;
-        case Bytecodes::_aload_0_fast_igetfield_4: bc_impl_aload_0_fast_igetfield_4(); break;
-        case Bytecodes::_aload_0_fast_igetfield_8: bc_impl_aload_0_fast_igetfield_8(); break;
-        case Bytecodes::_aload_0_fast_agetfield_1: bc_impl_aload_0_fast_agetfield_1(); break;
-        case Bytecodes::_aload_0_fast_agetfield_4: bc_impl_aload_0_fast_agetfield_4(); break;
-        case Bytecodes::_aload_0_fast_agetfield_8: bc_impl_aload_0_fast_agetfield_8(); break;
-        case Bytecodes::_init_static_array: bc_impl_init_static_array(); break;
+        case Bytecodes::_aload_0_fast_igetfield_1: BYTECODE_RUN(aload_0_fast_igetfield_1); break;
+        case Bytecodes::_aload_0_fast_igetfield_4: BYTECODE_RUN(aload_0_fast_igetfield_4); break;
+        case Bytecodes::_aload_0_fast_igetfield_8: BYTECODE_RUN(aload_0_fast_igetfield_8); break;
+        case Bytecodes::_aload_0_fast_agetfield_1: BYTECODE_RUN(aload_0_fast_agetfield_1); break;
+        case Bytecodes::_aload_0_fast_agetfield_4: BYTECODE_RUN(aload_0_fast_agetfield_4); break;
+        case Bytecodes::_aload_0_fast_agetfield_8: BYTECODE_RUN(aload_0_fast_agetfield_8); break;
+        case Bytecodes::_init_static_array: BYTECODE_RUN(init_static_array); break;
 #elif ENABLE_ARM11_JAZELLE_DLOAD_BUG_WORKAROUND
-        case Bytecodes::_lload_safe: bc_impl_lload_safe(); break;
-        case Bytecodes::_lstore_safe: bc_impl_lstore_safe(); break;
-        case Bytecodes::_dload_safe: bc_impl_dload_safe(); break;
-        case Bytecodes::_dstore_safe: bc_impl_dstore_safe(); break;
+        case Bytecodes::_lload_safe: BYTECODE_RUN(lload_safe); break;
+        case Bytecodes::_lstore_safe: BYTECODE_RUN(lstore_safe); break;
+        case Bytecodes::_dload_safe: BYTECODE_RUN(dload_safe); break;
+        case Bytecodes::_dstore_safe: BYTECODE_RUN(dstore_safe); break;
 #endif
-        case Bytecodes::_pop_and_npe_if_null: bc_impl_pop_and_npe_if_null(); break;
-        case Bytecodes::_fast_init_1_putstatic: bc_impl_fast_init_1_putstatic(); break;
-        case Bytecodes::_fast_init_2_putstatic: bc_impl_fast_init_2_putstatic(); break;
-        case Bytecodes::_fast_init_a_putstatic: bc_impl_fast_init_a_putstatic(); break;
-        case Bytecodes::_fast_init_1_getstatic: bc_impl_fast_init_1_getstatic(); break;
-        case Bytecodes::_fast_init_2_getstatic: bc_impl_fast_init_2_getstatic(); break;
-        case Bytecodes::_fast_init_invokestatic: bc_impl_fast_init_invokestatic(); break;
-        case Bytecodes::_fast_init_new: bc_impl_fast_init_new(); break;
-        default: interpreter_dispatch_table[*g_jpc](); break;
+        case Bytecodes::_pop_and_npe_if_null: BYTECODE_RUN(pop_and_npe_if_null); break;
+        case Bytecodes::_fast_init_1_putstatic: BYTECODE_RUN(fast_init_1_putstatic); break;
+        case Bytecodes::_fast_init_2_putstatic: BYTECODE_RUN(fast_init_2_putstatic); break;
+        case Bytecodes::_fast_init_a_putstatic: BYTECODE_RUN(fast_init_a_putstatic); break;
+        case Bytecodes::_fast_init_1_getstatic: BYTECODE_RUN(fast_init_1_getstatic); break;
+        case Bytecodes::_fast_init_2_getstatic: BYTECODE_RUN(fast_init_2_getstatic); break;
+        case Bytecodes::_fast_init_invokestatic: BYTECODE_RUN(fast_init_invokestatic); break;
+        case Bytecodes::_fast_init_new: BYTECODE_RUN(fast_init_new); break;
+        default:
+          VM_CALL(interpreter_dispatch_table[*::g_jpc]());
+          break;
       }
     }
 #else
@@ -5079,3 +5394,88 @@ unsigned char _dummy2[PROTECTED_PAGE_SIZE];
 #endif // ENABLE_PAGE_PROTECTION
 
 } // extern "C"
+
+// This file is compiled together with others into one translation unit
+// (MergedSrc): do not let its short macro names leak into them.
+#undef arg_address_from_sp
+#undef int_from_sp
+#undef address_from_sp
+#undef POP
+#undef OBJ_POP
+#undef FLOAT_POP
+#undef LONG_POP
+#undef DOUBLE_POP
+#undef PUSH
+#undef OBJ_PUSH
+#undef FLOAT_PUSH
+#undef LONG_PUSH
+#undef DOUBLE_PUSH
+#undef PEEK
+#undef OBJ_PEEK
+#undef check_timer_tick
+#undef type_check
+#undef array_load
+#undef array_store
+#undef iload
+#undef lload
+#undef fload
+#undef aload
+#undef dload
+#undef istore
+#undef lstore
+#undef fstore
+#undef astore
+#undef dstore
+#undef branch
+#undef get_static_field_offset
+#undef fast_ldc
+#undef IS_P
+#undef IS_P_
+#undef IS_A
+#undef IS_A_
+#undef IS_INLINE
+#undef IS_FN
+#undef VM_CALL
+#undef VM_SYNC_OUT
+#undef VM_SYNC_IN
+#undef VM_POISON
+#undef BYTECODE_STEP_CHECK
+#undef BYTECODE_SLOW_HEAD
+#undef BYTECODE_FAST
+#undef BYTECODE_CHAIN
+#undef BYTECODE_RUN
+#undef invoke_method
+#undef return_method
+#undef fast_invoke_internal
+#undef BYTECODE_IMPL
+#undef BYTECODE_IMPL_NO_STEP
+#undef BYTECODE_IMPL_END
+#undef START_BYTECODES
+#undef END_BYTECODES
+#undef INTERP_POISON_ADDR
+#undef IS_A_FP
+#undef IS_A_LC
+#undef IS_A_PC
+#undef IS_A_SP
+#undef IS_DECLARE_LOCALS
+#undef IS_D_FP
+#undef IS_D_LC
+#undef IS_D_PC
+#undef IS_D_SP
+#undef IS_GLOBALS
+#undef IS_G_FP
+#undef IS_G_LC
+#undef IS_G_PC
+#undef IS_G_SP
+#undef IS_I_FP
+#undef IS_I_LC
+#undef IS_I_PC
+#undef IS_I_SP
+#undef IS_O_FP
+#undef IS_O_LC
+#undef IS_O_PC
+#undef IS_O_SP
+#undef IS_P_FP
+#undef IS_P_LC
+#undef IS_P_PC
+#undef IS_P_SP

@@ -49,6 +49,9 @@ jobs:
           gcc -m32 -O2 -c tools/cloud-test/fmodshim.c -o "$RUNNER_TEMP/fmodshim.o"
           echo "HOST_LINK_EXTRA=$RUNNER_TEMP/fmodshim.o" >> "$GITHUB_ENV"
 
+      - name: Check the interpreter's local-state rule
+        run: python3 tools/check-interp-state.py
+
       - name: Build
         run: ./build.sh web
 
