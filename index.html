@@ -185,7 +185,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=6f07ea0-1794307631';
+const V = '?v=4060bdf-1794311147';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -922,6 +922,7 @@ $('start').addEventListener('click', async () => {
         ENV.PHONEME_PC_KEYS = pcKeysSpec(game);
         if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
+        if (params.get('jit')) ENV.PHONEME_JIT = params.get('jit');
         // ?env=NAME=value (repeatable): any runtime setting, for testing
         for (const e of params.getAll('env')) {
           const i = e.indexOf('=');
