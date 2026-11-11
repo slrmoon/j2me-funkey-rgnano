@@ -897,7 +897,7 @@ $('start').addEventListener('click', async () => {
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
-        PHONEME_HEAP_MB: params.get('heap') || (game.doja ? '32' : '16'),
+        PHONEME_HEAP_MB: params.get('heap') || '64',
         PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x320'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',

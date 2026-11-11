@@ -13,7 +13,7 @@
 #                   DoJa: the .jam DrawArea)
 #   MODE=fit        fit | integer | crop | fill | center | zoom | auto
 #   FILTER=sharp    sharp | smooth | pixel
-#   FPS=30          frame limit;  HEAP_MB=16 (DoJa 32)
+#   FPS=30          frame limit;  HEAP_MB=64
 #   MUTE=1          no sound;     VMARGS="-int" extra VM options
 #   SP=save.sp      DoJa scratchpad file (default: game.sp by the jar)
 #   VERIFY=1        check bytecode like a phone does (off by default:
@@ -198,7 +198,7 @@ fi
 
 cd "$HERE/bin"
 if [ -n "$APP_CLASS" ]; then
-    export PHONEME_HEAP_MB=${HEAP_MB:-32}
+    export PHONEME_HEAP_MB=${HEAP_MB:-64}
     area=$(jam_value "$JAM" DrawArea)
     case "$area" in
         [0-9]*x[0-9]*) ;;
@@ -240,7 +240,7 @@ if [ -n "$APP_CLASS" ]; then
     exit $?
 fi
 
-export PHONEME_HEAP_MB=${HEAP_MB:-16}
+export PHONEME_HEAP_MB=${HEAP_MB:-64}
 # a common phone screen (the runtime's own default, 240x240, is the FunKey's)
 if [ -z "${LCD:-}" ]; then
     DEFAULT_LCD=240x320

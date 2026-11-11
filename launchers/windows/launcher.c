@@ -1347,7 +1347,7 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
             free(u);
             free(w);
         }
-        snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 32); env_set("PHONEME_HEAP_MB", s);
+        snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 64); env_set("PHONEME_HEAP_MB", s);
         desc_value(jt, "DrawArea", '=', area, sizeof(area));
         if (!(area[0] >= '0' && area[0] <= '9' && strchr(area, 'x'))) strcpy(area, "240x240");
         if (!st.lcd[0]) { env_set("PHONEME_LCD_SIZE", area); env_set("PHONEME_SOURCE_SIZE", area); }
@@ -1424,7 +1424,7 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
         char *desc = NULL, main_class[512] = "", name[512];
         int own_jad = 0;
 
-        snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 16); env_set("PHONEME_HEAP_MB", s);
+        snprintf(s, sizeof(s), "%d", st.heap > 0 ? st.heap : 64); env_set("PHONEME_HEAP_MB", s);
         /* a common phone screen (the runtime's own default, 240x240, is the
          * FunKey's) */
         if (!st.lcd[0]) { env_set("PHONEME_LCD_SIZE", "240x320"); env_set("PHONEME_SOURCE_SIZE", "240x320"); }
@@ -2197,7 +2197,7 @@ static INT_PTR CALLBACK main_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
             for (i = 0; i < N(Fpss); i++) combo_add(d, IDC_FPS, Fpss[i].label);
             for (i = 0; i < N(Heaps); i++) {
                 wchar_t t[64];
-                if (Heaps[i] == 0) wcscpy(t, L"Default (16 MB, i-appli 32)");
+                if (Heaps[i] == 0) wcscpy(t, L"Default (64 MB)");
                 else _snwprintf(t, 64, L"%d MB", Heaps[i]);
                 combo_add(d, IDC_HEAP, t);
             }

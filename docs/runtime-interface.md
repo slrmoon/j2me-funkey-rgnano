@@ -84,7 +84,7 @@ screen), so launchers show a message only for the other codes.
 
 | Variable | Meaning |
 |---|---|
-| `PHONEME_HEAP_MB` | Java heap in MB, 1–256 (launchers: 16, i-appli 32) |
+| `PHONEME_HEAP_MB` | Java heap in MB, 1–256 (Windows, Linux, web: 64; FunKey: 16, i-appli 32) |
 | `PHONEME_HEAP_KB` | Java heap in KB (wins over `PHONEME_HEAP_MB`) |
 
 ### Screen
