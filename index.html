@@ -189,7 +189,7 @@
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=afee6ac-1794420131';
+const V = '?v=ade30ea-1794420825';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
@@ -897,7 +897,7 @@ $('start').addEventListener('click', async () => {
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
-        PHONEME_HEAP_MB: params.get('heap') || (game.doja ? '32' : '16'),
+        PHONEME_HEAP_MB: params.get('heap') || '64',
         PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x320'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
