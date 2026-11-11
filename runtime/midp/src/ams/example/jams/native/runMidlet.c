@@ -47,6 +47,13 @@
 /** Maximum number of command line arguments. */
 #define RUNMIDLET_MAX_ARGS 32
 
+/*
+ * Largest heap PHONEME_HEAP_MB / PHONEME_HEAP_KB may ask for. A value over
+ * the limit used to fall back to the 16 MB default without a word, so the
+ * launchers' 48 and 64 MB settings gave a smaller heap than 32 MB.
+ */
+#define MIDP_HEAP_MAX_MB 256
+
 static int getMidpHeapRequirement() {
     char *heapKb = PhoneMEConfig("PHONEME_HEAP_KB");
     char *heapMb = PhoneMEConfig("PHONEME_HEAP_MB");
@@ -54,14 +61,14 @@ static int getMidpHeapRequirement() {
 
     if (heapKb != NULL && heapKb[0] != '\0') {
         value = atoi(heapKb);
-        if (value >= 1024 && value <= 32768) {
+        if (value >= 1024 && value <= MIDP_HEAP_MAX_MB * 1024) {
             return value * 1024;
         }
     }
 
     if (heapMb != NULL && heapMb[0] != '\0') {
         value = atoi(heapMb);
-        if (value >= 1 && value <= 32) {
+        if (value >= 1 && value <= MIDP_HEAP_MAX_MB) {
             return value * 1024 * 1024;
         }
     }
