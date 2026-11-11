@@ -13,6 +13,8 @@
 #               time (compiled code once ran on a foreign thread's frame)
 #   StackTest   deep recursion (stack growth), exceptions and finally
 #               through compiled frames
+#   BigFrameTest  methods with many locals, monitors in loops, code first
+#               run long after the method was compiled
 set -e
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 D=$ROOT/out/web/cldc/emscripten_c/dist
@@ -25,7 +27,7 @@ mkdir "$W/cls" "$W/pv"
 "$D/bin/preverify" -classpath "$D/lib/cldc_classes.zip" -d "$W/pv" "$W/cls"
 bad=0
 cd "$W/pv"
-for t in StreamTest LockTest StackTest; do
+for t in StreamTest LockTest StackTest BigFrameTest; do
     for cfg in "0 400" "1 400" "1 20" "1 1"; do
         set -- $cfg
         if PHONEME_JIT=$1 PHONEME_JIT_THRESHOLD=$2 timeout $((SECS * 4 + 20)) \

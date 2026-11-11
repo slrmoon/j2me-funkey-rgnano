@@ -109,6 +109,7 @@ static inline address method_execution_entry(address method) {
 #if ENABLE_WASM_JIT && WASM_JIT_PART == 2
 
 static void jit_exec_bytecode_entry();
+static void jit_stale_exit_entry();
 
 extern "C" {
   extern void os_emscripten_poll_ticks();
@@ -260,7 +261,7 @@ enum {
 enum { T_VOIDBLOCK = 0x40, VT_I32 = 0x7f, VT_I64 = 0x7e, VT_F32 = 0x7d,
        VT_F64 = 0x7c };
 /* imported functions */
-enum { F_METHOD_ENTRY, F_POLL_TICKS, F_EXEC_BYTECODE, F_IMPORTS,
+enum { F_METHOD_ENTRY, F_POLL_TICKS, F_EXEC_BYTECODE, F_STALE_EXIT, F_IMPORTS,
        F_ENTRY = F_IMPORTS, F_RUN };
 
 /* -------------------------------------------- reading the method's code */
@@ -732,7 +733,7 @@ struct Gen {
   int cur_block;
   // wasm locals of run(): 0 = param (block)
   enum { P_BLOCK = 0, L_JFP, L_JLOCALS, L_SBASE, L_CP, L_NEXT, L_XBCI,
-         L_XD, L_T0, L_T1, L_T2, L_T3, L_T4, L_T5, L_I64A, L_I64B, L_F32,
+         L_XD, L_XSTALE, L_T0, L_T1, L_T2, L_T3, L_T4, L_T5, L_I64A, L_I64B, L_F32,
          L_F64, L_FIRST };
   int L(int n) { return L_FIRST + n; }
   int S(int i) { return L_FIRST + M->max_locals + i; }
@@ -1561,6 +1562,9 @@ bool Gen::generate() {
         op(W_I32SUB); lset(S(d - 4));
       } else switch (o.kind) {
       case K_EXIT:
+        // not quickened yet (never executed): once it is, the method is
+        // worth compiling again - the exit tells (jit_stale_exit)
+        if (is_unquickened(o.code)) { i32(1); lset(L_XSTALE); }
         exit_now(bci, d);
         fallthrough = false;
         break;
@@ -1635,6 +1639,10 @@ bool Gen::generate() {
   global_addr(&g_jsp); lget(L_SBASE); lget(L_XD); i32(2); op(W_I32SHL);
   op(W_I32SUB); store32();
   global_addr(&g_jpc); method_base(); lget(L_XBCI); op(W_I32ADD); store32();
+  lget(L_XSTALE);
+  if_();
+    call(F_STALE_EXIT);
+  end();
   end();      // done
   global_addr(&nesting); global_addr(&nesting); load32(); i32(1);
   op(W_I32SUB); store32();
@@ -1754,6 +1762,7 @@ static int build_and_load(Method_* M, Gen& g) {
   imports[F_METHOD_ENTRY] = (int)(uintptr_t)&interpreter_method_entry;
   imports[F_POLL_TICKS] = (int)(uintptr_t)&os_emscripten_poll_ticks;
   imports[F_EXEC_BYTECODE] = (int)(uintptr_t)&jit_exec_bytecode_entry;
+  imports[F_STALE_EXIT] = (int)(uintptr_t)&jit_stale_exit_entry;
   return fk_jit_load(m.p, m.n, imports, F_IMPORTS);
 }
 
@@ -1823,9 +1832,19 @@ static bool compile(address method) {
   if (m().is_native() || m().is_abstract()) return false;
   int size = m().code_size();
   int max_locals = m().max_locals();
-  int max_stack = m().max_execution_stack_count();
+  // the expression stack (and the stack locks of monitorenter); not
+  // max_execution_stack_count(), which is this plus the locals: with that
+  // every method with more than 64 words of locals + stack - the big inner
+  // loops of software renderers - was silently left to the interpreter
+  int max_stack = m().max_stack();
   if (size <= 0 || size > MAX_CODE || max_locals > MAX_LOCALS ||
       max_stack > MAX_STACK) {
+    if (jit_trace) {
+      tty->print("jit: #%d not compiled ", this_attempt);
+      print_method_name(method);
+      tty->print_cr(" (%d bytes, %d locals, %d stack: too big)", size,
+                    max_locals, max_stack);
+    }
     return false;
   }
 
@@ -1984,11 +2003,24 @@ static void backedge(address method, int bci) {
   if (!enter_at(method, bci)) interpreted_loop(method);
 }
 
+/* Compiled code left at a bytecode that was not quickened when the method
+ * was compiled (global context, the frame is the method's). Without this
+ * a method whose loop passes such a bytecode exits there on every
+ * iteration for ever: the loop itself is entered in compiled code again,
+ * so interpreted_loop() never sees it. */
+static void stale_exit() {
+  interpreted_loop(*(address*)(g_jfp + JavaFrame::method_offset()));
+}
+
 }  // namespace wasm_jit
 
 /* the interpreter's handler for the bytecode at g_jpc (global context) */
 static void jit_exec_bytecode_entry() {
   interpreter_dispatch_table[*g_jpc]();
+}
+
+static void jit_stale_exit_entry() {
+  wasm_jit::stale_exit();
 }
 
 #endif // ENABLE_WASM_JIT
