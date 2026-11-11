@@ -880,7 +880,7 @@ $('keysRestart').addEventListener('click', () => { saveRms(); setTimeout(() => s
 
 // debug dialog: the JIT, the Java heap and the frame counter. The address
 // (?jit=, ?heap=, ?fps=) wins over what is kept here.
-const DEBUG_DEFAULTS = { jit: false, heap: 0, fps: false };
+const DEBUG_DEFAULTS = { jit: true, heap: 0, fps: false };
 const debugSet = () => Object.assign({}, DEBUG_DEFAULTS, store.get('phoneme-debug', null) || {});
 function debugShow() {
   const d = debugSet();
