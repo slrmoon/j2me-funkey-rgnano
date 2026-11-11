@@ -1698,10 +1698,31 @@ static int build_and_load(Method_* M, Gen& g) {
   {
     // entry(): build the frame as the interpreter would, then run block 0
     Buf e;
+    // local 0: the caller's frame
+    e.byte(W_I32CONST); e.sleb((int)(uintptr_t)&g_jfp);
+    e.byte(W_I32LOAD); e.uleb(2); e.uleb(0);
+    e.byte(W_LSET); e.uleb(0);
     e.byte(W_CALL); e.uleb(F_METHOD_ENTRY);
-    // the frame is for this method if g_jpc is at its first bytecode
-    // (stack overflow and synchronization are handled there; if anything
-    // unusual happened the interpreter just goes on)
+    // Go on only in the frame that call has just built: a new frame on top
+    // of the caller's, at its first bytecode. interpreter_method_entry()
+    // may come back without one - the stack had to grow (and moved), an
+    // exception was thrown, or the method is synchronized and its lock is
+    // taken: then ANOTHER thread is current now. Looking only at "g_jpc is
+    // at the first bytecode of the current frame's method" let this
+    // method's code run on the frame of a thread that was about to start
+    // (or stood at a loop at bci 0): wrong code on a foreign frame.
+    e.byte(W_I32CONST); e.sleb((int)(uintptr_t)&g_jfp);
+    e.byte(W_I32LOAD); e.uleb(2); e.uleb(0);
+    e.byte(W_I32CONST); e.sleb(JavaFrame::caller_fp_offset());
+    e.byte(W_I32ADD);
+    e.byte(W_I32LOAD); e.uleb(2); e.uleb(0);
+    e.byte(W_LGET); e.uleb(0);
+    e.byte(W_I32EQ);
+    e.byte(W_I32CONST); e.sleb((int)(uintptr_t)&g_jfp);
+    e.byte(W_I32LOAD); e.uleb(2); e.uleb(0);
+    e.byte(W_LGET); e.uleb(0);
+    e.byte(W_I32NE);
+    e.byte(W_I32AND);
     e.byte(W_I32CONST); e.sleb((int)(uintptr_t)&g_jpc);
     e.byte(W_I32LOAD); e.uleb(2); e.uleb(0);
     e.byte(W_I32CONST); e.sleb((int)(uintptr_t)&g_jfp);
@@ -1712,12 +1733,13 @@ static int build_and_load(Method_* M, Gen& g) {
     e.byte(W_I32CONST); e.sleb(Method::base_offset());
     e.byte(W_I32ADD);
     e.byte(W_I32EQ);
+    e.byte(W_I32AND);
     e.byte(W_IF); e.byte(T_VOIDBLOCK);
     e.byte(W_I32CONST); e.sleb(0);
     e.byte(W_CALL); e.uleb(F_RUN);
     e.byte(W_END);
-    int none_c[1], none_t[1];
-    func_body(code, e, none_c, none_t, 0);
+    int one_c[1] = { 1 }, one_t[1] = { VT_I32 };
+    func_body(code, e, one_c, one_t, 1);
   }
   {
     int counts[5] = { Gen::L_I64A - 1 /* i32 */, 2 /* i64 */, 1, 1,
