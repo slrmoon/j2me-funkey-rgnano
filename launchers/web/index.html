@@ -162,11 +162,42 @@
       <button id="keysClose" class="primary">Done</button></span>
   </div>
 </dialog>
+<dialog id="dbgDlg">
+  <h2>Debug</h2>
+  <p>Kept in this browser, for every game. Changes apply when the game
+    starts (or restarts).</p>
+  <div class="row">
+    <label><input id="dbgJit" type="checkbox"> JIT compiler (experimental:
+      faster, but some games freeze or crash with it)</label>
+  </div>
+  <div class="row">
+    <label>Java memory (heap):
+      <select id="dbgHeap">
+        <option value="0">Default (64 MB)</option>
+        <option value="16">16 MB</option>
+        <option value="32">32 MB</option>
+        <option value="48">48 MB</option>
+        <option value="64">64 MB</option>
+        <option value="96">96 MB</option>
+        <option value="128">128 MB</option>
+        <option value="256">256 MB</option>
+      </select></label>
+  </div>
+  <div class="row">
+    <label><input id="dbgFps" type="checkbox"> Frame counter</label>
+  </div>
+  <div class="row">
+    <button id="dbgReset">Defaults</button>
+    <span><button id="dbgRestart" hidden>Restart the game</button>
+      <button id="dbgClose" class="primary">Done</button></span>
+  </div>
+</dialog>
 <div id="bar">
   <div id="status">No game loaded</div>
   <button id="export" disabled title="the game's saves as a .zip (the files of rms/&lt;game&gt; on the FunKey, Linux and Windows)">Export saves</button>
   <label class="file small" id="importLabel" aria-disabled="true">Import saves<input id="import" type="file" multiple disabled></label>
   <button id="keysBtn">Keys</button>
+  <button id="dbgBtn" title="JIT compiler, Java memory, frame counter">Debug</button>
   <button id="padBtn" aria-pressed="false">Buttons</button>
   <button id="full" disabled>Full screen</button>
   <button id="reload">Another game</button>
@@ -571,7 +602,9 @@ $('import').addEventListener('change', async e => {
 async function startAgain(auto) {
   await stash(Object.assign({}, game, { auto }));
   leaving = true;
-  location.href = location.pathname + '?restart=1' + (params.get('fps') ? '&fps=1' : '');
+  const keep = ['fps', 'jit', 'heap', 'limit'].filter(k => params.get(k))
+    .map(k => '&' + k + '=' + encodeURIComponent(params.get(k))).join('');
+  location.href = location.pathname + '?restart=1' + keep;
 }
 if (params.get('restart')) {
   unstash().then(async g => {
@@ -845,6 +878,38 @@ $('keysClose').addEventListener('click', () => { capturing = null; $('keysDlg').
 $('keysDlg').addEventListener('cancel', e => { if (capturing) e.preventDefault(); });
 $('keysRestart').addEventListener('click', () => { saveRms(); setTimeout(() => startAgain(true), 300); });
 
+// debug dialog: the JIT, the Java heap and the frame counter. The address
+// (?jit=, ?heap=, ?fps=) wins over what is kept here.
+const DEBUG_DEFAULTS = { jit: false, heap: 0, fps: false };
+const debugSet = () => Object.assign({}, DEBUG_DEFAULTS, store.get('phoneme-debug', null) || {});
+function debugShow() {
+  const d = debugSet();
+  $('dbgJit').checked = !!d.jit;
+  $('dbgHeap').value = String(d.heap || 0);
+  if ($('dbgHeap').selectedIndex < 0) $('dbgHeap').value = '0';
+  $('dbgFps').checked = !!d.fps;
+}
+function debugKeep() {
+  store.set('phoneme-debug', { jit: $('dbgJit').checked, heap: +$('dbgHeap').value || 0,
+                               fps: $('dbgFps').checked });
+  $('dbgRestart').hidden = !running;
+}
+for (const id of ['dbgJit', 'dbgHeap', 'dbgFps']) $(id).addEventListener('change', debugKeep);
+$('dbgBtn').addEventListener('click', () => {
+  debugShow();
+  $('dbgRestart').hidden = true;
+  $('dbgDlg').showModal();
+});
+$('dbgReset').addEventListener('click', () => {
+  store.set('phoneme-debug', DEBUG_DEFAULTS);
+  debugShow();
+  $('dbgRestart').hidden = !running;
+});
+$('dbgClose').addEventListener('click', () => { $('dbgDlg').close(); $('canvas').focus(); });
+$('dbgRestart').addEventListener('click', () => { saveRms(); setTimeout(() => startAgain(true), 300); });
+window.addEventListener('keydown', e => { if ($('dbgDlg').open) e.stopImmediatePropagation(); }, true);
+window.addEventListener('keyup', e => { if ($('dbgDlg').open) e.stopImmediatePropagation(); }, true);
+
 // the command line of an i-appli (as launchers/linux/run.sh)
 function dojaArgs(spPath) {
   const d = game.doja;
@@ -897,7 +962,7 @@ $('start').addEventListener('click', async () => {
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
-        PHONEME_HEAP_MB: params.get('heap') || '64',
+        PHONEME_HEAP_MB: params.get('heap') || String(debugSet().heap || 64),
         PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x320'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
@@ -927,9 +992,10 @@ $('start').addEventListener('click', async () => {
           }
         }
         ENV.PHONEME_PC_KEYS = pcKeysSpec(game);
-        if (params.get('fps')) ENV.PHONEME_SHOW_FPS = '1';
+        if (params.get('fps') || debugSet().fps) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
-        if (params.get('jit')) ENV.PHONEME_JIT = params.get('jit');
+        // the JIT is off unless asked for: some games freeze or crash with it
+        ENV.PHONEME_JIT = params.get('jit') || (debugSet().jit ? '1' : '0');
         // ?env=NAME=value (repeatable): any runtime setting, for testing
         for (const e of params.getAll('env')) {
           const i = e.indexOf('=');
