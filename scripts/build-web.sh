@@ -24,7 +24,9 @@ BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR:-$ROOT/out/web}
 MAKE_JOBS=${MAKE_JOBS:-$(nproc 2>/dev/null || echo 1)}
 HOST_LINK_EXTRA=${HOST_LINK_EXTRA:-}
 EMSCRIPTEN_LINK_FLAGS=${EMSCRIPTEN_LINK_FLAGS:--O2 -sNODERAWFS=1 -sASYNCIFY -sALLOW_TABLE_GROWTH=1}
-EMSCRIPTEN_MIDP_LINK_FLAGS=${EMSCRIPTEN_MIDP_LINK_FLAGS:--O2 -sASYNCIFY -sALLOW_TABLE_GROWTH=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=FS,ENV,addRunDependency,removeRunDependency -lidbfs.js}
+# --profiling-funcs keeps the function names in runMidlet.wasm (+4% size, same
+# code): a crash in the browser console then names the VM functions
+EMSCRIPTEN_MIDP_LINK_FLAGS=${EMSCRIPTEN_MIDP_LINK_FLAGS:--O2 --profiling-funcs -sASYNCIFY -sALLOW_TABLE_GROWTH=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sFORCE_FILESYSTEM=1 -sEXPORTED_RUNTIME_METHODS=FS,ENV,addRunDependency,removeRunDependency -lidbfs.js}
 
 if [ -z "${JDK_DIR:-}" ]; then
     for d in "$ROOT"/zulu7*-linux_x64; do
