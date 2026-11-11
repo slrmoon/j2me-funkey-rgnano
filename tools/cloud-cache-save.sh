@@ -1,7 +1,7 @@
 #!/bin/bash
 # Saves the compiler cache (ccache's directory) to the private repository
 # CACHE_REPO (default slrmoon/j2me-build-cache) as build-cache.tar.zst.NN
-# (parts under GitHub's 100 MB file limit), in one commit that replaces the
+# (45 MB parts: GitHub warns from 50 MB, refuses 100 MB), in one commit that replaces the
 # previous one (force push: the repository keeps no history of caches).
 # Run it after building in a container set up by tools/cloud-setup.sh.
 
@@ -22,7 +22,7 @@ if [ ! -d "$R/.git" ]; then
           git -C "$R" remote add origin "https://github.com/$CACHE_REPO"; }
 fi
 rm -f "$R"/build-cache.tar.zst.*
-tar -C "$TC" -cf - ccache | zstd -q -T0 -10 | split -b 90M -d - "$R/build-cache.tar.zst."
+tar -C "$TC" -cf - ccache | zstd -q -T0 -10 | split -b 45M -d - "$R/build-cache.tar.zst."
 du -ch "$R"/build-cache.tar.zst.* | tail -n 1
 
 cat > "$R/README.md" <<TXT
