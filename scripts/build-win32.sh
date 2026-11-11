@@ -111,8 +111,21 @@ fi
 # MIDP's makefiles call plain gcc/g++/ar from GNU_TOOLS_DIR/bin
 TOOLCHAIN_DIR=$BUILD_OUTPUT_DIR/toolchain
 mkdir -p "$TOOLCHAIN_DIR/bin"
+# (with a compiler cache in front of PATH - tools/cloud-setup.sh - the links
+# must reach the real MinGW tools, and gcc/g++ go through ccache by script)
+real_tool() {
+    PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "${CCACHE_WRAPPERS:-/nonexistent}" |
+           paste -sd:) command -v "$1"
+}
 for t in gcc g++ cpp ar as ld ranlib strip objcopy objdump nm windres; do
-    ln -sf "$(command -v "${MINGW_PREFIX}$t")" "$TOOLCHAIN_DIR/bin/$t"
+    rm -f "$TOOLCHAIN_DIR/bin/$t"
+    if [ -n "${CCACHE_WRAPPERS:-}" ] && { [ "$t" = gcc ] || [ "$t" = g++ ]; }; then
+        printf '#!/bin/sh\nexec ccache %s "$@"\n' "$(real_tool "${MINGW_PREFIX}$t")" \
+            > "$TOOLCHAIN_DIR/bin/$t"
+        chmod +x "$TOOLCHAIN_DIR/bin/$t"
+    else
+        ln -sf "$(real_tool "${MINGW_PREFIX}$t")" "$TOOLCHAIN_DIR/bin/$t"
+    fi
 done
 
 # ---- PCSL ---------------------------------------------------------------

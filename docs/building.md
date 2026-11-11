@@ -30,6 +30,23 @@ as `HOST_LINK_EXTRA`. `scripts/publish-web.sh` puts `out/web/site` on the
 `gh-pages` branch; `.github/workflows/web.yml` does both on every push to
 `main` that touches the runtime or the page.
 
+In a fresh cloud container (Ubuntu 24.04, e.g. a Claude session) one
+script sets up every target and restores the compiler cache:
+
+```bash
+tools/cloud-setup.sh          # packages, JDK 7, FunKey SDK, ccache wrappers, cache
+. /root/tc/env.sh             # JDK_DIR, FUNKEY_SDK_DIR, fmod shim, ccache
+./build.sh web                # or funkey / linux / windows [package]
+tools/cloud-cache-save.sh     # after building: upload the updated cache
+```
+
+The cache (ccache's directory) is kept in the private repository
+`slrmoon/j2me-build-cache` (a Claude session needs it attached), one commit
+replaced on each save. Make rebuilds everything in a fresh clone, but every compiler call
+(gcc, MinGW, the FunKey compiler, emcc) is answered from the cache when its
+input did not change. The browser build in GitHub Actions keeps its own
+ccache with `actions/cache`.
+
 Main FunKey artifacts:
 
 - `out/funkey/midp/bin/arm/runMidlet`

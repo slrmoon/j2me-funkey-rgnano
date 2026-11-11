@@ -36,7 +36,28 @@ jobs:
       - name: Host packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends emscripten gcc-multilib g++-multilib
+          sudo apt-get install -y --no-install-recommends emscripten gcc-multilib g++-multilib ccache
+
+      # compiler results of earlier runs: a run compiles only what changed
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-web-${{ github.sha }}
+          restore-keys: ccache-web-
+
+      - name: Use the compiler cache
+        run: |
+          mkdir -p "$RUNNER_TEMP/ccache-bin"
+          for c in gcc g++ cc c++; do ln -sf "$(command -v ccache)" "$RUNNER_TEMP/ccache-bin/$c"; done
+          echo "$RUNNER_TEMP/ccache-bin" >> "$GITHUB_PATH"
+          {
+            echo "CCACHE_DIR=$RUNNER_TEMP/ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=1G"
+            echo "EM_COMPILER_WRAPPER=ccache"
+          } >> "$GITHUB_ENV"
 
       - name: JDK 7 (the runtime's Java is built with it)
         run: |
@@ -53,7 +74,10 @@ jobs:
         run: python3 tools/check-interp-state.py
 
       - name: Build
-        run: ./build.sh web
+        run: |
+          ccache -z
+          ./build.sh web
+          ccache -s
 
       - name: Publish to gh-pages
         run: |

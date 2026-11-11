@@ -33,6 +33,11 @@ echo "Sourcing FunKey SDK environment: $ENV_SETUP"
 # shellcheck disable=SC1090
 . "$ENV_SETUP"
 echo "FunKey SDK environment loaded."
+# the SDK put its own bin first in PATH: keep a compiler cache wrapper in
+# front of it (tools/cloud-setup.sh)
+if [ -n "${CCACHE_WRAPPERS:-}" ]; then
+    export PATH=$CCACHE_WRAPPERS:$PATH
+fi
 
 if [ -z "${CC:-}" ] || [ -z "${CXX:-}" ]; then
     echo "FunKey SDK environment did not set CC/CXX." >&2
