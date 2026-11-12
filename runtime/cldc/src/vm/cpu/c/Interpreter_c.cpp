@@ -2452,8 +2452,30 @@ enum {
    * done here, as interpreter_method_entry() and return_internal() would
    * do it; everything else goes to them through VM_CALL.
    */
+  // entries of intrinsics that this port does not implement: each is
+  // interpreter_method_entry() under another name, the method runs its
+  // Java code (String.equals, charAt, startsWith, Vector.elementAt...)
+  static inline bool is_java_intrinsic_entry(address entry) {
+    return entry == (address)&native_string_init_entry ||
+           entry == (address)&native_string_equals_entry ||
+           entry == (address)&native_string_compareTo_entry ||
+           entry == (address)&native_string_charAt_entry ||
+           entry == (address)&native_string_indexof0_string_entry ||
+           entry == (address)&native_string_indexof_string_entry ||
+           entry == (address)&native_string_startsWith_entry ||
+           entry == (address)&native_string_startsWith0_entry ||
+           entry == (address)&native_string_endsWith_entry ||
+           entry == (address)&native_string_substringI_entry ||
+           entry == (address)&native_string_substringII_entry ||
+           entry == (address)&native_vector_elementAt_entry ||
+           entry == (address)&native_vector_addElement_entry ||
+           entry == (address)&native_stringbuffer_append_entry ||
+           entry == (address)&native_integer_toString_entry;
+  }
+
   static inline bool is_plain_interpreter_entry(address entry) {
-    return entry == (address)&interpreter_fast_method_entry_0 ||
+    return is_java_intrinsic_entry(entry) ||
+           entry == (address)&interpreter_fast_method_entry_0 ||
            entry == (address)&interpreter_fast_method_entry_1 ||
            entry == (address)&interpreter_fast_method_entry_2 ||
            entry == (address)&interpreter_fast_method_entry_3 ||

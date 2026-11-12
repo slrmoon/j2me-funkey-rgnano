@@ -79,18 +79,32 @@ static int  jit_skip = -1;          // debugging: do not compile the n-th
 static int  first_fn = 0x7fffffff;  // lowest table index of compiled code
 
 struct Counter { address method; int count; int attempts; };
-enum { COUNTERS = 2048 };
-static Counter counters[COUNTERS];
+enum { COUNTERS = 8192, COUNTER_WAYS = 4 };
+static Counter counters[COUNTERS + COUNTER_WAYS];
+
+/* The counter of a method. Four places per method: with one, two hot
+ * methods that fell on the same place reset each other's count for ever
+ * and neither was compiled (String.equals called from a loop that calls
+ * something else, for one). A newcomer takes a free place or that of the
+ * coldest method. */
+static Counter* counter_miss(address method, Counter* c) {
+  Counter* victim = c;
+  for (int i = 0; i < COUNTER_WAYS; i++) {
+    if (c[i].method == method) return &c[i];
+    if (c[i].method == NULL) { victim = &c[i]; break; }
+    if ((unsigned)c[i].count < (unsigned)victim->count) victim = &c[i];
+  }
+  victim->method = method;
+  victim->count = 0;
+  victim->attempts = 0;
+  return victim;
+}
 
 static inline Counter* counter_for(address method) {
-  unsigned h = ((unsigned)(uintptr_t)method * 2654435761u) >> 21;
+  unsigned h = ((unsigned)(uintptr_t)method * 2654435761u) >> 19;
   Counter* c = &counters[h & (COUNTERS - 1)];
-  if (c->method != method) {
-    c->method = method;
-    c->count = 0;
-    c->attempts = 0;
-  }
-  return c;
+  if (c->method == method) return c;
+  return counter_miss(method, c);
 }
 
 static void read_settings();
@@ -1581,7 +1595,18 @@ bool Gen::generate() {
         addr(L_T1, JavaFrame::return_address_offset()); load32();
         i32((int)EntryFrame::FakeReturnAddress); op(W_I32EQ);
         op(W_I32OR);
-        exit_if(bci, d);
+        // then the interpreter's own return does it (unlocks, leaves the
+        // entry frame) and this code is done: a compiled caller sees its
+        // call complete and goes on. Leaving at the return bytecode
+        // instead threw every caller of a synchronized method out of
+        // compiled code (ByteArrayInputStream.read() under a
+        // DataInputStream, for one).
+        if_();
+          write_back(d);
+          set_globals(bci, d);
+          call(F_EXEC_BYTECODE);
+          br(rel_done());
+        end();
         // the caller's state
         frame_load(JavaFrame::locals_pointer_offset());
         i32(JavaFrame::arg_offset_from_sp(-1)); op(W_I32SUB); lset(L_T0);
@@ -1781,6 +1806,7 @@ EM_JS(int, fk_jit_setting, (const char* name), {
 /* print the statistics when the page / process goes away */
 EM_JS(void, fk_jit_report_at_exit, (const int* stats), {
   var report = function() {
+    _fk_jit_left_report();
     var p = stats >> 2;
     err('jit: runs ' + HEAP32[p] + ', exits ' + HEAP32[p + 1] +
         ' (last at bci ' + HEAP32[p + 5] + '), calls ' + HEAP32[p + 2] +
@@ -1822,7 +1848,17 @@ static void print_method_name(address method) {
 static bool compile(address method) {
   Method::Raw m = (OopDesc*)method;
   address plain_entry = m().execution_entry();
-  if (!is_plain_interpreter_entry(plain_entry)) return false;
+  if (!is_plain_interpreter_entry(plain_entry)) {
+    if (jit_trace) {
+      static int told = 0;
+      if (told++ < 60) {
+        tty->print("jit: no plain entry (%d) ", (int)(uintptr_t)plain_entry);
+        print_method_name(method);
+        tty->print_cr(" native %d", (int)m().is_native());
+      }
+    }
+    return false;
+  }
   if (!jit_rom && !ObjectHeap::contains((OopDesc*)method)) return false;
   // modules are never freed (a method compiled again leaves its old one)
   if (compiled_count >= INFOS - INFOS / 8) return false;
@@ -2015,8 +2051,89 @@ static void stale_exit() {
 }  // namespace wasm_jit
 
 /* the interpreter's handler for the bytecode at g_jpc (global context) */
+/* PHONEME_JIT_TRACE: which calls leave compiled code (bytecode + where the
+ * interpreter stands afterwards), the top ones are printed with the stats */
+struct LeftCall { char name[72]; unsigned count; };
+enum { LEFT_CALLS = 512 };
+static LeftCall left_calls[LEFT_CALLS];
+
+static void left_call_note(int opcode, address fp0, address pc0) {
+  char name[72];
+  int n = 0;
+  n += jvm_sprintf(name + n, "%d ", opcode);
+  if (g_jfp == fp0) {
+    n += jvm_sprintf(name + n, g_jpc == pc0 ? "(same bytecode again)"
+                                            : "(same frame, other bci)");
+  } else if (*(address*)(g_jfp + JavaFrame::caller_fp_offset()) == fp0) {
+    Method::Raw m = *(OopDesc**)(g_jfp + JavaFrame::method_offset());
+    JavaClass::Raw k = m().holder();
+    Symbol::Raw cn = k.is_null() ? (OopDesc*)NULL : k().name();
+    Symbol::Raw mn = m().name();
+    if (cn.not_null()) {
+      for (int i = 0; i < cn().length() && n < 40; i++) name[n++] = cn().base_address()[i];
+    }
+    name[n++] = '.';
+    if (mn.not_null()) {
+      for (int i = 0; i < mn().length() && n < 62; i++) name[n++] = mn().base_address()[i];
+    }
+    name[n] = 0;
+    n += jvm_sprintf(name + n, m().is_native() ? " N" : " %d", (int)m().code_size());
+  } else {
+    n += jvm_sprintf(name + n, "(other frame: return, exception, thread)");
+  }
+  unsigned h = 0;
+  for (int i = 0; name[i]; i++) h = h * 31 + (unsigned char)name[i];
+  for (int i = 0; i < LEFT_CALLS; i++) {
+    LeftCall* c = &left_calls[(h + i) % LEFT_CALLS];
+    if (c->count == 0) { jvm_strcpy(c->name, name); c->count = 1; return; }
+    if (jvm_strcmp(c->name, name) == 0) { c->count++; return; }
+  }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void fk_jit_left_report() {
+  for (int round = 0; round < 24; round++) {
+    LeftCall* best = NULL;
+    for (int i = 0; i < LEFT_CALLS; i++) {
+      LeftCall* c = &left_calls[i];
+      if (c->count != 0 && (c->count & 0x80000000u) == 0 &&
+          (best == NULL || c->count > best->count)) best = c;
+    }
+    if (best == NULL) break;
+    tty->print_cr("jit: left %u  %s", best->count, best->name);
+    best->count |= 0x80000000u;
+  }
+  for (int i = 0; i < LEFT_CALLS; i++) left_calls[i].count &= 0x7fffffffu;
+}
+
+/* An invoke of a native method that is not a quick one leaves a frame with
+ * the method's own two bytecodes (invokenative, return) for the
+ * interpreter. Run them here, so that the compiled caller sees its call
+ * complete and goes on; anything else - the native blocked the thread,
+ * threw, another thread is current - stops at once and the caller leaves,
+ * as before. */
+static inline void finish_native_call(address fp0) {
+  address fp1 = g_jfp;
+  if (fp1 == fp0 || *(address*)(fp1 + JavaFrame::caller_fp_offset()) != fp0) return;
+  address method = *(address*)(fp1 + JavaFrame::method_offset());
+  if ((*(jushort*)(method + Method::access_flags_offset()) & JVM_ACC_NATIVE) == 0) return;
+  for (int i = 0; i < 2 && g_jfp == fp1; i++) {
+    interpreter_dispatch_table[*g_jpc]();
+  }
+}
+
 static void jit_exec_bytecode_entry() {
+  address fp0 = g_jfp;
+  if (wasm_jit::jit_trace) {
+    address pc0 = g_jpc;
+    int opcode = *g_jpc;
+    int len = Bytecodes::length_for((Bytecodes::Code)opcode);
+    interpreter_dispatch_table[opcode]();
+    finish_native_call(fp0);
+    if (g_jfp != fp0 || g_jpc != pc0 + len) left_call_note(opcode, fp0, pc0);
+    return;
+  }
   interpreter_dispatch_table[*g_jpc]();
+  finish_native_call(fp0);
 }
 
 static void jit_stale_exit_entry() {
