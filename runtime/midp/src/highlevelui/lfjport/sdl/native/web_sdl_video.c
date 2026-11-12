@@ -203,6 +203,43 @@ EM_ASYNC_JS(void, fk_web_yield_js, (void), {
 /* (an EM_ASYNC_JS function is an import of this file only) */
 void fk_web_yield(void) { fk_web_yield_js(); }
 
+/* Wait up to ms, but come back as soon as an input event is queued for
+ * SDL (key, pointer, the page's on-screen pad): a game waiting between its
+ * frames saw a key only at the end of a 16 ms step before, up to 17 ms
+ * after it was pressed. */
+EM_ASYNC_JS(void, fk_web_wait_js, (int ms), {
+    if (typeof SDL !== 'undefined' && SDL.events && !SDL.events.fkWakes) {
+        var q = SDL.events, push = q.push;
+        q.fkWakes = true;
+        q.push = function () {
+            var r = push.apply(this, arguments);
+            var w = Module.fkWake;
+            if (w) { Module.fkWake = null; w(); }
+            return r;
+        };
+    }
+    await new Promise(function (resolve) {
+        var done = false;
+        var finish = function () {
+            if (done) return;
+            done = true;
+            Module.fkWake = null;
+            clearTimeout(t);
+            resolve();
+        };
+        var t = setTimeout(finish, ms);
+        if (typeof SDL !== 'undefined' && SDL.events && SDL.events.length) { finish(); return; }
+        /* after the event that queued it has been dispatched in full */
+        Module.fkWake = function () {
+            var c = new MessageChannel();
+            c.port1.onmessage = finish;
+            c.port2.postMessage(0);
+        };
+    });
+});
+
+void fk_web_wait(int ms) { fk_web_wait_js(ms); }
+
 EM_JS(void, fk_web_present, (const void *rgba, int w, int h), {
     var c = Module['canvas'];
     if (!c) return;
