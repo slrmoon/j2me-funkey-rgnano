@@ -240,14 +240,66 @@ EM_ASYNC_JS(void, fk_web_wait_js, (int ms), {
 
 void fk_web_wait(int ms) { fk_web_wait_js(ms); }
 
+/*
+ * Frame pacing. A browser shows a canvas at the next display refresh. A game
+ * that draws every 33 or 50 ms (2 or 3 refreshes at 60 Hz) with a
+ * millisecond of jitter, and whose frames happen to come just before a
+ * refresh, has some frames shown one refresh early or late: uneven motion
+ * at a steady frame rate. A window on the desktop has no such grid.
+ * So when a game draws slower than the display, each frame is put on the
+ * canvas from requestAnimationFrame, moved later by up to one refresh so
+ * that frames come, on average, half a refresh before one: a millisecond
+ * or two of jitter then no longer changes the refresh a frame lands on.
+ * Faster games, hidden pages, ?pace=0 and "Frame pacing" off in the page's
+ * Debug dialog (Module.fkNoPace): drawn at once, as before.
+ */
 EM_JS(void, fk_web_present, (const void *rgba, int w, int h), {
-    var c = Module['canvas'];
-    if (!c) return;
-    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; Module.fkCtx = null; }
-    if (!Module.fkCtx) Module.fkCtx = c.getContext('2d');
-    var img = new ImageData(new Uint8ClampedArray(HEAPU8.buffer, rgba, w * h * 4), w, h);
-    Module.fkCtx.putImageData(img, 0, 0);
+    var P = Module.fkPace;
+    if (!P) {
+        P = Module.fkPace = { v: 1000 / 60, last: 0, gaps: [], c: 0, s: 0, frame: 0, prev: 0,
+                              pending: null, on: !Module.fkNoPace && !/[?&]pace=0/.test(location.search) };
+        var draw = function (f) {
+            var c = Module['canvas'];
+            if (!c) return;
+            if (c.width !== f.w || c.height !== f.h) { c.width = f.w; c.height = f.h; Module.fkCtx = null; }
+            if (!Module.fkCtx) Module.fkCtx = c.getContext('2d');
+            Module.fkCtx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, f.p, f.w * f.h * 4), f.w, f.h), 0, 0);
+        };
+        P.draw = draw;
+        var tick = function () {
+            var t = performance.now();
+            if (P.last) {
+                var g = t - P.last;
+                if (g > 4 && g < 60) { P.gaps.push(g); if (P.gaps.length > 40) P.gaps.shift(); }
+                if (P.gaps.length >= 10 && (P.gaps.length & 7) === 0) {
+                    var q = P.gaps.slice().sort(function (a, b) { return a - b; });
+                    P.v = q[q.length >> 1];
+                }
+            }
+            P.last = t;
+            if (P.pending && t >= P.pending.due) { var f = P.pending; P.pending = null; draw(f); }
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+    var now = performance.now(), f = { p: rgba, w: w, h: h, due: now };
     Module.fkFrames = (Module.fkFrames || 0) + 1;
+    if (P.prev) P.frame = P.frame ? P.frame * 0.9 + (now - P.prev) * 0.1 : now - P.prev;
+    P.prev = now;
+    /* the SDL_Flip buffer is the same for every frame: a frame still
+     * waiting is replaced by the newer one, never drawn after it */
+    if (!P.on || !P.last || now - P.last > 100 || P.frame < P.v * 1.5) {
+        P.pending = null;
+        P.draw(f);
+        return;
+    }
+    /* phase of this frame between refreshes, averaged over recent frames */
+    var a = 2 * Math.PI * (((now - P.last) % P.v) / P.v);
+    P.c = P.c * 0.9 + Math.cos(a); P.s = P.s * 0.9 + Math.sin(a);
+    var mean = Math.atan2(P.s, P.c) / (2 * Math.PI);
+    var shift = ((0.5 - mean) % 1 + 1) % 1;
+    f.due = now + shift * P.v - 1;
+    P.pending = f;
 });
 
 int SDL_Flip(SDL_Surface *s) {

@@ -185,6 +185,8 @@
   </div>
   <div class="row">
     <label><input id="dbgFps" type="checkbox"> Frame counter</label>
+    <label><input id="dbgPace" type="checkbox"> Frame pacing (even motion; up to one
+      display refresh later)</label>
   </div>
   <p>Logs go to the browser console (F12) and to "Log" under the game.
     The game's own menu (Esc &gt; Debug) has the same switches.</p>
@@ -667,6 +669,7 @@ function applyRuntimeCfg(gameCfg) {
     if (d[name]) ENV[env] = '1'; else delete ENV[env];
   }
   ENV.PHONEME_JIT = d.jit ? '1' : '0';
+  Module.fkNoPace = d.pace === false;
   const g = readCfg(gameCfg);
   if (g.DISPLAY_MODE) ENV.PHONEME_SCALE_MODE = g.DISPLAY_MODE;
   if (g.FILTER) ENV.PHONEME_SCALE_FILTER = g.FILTER;
@@ -891,7 +894,7 @@ $('keysRestart').addEventListener('click', () => { saveRms(); setTimeout(() => s
 // ?fps= in the address win over what is kept here, and the dialog shows
 // them; a change made in the dialog takes them out of the address, or the
 // dialog would seem to do nothing on a page opened with such a link.
-const DEBUG_DEFAULTS = { jit: true, heap: 0, fps: false, keys: false, events: false,
+const DEBUG_DEFAULTS = { jit: true, heap: 0, pace: true, fps: false, keys: false, events: false,
   display: false, audio: false, launch: false, jitlog: false };
 // the switches the runtime menu shares through /cfg/debug.cfg: key there,
 // name here, checkbox, runtime variable
@@ -915,10 +918,11 @@ function debugShow() {
     heap.add(new Option(d.heap + ' MB', String(d.heap)));
   }
   heap.value = String(d.heap || 0);
+  $('dbgPace').checked = d.pace !== false;
   for (const [, name, id] of DEBUG_SWITCHES) $(id).checked = !!d[name];
 }
 function debugKeep() {
-  const d = { heap: +$('dbgHeap').value || 0 };
+  const d = { heap: +$('dbgHeap').value || 0, pace: $('dbgPace').checked };
   for (const [, name, id] of DEBUG_SWITCHES) d[name] = $(id).checked;
   store.set('phoneme-debug', d);
   let cut = false;
@@ -951,7 +955,9 @@ function debugWriteCfg() {
   try { FS.writeFile(DEBUG_CFG, text); store.set('phoneme-debug-cfg', text); } catch (e) {}
 }
 function debugSyncCfg() { debugImportCfg(); debugWriteCfg(); }
-for (const id of ['dbgHeap', ...DEBUG_SWITCHES.map(x => x[2])]) $(id).addEventListener('change', debugKeep);
+for (const id of ['dbgHeap', 'dbgPace', ...DEBUG_SWITCHES.map(x => x[2])]) $(id).addEventListener('change', debugKeep);
+// frame pacing is the page's own: it takes effect at once
+$('dbgPace').addEventListener('change', () => { if (window.Module) { Module.fkNoPace = !$('dbgPace').checked; if (Module.fkPace) Module.fkPace.on = !Module.fkNoPace; } });
 $('dbgBtn').addEventListener('click', () => {
   debugShow();
   $('dbgRestart').hidden = true;
@@ -959,6 +965,8 @@ $('dbgBtn').addEventListener('click', () => {
 });
 $('dbgReset').addEventListener('click', () => {
   $('dbgHeap').value = '0';
+  $('dbgPace').checked = true;
+  if (window.Module) { Module.fkNoPace = false; if (Module.fkPace) Module.fkPace.on = true; }
   for (const [, name, id] of DEBUG_SWITCHES) $(id).checked = DEBUG_DEFAULTS[name];
   debugKeep();
 });
