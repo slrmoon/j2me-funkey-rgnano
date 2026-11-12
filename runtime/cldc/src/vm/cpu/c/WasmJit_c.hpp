@@ -1808,7 +1808,7 @@ EM_JS(void, fk_jit_report_at_exit, (const int* stats), {
   var report = function() {
     _fk_jit_left_report();
     var p = stats >> 2;
-    err('jit: runs ' + HEAP32[p] + ', exits ' + HEAP32[p + 1] +
+    err('jit: totals (every 5 s, not a compilation): runs ' + HEAP32[p] + ', exits ' + HEAP32[p + 1] +
         ' (last at bci ' + HEAP32[p + 5] + '), calls ' + HEAP32[p + 2] +
         ' on / ' + HEAP32[p + 3] + ' left (' + HEAP32[p + 6] +
         ' direct), returns ' + HEAP32[p + 4]);
@@ -2091,6 +2091,16 @@ static void left_call_note(int opcode, address fp0, address pc0) {
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void fk_jit_left_report() {
+  {
+    // a line only when methods were compiled since the last report: a log
+    // that goes quiet here means the game is warmed up
+    static int reported = 0;
+    if (wasm_jit::compiled_count != reported) {
+      tty->print_cr("jit: %d methods compiled so far (%d since the last totals)",
+                    wasm_jit::compiled_count, wasm_jit::compiled_count - reported);
+      reported = wasm_jit::compiled_count;
+    }
+  }
   for (int round = 0; round < 24; round++) {
     LeftCall* best = NULL;
     for (int i = 0; i < LEFT_CALLS; i++) {
