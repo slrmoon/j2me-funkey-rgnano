@@ -1282,14 +1282,26 @@ extern "C" void os_emscripten_force_tick() {
   if (ticker_running) rt_tick_event();
 }
 
+static double emscripten_next_tick;
+
 extern "C" void os_emscripten_poll_ticks() {
-  static double next_tick;
   double now;
   if (!ticker_running) return;
   now = emscripten_get_now();
-  if (now >= next_tick) {
-    next_tick = now + TickInterval;
+  if (now >= emscripten_next_tick) {
+    emscripten_next_tick = now + TickInterval;
     rt_tick_event();
   }
+}
+
+// After the VM has waited (every Java thread asleep): the next tick comes
+// a full TickInterval of running later, as on Linux, where ticks count
+// the CPU time of the process (ITIMER_VIRTUAL). Counted from the wall
+// clock, a tick fell due at once after every wait and switched threads at
+// a random point of the woken thread's work. A game that moves its world
+// in one thread and draws it in another (Gravity Defied) then showed some
+// frames twice and the next one two steps on: uneven motion.
+extern "C" void os_emscripten_idle_end() {
+  emscripten_next_tick = emscripten_get_now() + TickInterval;
 }
 #endif

@@ -239,6 +239,7 @@ void midp_check_events(JVMSPI_BlockedThreadInfo *blocked_threads,
 unsigned int fk_web_frame_wait_ms(void);   /* lfjport_st_export.c */
 void fk_web_yield(void);                    /* web_sdl_video.c */
 double emscripten_get_now(void);
+void os_emscripten_idle_end(void);         /* OS_linux.cpp */
 
 int midpRunVm(JvmPathChar* classPath,
               char* mainClass,
@@ -258,6 +259,7 @@ int midpRunVm(JvmPathChar* classPath,
             if (timeout >= 0 && (jlong)frame > timeout) timeout = frame;
             blocked = SNI_GetBlockedThreads(&count);
             midp_check_events(blocked, count, timeout);
+            if (timeout != 0) os_emscripten_idle_end();
             /* a busy game never waits: still let the page draw and take
              * keys about every frame */
             if (emscripten_get_now() - lastYield > 15.0) {
