@@ -417,7 +417,7 @@ typedef struct {
     char vmargs[256];
     int mute, volume;
     char synth[16];
-    int log, log_keys, log_events, log_display, show_fps, log_audio;
+    int log, log_keys, log_events, log_display, show_fps, log_audio, log_launch, profile;
     int zoom;
     char pan[24];
     char phone[16];
@@ -484,6 +484,8 @@ static void settings_apply(Settings *s, const char *key, const char *v) {
     else if (!strcasecmp(key, "LOG_DISPLAY")) s->log_display = atoi(v) != 0;
     else if (!strcasecmp(key, "SHOW_FPS")) s->show_fps = atoi(v) != 0;
     else if (!strcasecmp(key, "LOG_AUDIO")) s->log_audio = atoi(v) != 0;
+    else if (!strcasecmp(key, "LOG_LAUNCH")) s->log_launch = atoi(v) != 0;
+    else if (!strcasecmp(key, "PROFILE")) s->profile = atoi(v) != 0;
     else if (!strcasecmp(key, "ZOOM")) s->zoom = atoi(v);
     else if (!strcasecmp(key, "PAN")) copy_str(s->pan, sizeof(s->pan), v);
     else if (!strcasecmp(key, "PHONE")) copy_str(s->phone, sizeof(s->phone), v);
@@ -543,12 +545,12 @@ static int settings_save_file(const Settings *s, const char *path, int global) {
         "FPS = %s\nHEAP_MB = %d\nJIT = %d\nVERIFY = %d\nVMARGS = %s\n"
         "MUTE = %d\nVOLUME = %d\nSYNTH = %s\n"
         "LOG = %d\nLOG_KEYS = %d\nLOG_EVENTS = %d\nLOG_DISPLAY = %d\n"
-        "SHOW_FPS = %d\nLOG_AUDIO = %d\nZOOM = %d\nPAN = %s\n"
+        "SHOW_FPS = %d\nLOG_AUDIO = %d\nLOG_LAUNCH = %d\nPROFILE = %d\nZOOM = %d\nPAN = %s\n"
         "PHONE = %s\nKEYS = %s\n",
         s->scale, s->fullscreen, s->mode, s->filter, s->lcd, s->fps, s->heap, s->jit,
         s->verify, s->vmargs, s->mute, s->volume, s->synth, s->log,
-        s->log_keys, s->log_events, s->log_display, s->show_fps, s->log_audio, s->zoom,
-        s->pan, s->phone, keys);
+        s->log_keys, s->log_events, s->log_display, s->show_fps, s->log_audio, s->log_launch,
+        s->profile, s->zoom, s->pan, s->phone, keys);
     if (global && n > 0 && n < (int)sizeof(buf))
         n += snprintf(buf + n, sizeof(buf) - (size_t)n, "GAMES_DIR = %s\n", s->games_dir);
     if (n <= 0 || n >= (int)sizeof(buf)) return 0;
@@ -612,9 +614,10 @@ static void debug_cfg_write(const Settings *s) {
     char path[BUF], buf[256];
     snprintf(path, sizeof(path), "%s/debug.cfg", g_data);
     snprintf(buf, sizeof(buf),
-             "LOG=%d\nKEYS=%d\nEVENTS=%d\nDISPLAY=%d\nAUDIO=%d\nFPS=%d\n",
+             "LOG=%d\nKEYS=%d\nEVENTS=%d\nDISPLAY=%d\nAUDIO=%d\nLAUNCH=%d\n"
+             "PROFILE=%d\nJIT=%d\nFPS=%d\n",
              s->log, s->log_keys, s->log_events, s->log_display, s->log_audio,
-             s->show_fps);
+             s->log_launch, s->profile, s->jit, s->show_fps);
     mkdirs(g_data);
     write_file(path, buf);
 }
@@ -653,6 +656,9 @@ static void absorb_runtime_cfg(Settings *s, const char *jar) {
     if (cfg_value(path, "DISPLAY", v, sizeof(v))) s->log_display = atoi(v) != 0;
     if (cfg_value(path, "AUDIO", v, sizeof(v))) s->log_audio = atoi(v) != 0;
     if (cfg_value(path, "FPS", v, sizeof(v))) s->show_fps = atoi(v) != 0;
+    if (cfg_value(path, "LAUNCH", v, sizeof(v))) s->log_launch = atoi(v) != 0;
+    if (cfg_value(path, "PROFILE", v, sizeof(v))) s->profile = atoi(v) != 0;
+    if (cfg_value(path, "JIT", v, sizeof(v))) s->jit = atoi(v) != 0;
 
     stem_of(jar, stem, sizeof(stem));
     if (!ascii_only(stem)) return;
@@ -788,12 +794,9 @@ static int run_game(const Settings *s, const char *jar) {
     if (s->heap > 0) env_int("HEAP_MB", s->heap);
     if (s->mute) setenv("MUTE", "1", 1); else unsetenv("MUTE");
     env_int("VERIFY", s->verify);
-    {
-        char args[300];
-        snprintf(args, sizeof(args), "%s%s%s", s->jit ? "" : "-UseCompiler",
-                 (!s->jit && s->vmargs[0]) ? " " : "", s->vmargs);
-        if (args[0]) setenv("VMARGS", args, 1); else unsetenv("VMARGS");
-    }
+    /* the JIT switch goes through debug.cfg (run.sh reads it at every
+     * start, so the runtime menu can change it too) */
+    if (s->vmargs[0]) setenv("VMARGS", s->vmargs, 1); else unsetenv("VMARGS");
     /* straight to the runtime: run.sh passes its environment on */
     setenv("PHONEME_FULLSCREEN", s->fullscreen ? "1" : "0", 1);
     env_int("PHONEME_SOUND_VOLUME", s->volume);
@@ -911,6 +914,9 @@ static Item ItemsLogs[] = {
     { "Log events", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
     { "Log display", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
     { "Log sound", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
+    { "Log launch settings", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
+    { "Profiler", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL,
+      "CPU use by function, to the log every 10 s" },
     { "Show FPS in the game", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
     { "Saves, logs and settings are kept in", IT_INFO, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL }
 };
@@ -940,7 +946,9 @@ static void items_bind(void) {
     ItemsLogs[2].val = &g_set.log_events;
     ItemsLogs[3].val = &g_set.log_display;
     ItemsLogs[4].val = &g_set.log_audio;
-    ItemsLogs[5].val = &g_set.show_fps;
+    ItemsLogs[5].val = &g_set.log_launch;
+    ItemsLogs[6].val = &g_set.profile;
+    ItemsLogs[7].val = &g_set.show_fps;
 }
 
 static Item *page_items(int page, int *n) {

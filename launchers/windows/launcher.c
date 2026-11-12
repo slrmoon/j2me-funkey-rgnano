@@ -654,7 +654,7 @@ typedef struct {
     char vmargs[256];
     int mute, volume;
     char synth[16];
-    int log, console, log_keys, log_events, log_display, show_fps, log_audio;
+    int log, console, log_keys, log_events, log_display, show_fps, log_audio, log_launch;
     int zoom;             /* "zoom" mode: 250..4000 (1/1000), 0 = default */
     char pan[24];         /* zoom/crop: visible part "x,y", "" = centre */
     char phone[16];
@@ -729,6 +729,7 @@ static void settings_apply(Settings *s, const char *key, const char *v) {
     else if (!_stricmp(key, "LOG_DISPLAY")) s->log_display = atoi(v) != 0;
     else if (!_stricmp(key, "SHOW_FPS")) s->show_fps = atoi(v) != 0;
     else if (!_stricmp(key, "LOG_AUDIO")) s->log_audio = atoi(v) != 0;
+    else if (!_stricmp(key, "LOG_LAUNCH")) s->log_launch = atoi(v) != 0;
     else if (!_stricmp(key, "ZOOM")) s->zoom = atoi(v);
     else if (!_stricmp(key, "PAN")) copy_str(s->pan, sizeof(s->pan), v);
     else if (!_stricmp(key, "PHONE")) copy_str(s->phone, sizeof(s->phone), v);
@@ -817,12 +818,12 @@ static int settings_save_file(const Settings *s, const wchar_t *path, int global
         "FPS = %s\r\nHEAP_MB = %d\r\nJIT = %d\r\nVERIFY = %d\r\nVMARGS = %s\r\n"
         "MUTE = %d\r\nVOLUME = %d\r\nSYNTH = %s\r\n"
         "LOG = %d\r\nCONSOLE = %d\r\nLOG_KEYS = %d\r\nLOG_EVENTS = %d\r\nLOG_DISPLAY = %d\r\n"
-        "SHOW_FPS = %d\r\nLOG_AUDIO = %d\r\nZOOM = %d\r\nPAN = %s\r\n"
+        "SHOW_FPS = %d\r\nLOG_AUDIO = %d\r\nLOG_LAUNCH = %d\r\nZOOM = %d\r\nPAN = %s\r\n"
         "PHONE = %s\r\nKEYS = %s\r\n",
         s->scale, s->fullscreen, s->mode, s->filter, s->lcd, s->fps, s->heap, s->jit,
         s->verify, s->vmargs, s->mute, s->volume, s->synth, s->log, s->console,
-        s->log_keys, s->log_events, s->log_display, s->show_fps, s->log_audio, s->zoom,
-        s->pan, s->phone, keys);
+        s->log_keys, s->log_events, s->log_display, s->show_fps, s->log_audio, s->log_launch,
+        s->zoom, s->pan, s->phone, keys);
     if (global && n > 0 && n < (int)sizeof(buf)) {
         char *gd = utf8_of(s->games_dir);
         n += snprintf(buf + n, sizeof(buf) - (size_t)n, "GAMES_DIR = %s\r\n", gd);
@@ -994,7 +995,7 @@ typedef struct {
     DWORD code;
     wchar_t *cmd, *env;
     wchar_t bindir[WBUF], logpath[WBUF];
-    int console, log_on;
+    int console, log_on, log_launch;
     /* the runtime menu's files, read back when the game ends */
     wchar_t jar[WBUF], restart[WBUF], game_cfg[WBUF];
     Settings used;
@@ -1017,6 +1018,24 @@ static int start_vm(RunInfo *ri) {
         logh = CreateFileW(ri->log_on ? ri->logpath : L"NUL", GENERIC_WRITE,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
                            ri->log_on ? CREATE_ALWAYS : OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (logh != INVALID_HANDLE_VALUE && ri->log_on && ri->log_launch) {
+            /* launch log: what the game is started with */
+            const wchar_t *e;
+            char *u = utf8_of(ri->cmd);
+            DWORD wr;
+            WriteFile(logh, "launcher: ", 10, &wr, NULL);
+            WriteFile(logh, u, (DWORD)strlen(u), &wr, NULL);
+            WriteFile(logh, "\r\n", 2, &wr, NULL);
+            free(u);
+            for (e = ri->env; e != NULL && *e; e += wcslen(e) + 1) {
+                if (wcsncmp(e, L"PHONEME_", 8) != 0 && wcsncmp(e, L"MIDP_", 5) != 0) continue;
+                u = utf8_of(e);
+                WriteFile(logh, "launcher: ", 10, &wr, NULL);
+                WriteFile(logh, u, (DWORD)strlen(u), &wr, NULL);
+                WriteFile(logh, "\r\n", 2, &wr, NULL);
+                free(u);
+            }
+        }
         if (logh != INVALID_HANDLE_VALUE) {
             si.dwFlags = STARTF_USESTDHANDLES;
             si.hStdInput = NULL;
@@ -1068,7 +1087,8 @@ static void show_log_tail(HWND owner, const wchar_t *log, DWORD code) {
 
 static const struct { const char *rt; const char *ini; } DebugKeys[] = {
     { "LOG", "LOG" }, { "KEYS", "LOG_KEYS" }, { "EVENTS", "LOG_EVENTS" },
-    { "DISPLAY", "LOG_DISPLAY" }, { "AUDIO", "LOG_AUDIO" }, { "FPS", "SHOW_FPS" }
+    { "DISPLAY", "LOG_DISPLAY" }, { "AUDIO", "LOG_AUDIO" }, { "LAUNCH", "LOG_LAUNCH" },
+    { "JIT", "JIT" }, { "FPS", "SHOW_FPS" }
 };
 
 static int *debug_field(Settings *s, int i) {
@@ -1078,6 +1098,8 @@ static int *debug_field(Settings *s, int i) {
     case 2: return &s->log_events;
     case 3: return &s->log_display;
     case 4: return &s->log_audio;
+    case 5: return &s->log_launch;
+    case 6: return &s->jit;
     default: return &s->show_fps;
     }
 }
@@ -1091,8 +1113,8 @@ static void debug_cfg_write(const Settings *st) {
     Settings t = *st;
     for (i = 0; i < (int)(sizeof(DebugKeys) / sizeof(DebugKeys[0])); i++)
         n += snprintf(buf + n, sizeof(buf) - (size_t)n, "%s=%d\n", DebugKeys[i].rt, *debug_field(&t, i));
-    /* no launch log / profiler on Windows */
-    n += snprintf(buf + n, sizeof(buf) - (size_t)n, "LAUNCH=0\nPROFILE=0\n");
+    /* no profiler on Windows (it samples with POSIX timers) */
+    n += snprintf(buf + n, sizeof(buf) - (size_t)n, "PROFILE=0\n");
     debug_cfg_path(path);
     write_file(path, buf, (DWORD)n);
 }
@@ -1502,6 +1524,7 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     wcscpy(ri->logpath, logpath);
     ri->console = st.console;
     ri->log_on = st.log;
+    ri->log_launch = st.log_launch;
     if (ri->cmd == NULL || ri->env == NULL || !start_vm(ri)) {
         fail(L"Cannot start bin\\runMidlet.exe (error %lu).", (unsigned long)GetLastError());
         run_info_free(ri);
@@ -1636,6 +1659,7 @@ static void pages_load(void) {
     check(so, IDC_LOGDISPLAY, g_set.log_display);
     check(so, IDC_SHOWFPS, g_set.show_fps);
     check(so, IDC_LOGAUDIO, g_set.log_audio);
+    check(so, IDC_LOGLAUNCH, g_set.log_launch);
     g_loading = 0;
 }
 
@@ -1720,6 +1744,7 @@ static void pages_read(void) {
     g_set.log_display = checked(so, IDC_LOGDISPLAY);
     g_set.show_fps = checked(so, IDC_SHOWFPS);
     g_set.log_audio = checked(so, IDC_LOGAUDIO);
+    g_set.log_launch = checked(so, IDC_LOGLAUNCH);
     save_scope();
 }
 

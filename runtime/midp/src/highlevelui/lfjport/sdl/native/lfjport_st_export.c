@@ -482,10 +482,16 @@ static const struct {
     { "AUDIO",   "Audio log",   0, 0 },
     { "LAUNCH",  "Launch log",  0, 0 },
     { "PROFILE", "Profiler",    0, 0 },
+    /* the launcher starts the VM without its compiler when this is off */
+    { "JIT",     "JIT compiler", 1, 0 },
+#ifdef __EMSCRIPTEN__
+    { "JITLOG",  "JIT log",     0, 0 },
+#endif
     { "FPS",     "FPS counter", 0, 1 }
 };
 #define OVERLAY_DEBUG_COUNT ((int) (sizeof(OverlayDebugOptions) / sizeof(OverlayDebugOptions[0])))
 #define OVERLAY_DEBUG_FPS   (OVERLAY_DEBUG_COUNT - 1)
+#define OVERLAY_DEBUG_JIT   8
 #define OVERLAY_DEBUG_ROW_RESTART OVERLAY_DEBUG_COUNT
 
 static const char *OverlayDebugPath;
@@ -1481,25 +1487,25 @@ static void overlay_draw_debug(void) {
     int i;
     for (i = 0; i < OVERLAY_DEBUG_COUNT; i++) {
         const char *value = OverlayDebug[i] ? "On" : "Off";
-        if (i != 0 && i != OVERLAY_DEBUG_FPS && OverlayDebug[i] && !OverlayDebug[0]) {
+        if (i != 0 && i != OVERLAY_DEBUG_FPS && i != OVERLAY_DEBUG_JIT && OverlayDebug[i] && !OverlayDebug[0]) {
             value = "On (no log)";
         }
-        overlay_draw_row(48 + i * 13, OverlayDebugOptions[i].label, value, OverlayRow == i);
+        overlay_draw_row(46 + i * 11, OverlayDebugOptions[i].label, value, OverlayRow == i);
     }
-    overlay_draw_row(48 + OVERLAY_DEBUG_COUNT * 13,
+    overlay_draw_row(46 + OVERLAY_DEBUG_COUNT * 11,
                      overlay_can_restart() ? "Restart now" : "Exit now", "",
                      OverlayRow == OVERLAY_DEBUG_ROW_RESTART);
     if (OverlayDebugPath == NULL || OverlayDebugPath[0] == '\0') {
-        stringColor(Native_SDL_Screen, 18, 172, "Start the game from the", 0xffd060ff);
-        stringColor(Native_SDL_Screen, 18, 184, "launcher to save these", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 182, "Start the game from the", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 194, "launcher to save these", 0xffd060ff);
     } else if (overlay_debug_needs_restart()) {
-        stringColor(Native_SDL_Screen, 18, 172, "Restart the game to", 0xffd060ff);
-        stringColor(Native_SDL_Screen, 18, 184, "apply the log settings", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 182, "Restart the game to", 0xffd060ff);
+        stringColor(Native_SDL_Screen, 18, 194, "apply these settings", 0xffd060ff);
     } else if (OverlayRow == OVERLAY_DEBUG_FPS) {
-        stringColor(Native_SDL_Screen, 18, 172, "Shown right away", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 182, "Shown right away", 0x9aaab0ff);
     } else if (OverlayRow < OVERLAY_DEBUG_COUNT) {
-        stringColor(Native_SDL_Screen, 18, 172, "Read logs in launcher:", 0x9aaab0ff);
-        stringColor(Native_SDL_Screen, 18, 184, "Y > View log", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 182, "Read logs in launcher:", 0x9aaab0ff);
+        stringColor(Native_SDL_Screen, 18, 194, "Y > View log", 0x9aaab0ff);
     }
 }
 

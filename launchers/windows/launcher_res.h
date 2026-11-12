@@ -54,3 +54,4 @@
 #define IDC_OPENLOG      1410
 #define IDC_OPENLOGDIR   1411
 #define IDC_LOGAUDIO     1412
+#define IDC_LOGLAUNCH    1413

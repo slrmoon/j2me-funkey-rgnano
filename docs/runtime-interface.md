@@ -176,9 +176,15 @@ handheld binds `UP`, `DOWN`, `LEFT`, `RIGHT`, `A`, `B`, `X`, `Y`, `L1`,
 `R1`, `START`, `SELECT` (phone key codes).
 
 `PHONEME_DEBUG_CONFIG` — `KEY=0/1` lines: `LOG`, `KEYS`, `EVENTS`,
-`DISPLAY`, `AUDIO`, `LAUNCH`, `PROFILE`, `FPS`. The runtime menu
-("Debug") edits it; the launcher applies it at the next start (log file
-on/off, `PHONEME_KEY_DEBUG`, ...). Only `FPS` takes effect at once.
+`DISPLAY`, `AUDIO`, `LAUNCH`, `PROFILE`, `JIT`, `JITLOG` (browser build
+only), `FPS`. The runtime menu ("Debug") edits it; the launcher applies it
+at the next start: log file on/off, `PHONEME_KEY_DEBUG` and the other
+variables above, `LAUNCH` - the launcher writes what it starts the game
+with to the log, `JIT=0` - the VM is started without its compiler
+(`-UseCompiler`; `PHONEME_JIT=0` in the browser). Only `FPS` takes effect
+at once. Every launcher shows the same switches in its own settings; a
+switch a platform cannot do is left out there (no profiler on Windows and
+in the browser, no JIT log outside the browser).
 
 `PHONEME_RESTART_FLAG` — when the user picks "Restart" in the runtime
 menu, the runtime saves `PHONEME_CONFIG_PATH`, creates this file and

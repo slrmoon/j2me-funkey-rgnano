@@ -112,6 +112,7 @@ BEGIN
     AUTOCHECKBOX    "Log display / scaling", IDC_LOGDISPLAY, 12, 144, 100, 10
     AUTOCHECKBOX    "FPS counter in the game", IDC_SHOWFPS, 12, 158, 120, 10
     AUTOCHECKBOX    "Log audio", IDC_LOGAUDIO, 120, 116, 80, 10
+    AUTOCHECKBOX    "Log launch settings", IDC_LOGLAUNCH, 120, 130, 90, 10
     PUSHBUTTON      "Open the game's log", IDC_OPENLOG, 214, 114, 100, 14
     PUSHBUTTON      "Open the logs folder", IDC_OPENLOGDIR, 214, 132, 100, 14
     LTEXT           "In the game: Esc opens the runtime menu (default keys).", -1, 12, 174, 300, 9

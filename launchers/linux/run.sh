@@ -166,19 +166,30 @@ apply_runtime_cfg() {
         esac
     fi
     LOG_ON=$(cfg_value "$PHONEME_DEBUG_CONFIG" LOG)
+    LAUNCH_LOG=$(cfg_value "$PHONEME_DEBUG_CONFIG" LAUNCH)
+    JIT_ON=$(cfg_value "$PHONEME_DEBUG_CONFIG" JIT)
+}
+# launch log (Debug > Launch log): what the game is started with
+launch_log() {
+    [ "${LAUNCH_LOG:-0}" = 1 ] || return 0
+    echo "launcher: ./runMidlet $*"
+    env | grep -E '^(PHONEME|MIDP)_' | sort | sed 's/^/launcher: /'
 }
 run_vm() {
-    local rc
+    local rc nojit
     while :; do
         rm -f "$PHONEME_RESTART_FLAG"
         apply_runtime_cfg
+        # Debug > JIT compiler off: the VM runs on its interpreter
+        nojit=
+        [ "${JIT_ON:-1}" = 0 ] && nojit=-UseCompiler
         if [ "${LOG_ON:-1}" = 1 ]; then
             # the terminal and the log file
             mkdir -p "$DATA/logs"
             [ -f "$LOGFILE" ] && mv -f "$LOGFILE" "${LOGFILE%.log}.prev.log"
-            ./runMidlet "$@" > >(tee "$LOGFILE") 2>&1 && rc=0 || rc=$?
+            { launch_log $nojit "$@"; ./runMidlet $nojit "$@"; } > >(tee "$LOGFILE") 2>&1 && rc=0 || rc=$?
         else
-            ./runMidlet "$@" && rc=0 || rc=$?
+            ./runMidlet $nojit "$@" && rc=0 || rc=$?
         fi
         [ -f "$PHONEME_RESTART_FLAG" ] || break
     done

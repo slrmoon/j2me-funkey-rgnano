@@ -1871,11 +1871,13 @@ static const DebugOption debug_options[] = {
     { "AUDIO",   "AUDIO LOG",   "PHONEME_AUDIO_TRACE",   "Audio device rate,",   "channels and buffer",  0 },
     { "LAUNCH",  "LAUNCH LOG",  "PM_LAUNCH_TRACE",       "Settings the launcher","passes to the game",   0 },
     { "PROFILE", "PROFILER",    "PHONEME_PROFILE",       "CPU use by function,", "to the log every 10 s",0 },
+    { "JIT",     "JIT COMPILER", NULL,                   "Off: interpreter only,","slow; to find JIT bugs",1 },
     { "FPS",     "FPS COUNTER", "PHONEME_SHOW_FPS",      "Frame rate in the",    "top-left corner",      0 }
 };
 #define DEBUG_OPTION_COUNT ((int)(sizeof(debug_options) / sizeof(debug_options[0])))
 #define DEBUG_OPT_LOG 0
 #define DEBUG_OPT_FPS (DEBUG_OPTION_COUNT - 1)
+#define DEBUG_OPT_JIT (DEBUG_OPTION_COUNT - 2)
 #define DEBUG_ROW_VIEW  DEBUG_OPTION_COUNT
 #define DEBUG_ROW_CLEAR (DEBUG_OPTION_COUNT + 1)
 #define DEBUG_ROW_COUNT (DEBUG_OPTION_COUNT + 2)
@@ -2829,6 +2831,7 @@ static int launch_game_once(int idx) {
              * broken code (bad literal load, SIGSEGV); bigger i-appli
              * methods run in the interpreter */
             "=MaxMethodToCompile3000",
+            debug_values[DEBUG_OPT_JIT] ? "-UseVerifier" : "-UseCompiler",
             "-UseVerifier",
             prop_app,
             prop_param,
@@ -2851,6 +2854,7 @@ static int launch_game_once(int idx) {
             /* no bytecode verification: modded games often fail it
              * (ClassFormatError 154) but run, as on most emulators */
             "-UseVerifier",
+            debug_values[DEBUG_OPT_JIT] ? "-UseVerifier" : "-UseCompiler",
             "-classpathext",
             classpath,
             "internal",
@@ -2900,7 +2904,7 @@ static void draw_debug(void) {
     for (i = 0; i < DEBUG_ROW_COUNT; i++) {
         if (i < DEBUG_OPTION_COUNT) {
             const char *value = debug_values[i] ? "On" : "Off";
-            if (i != DEBUG_OPT_LOG && i != DEBUG_OPT_FPS &&
+            if (i != DEBUG_OPT_LOG && i != DEBUG_OPT_FPS && i != DEBUG_OPT_JIT &&
                 debug_values[i] && !debug_values[DEBUG_OPT_LOG]) {
                 value = "On (no log)";
             }
@@ -2917,7 +2921,7 @@ static void draw_debug(void) {
         h1 = debug_options[debug_sel].hint1;
         h2 = debug_options[debug_sel].hint2;
         if (debug_sel != DEBUG_OPT_LOG && debug_sel != DEBUG_OPT_FPS &&
-            !debug_values[DEBUG_OPT_LOG]) {
+            debug_sel != DEBUG_OPT_JIT && !debug_values[DEBUG_OPT_LOG]) {
             h2 = "needs LOG FILE on";
         }
     } else if (debug_sel == DEBUG_ROW_VIEW) {

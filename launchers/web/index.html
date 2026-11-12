@@ -186,6 +186,14 @@
   <div class="row">
     <label><input id="dbgFps" type="checkbox"> Frame counter</label>
   </div>
+  <p>Logs go to the browser console (F12) and to "Log" under the game.
+    The game's own menu (Esc &gt; Debug) has the same switches.</p>
+  <div class="row"><label><input id="dbgKeys" type="checkbox"> Log keys</label>
+    <label><input id="dbgEvents" type="checkbox"> Log events sent to the game</label></div>
+  <div class="row"><label><input id="dbgDisplay" type="checkbox"> Log display and scaling</label>
+    <label><input id="dbgAudio" type="checkbox"> Log sound (every player call)</label></div>
+  <div class="row"><label><input id="dbgLaunch" type="checkbox"> Log launch settings</label>
+    <label><input id="dbgJitlog" type="checkbox"> Log the JIT (compiled methods, statistics)</label></div>
   <div class="row">
     <button id="dbgReset">Defaults</button>
     <span><button id="dbgRestart" hidden>Restart the game</button>
@@ -197,7 +205,7 @@
   <button id="export" disabled title="the game's saves as a .zip (the files of rms/&lt;game&gt; on the FunKey, Linux and Windows)">Export saves</button>
   <label class="file small" id="importLabel" aria-disabled="true">Import saves<input id="import" type="file" multiple disabled></label>
   <button id="keysBtn">Keys</button>
-  <button id="dbgBtn" title="JIT compiler, Java memory, frame counter">Debug</button>
+  <button id="dbgBtn" title="JIT compiler, Java memory, frame counter, logs">Debug</button>
   <button id="padBtn" aria-pressed="false">Buttons</button>
   <button id="full" disabled>Full screen</button>
   <button id="reload">Another game</button>
@@ -652,12 +660,13 @@ function readCfg(path) {
 
 // the settings the runtime menu saved, as the FunKey launcher passes them
 function applyRuntimeCfg(gameCfg) {
-  const d = readCfg('/cfg/debug.cfg');
-  const debugEnv = { KEYS: 'PHONEME_KEY_DEBUG', EVENTS: 'PHONEME_EVENT_DEBUG',
-    DISPLAY: 'PHONEME_DISPLAY_DEBUG', AUDIO: 'PHONEME_AUDIO_TRACE', FPS: 'PHONEME_SHOW_FPS' };
-  for (const k in debugEnv) {
-    if (d[k] === '1') ENV[debugEnv[k]] = '1'; else delete ENV[debugEnv[k]];
+  debugSyncCfg();
+  const d = debugSet();
+  for (const [, name, , env] of DEBUG_SWITCHES) {
+    if (env === null) continue;
+    if (d[name]) ENV[env] = '1'; else delete ENV[env];
   }
+  ENV.PHONEME_JIT = d.jit ? '1' : '0';
   const g = readCfg(gameCfg);
   if (g.DISPLAY_MODE) ENV.PHONEME_SCALE_MODE = g.DISPLAY_MODE;
   if (g.FILTER) ENV.PHONEME_SCALE_FILTER = g.FILTER;
@@ -882,44 +891,75 @@ $('keysRestart').addEventListener('click', () => { saveRms(); setTimeout(() => s
 // ?fps= in the address win over what is kept here, and the dialog shows
 // them; a change made in the dialog takes them out of the address, or the
 // dialog would seem to do nothing on a page opened with such a link.
-const DEBUG_DEFAULTS = { jit: true, heap: 0, fps: false };
+const DEBUG_DEFAULTS = { jit: true, heap: 0, fps: false, keys: false, events: false,
+  display: false, audio: false, launch: false, jitlog: false };
+// the switches the runtime menu shares through /cfg/debug.cfg: key there,
+// name here, checkbox, runtime variable
+const DEBUG_SWITCHES = [
+  ['KEYS', 'keys', 'dbgKeys', 'PHONEME_KEY_DEBUG'], ['EVENTS', 'events', 'dbgEvents', 'PHONEME_EVENT_DEBUG'],
+  ['DISPLAY', 'display', 'dbgDisplay', 'PHONEME_DISPLAY_DEBUG'], ['AUDIO', 'audio', 'dbgAudio', 'PHONEME_AUDIO_TRACE'],
+  ['LAUNCH', 'launch', 'dbgLaunch', null], ['JITLOG', 'jitlog', 'dbgJitlog', 'PHONEME_JIT_TRACE'],
+  ['JIT', 'jit', 'dbgJit', null], ['FPS', 'fps', 'dbgFps', 'PHONEME_SHOW_FPS']];
+const debugStored = () => Object.assign({}, DEBUG_DEFAULTS, store.get('phoneme-debug', null) || {});
 function debugSet() {
-  const d = Object.assign({}, DEBUG_DEFAULTS, store.get('phoneme-debug', null) || {});
+  const d = debugStored();
   if (params.get('jit')) d.jit = params.get('jit') !== '0';
   if (+params.get('heap') > 0) d.heap = +params.get('heap');
   if (params.get('fps')) d.fps = params.get('fps') !== '0';
   return d;
 }
 function debugShow() {
+  if (running) debugImportCfg();
   const d = debugSet(), heap = $('dbgHeap');
-  $('dbgJit').checked = !!d.jit;
   if (d.heap && ![...heap.options].some(o => +o.value === d.heap)) {
     heap.add(new Option(d.heap + ' MB', String(d.heap)));
   }
   heap.value = String(d.heap || 0);
-  $('dbgFps').checked = !!d.fps;
+  for (const [, name, id] of DEBUG_SWITCHES) $(id).checked = !!d[name];
 }
 function debugKeep() {
-  store.set('phoneme-debug', { jit: $('dbgJit').checked, heap: +$('dbgHeap').value || 0,
-                               fps: $('dbgFps').checked });
+  const d = { heap: +$('dbgHeap').value || 0 };
+  for (const [, name, id] of DEBUG_SWITCHES) d[name] = $(id).checked;
+  store.set('phoneme-debug', d);
   let cut = false;
   for (const k of ['jit', 'heap', 'fps']) if (params.has(k)) { params.delete(k); cut = true; }
   if (cut) {
     const q = params.toString();
     history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
   }
+  if (running) debugWriteCfg();
   $('dbgRestart').hidden = !running;
 }
-for (const id of ['dbgJit', 'dbgHeap', 'dbgFps']) $(id).addEventListener('change', debugKeep);
+// The runtime menu (Esc > Debug) keeps the same switches in /cfg/debug.cfg.
+// What the menu changed since the page last wrote the file goes into the
+// page's settings (at every start and when the dialog opens); the file is
+// written from them at every start and at every change in the dialog.
+const DEBUG_CFG = '/cfg/debug.cfg';
+function debugImportCfg() {
+  let text = '';
+  try { text = FS.readFile(DEBUG_CFG, { encoding: 'utf8' }); } catch (e) { return; }
+  if (!text || text === store.get('phoneme-debug-cfg', '')) return;
+  const menu = readCfg(DEBUG_CFG), d = debugStored();
+  for (const [key, name] of DEBUG_SWITCHES) if (key in menu) d[name] = menu[key] === '1';
+  store.set('phoneme-debug', d);
+  store.set('phoneme-debug-cfg', text);
+}
+function debugWriteCfg() {
+  const d = debugSet();
+  // LOG and PROFILE are the menu's rows that mean nothing in a browser
+  const text = 'LOG=1\n' + DEBUG_SWITCHES.map(([key, name]) => key + '=' + (d[name] ? 1 : 0)).join('\n') + '\nPROFILE=0\n';
+  try { FS.writeFile(DEBUG_CFG, text); store.set('phoneme-debug-cfg', text); } catch (e) {}
+}
+function debugSyncCfg() { debugImportCfg(); debugWriteCfg(); }
+for (const id of ['dbgHeap', ...DEBUG_SWITCHES.map(x => x[2])]) $(id).addEventListener('change', debugKeep);
 $('dbgBtn').addEventListener('click', () => {
   debugShow();
   $('dbgRestart').hidden = true;
   $('dbgDlg').showModal();
 });
 $('dbgReset').addEventListener('click', () => {
-  $('dbgJit').checked = DEBUG_DEFAULTS.jit;
   $('dbgHeap').value = '0';
-  $('dbgFps').checked = DEBUG_DEFAULTS.fps;
+  for (const [, name, id] of DEBUG_SWITCHES) $(id).checked = DEBUG_DEFAULTS[name];
   debugKeep();
 });
 $('dbgClose').addEventListener('click', () => { $('dbgDlg').close(); $('canvas').focus(); });
@@ -1009,13 +1049,17 @@ $('start').addEventListener('click', async () => {
           }
         }
         ENV.PHONEME_PC_KEYS = pcKeysSpec(game);
-        if (debugSet().fps) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
-        ENV.PHONEME_JIT = debugSet().jit ? '1' : '0';
         // ?env=NAME=value (repeatable): any runtime setting, for testing
         for (const e of params.getAll('env')) {
           const i = e.indexOf('=');
           if (i > 0) ENV[e.slice(0, i)] = e.slice(i + 1);
+        }
+        if (debugSet().launch) {
+          // launch log: what the game is started with
+          for (const k of Object.keys(ENV).sort()) {
+            if (/^(PHONEME|MIDP)_/.test(k)) log('launcher: ' + k + '=' + ENV[k]);
+          }
         }
         Module.removeRunDependency('saves');
       });
