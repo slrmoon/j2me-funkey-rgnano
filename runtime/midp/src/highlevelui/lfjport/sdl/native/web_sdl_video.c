@@ -250,19 +250,24 @@ void fk_web_wait(int ms) { fk_web_wait_js(ms); }
  * canvas from requestAnimationFrame, moved later by up to one refresh so
  * that frames come, on average, half a refresh before one: a millisecond
  * or two of jitter then no longer changes the refresh a frame lands on.
- * Faster games, hidden pages, ?pace=0 and "Frame pacing" off in the page's
- * Debug dialog (Module.fkNoPace): drawn at once, as before.
+ * Off by default (Debug dialog: Frame pacing, Module.fkPaceOn): it costs up
+ * to a refresh of delay. Faster games and hidden pages: drawn at once.
  */
 EM_JS(void, fk_web_present, (const void *rgba, int w, int h), {
     var P = Module.fkPace;
     if (!P) {
         P = Module.fkPace = { v: 1000 / 60, last: 0, gaps: [], c: 0, s: 0, frame: 0, prev: 0,
-                              pending: null, on: !Module.fkNoPace && !/[?&]pace=0/.test(location.search) };
+                              pending: null, on: !!Module.fkPaceOn && !/[?&]pace=0/.test(location.search) };
         var draw = function (f) {
             var c = Module['canvas'];
             if (!c) return;
             if (c.width !== f.w || c.height !== f.h) { c.width = f.w; c.height = f.h; Module.fkCtx = null; }
-            if (!Module.fkCtx) Module.fkCtx = c.getContext('2d');
+            /* low latency (Debug dialog, on by default): the canvas goes to
+             * the screen without waiting for the page's compositor - a
+             * frame or two less delay, as with a desktop window. Opaque:
+             * nothing to blend. Fixed for a canvas at its first use. */
+            if (!Module.fkCtx) Module.fkCtx = c.getContext('2d', { alpha: false,
+                desynchronized: !Module.fkNoLowLatency });
             Module.fkCtx.putImageData(new ImageData(new Uint8ClampedArray(HEAPU8.buffer, f.p, f.w * f.h * 4), f.w, f.h), 0, 0);
         };
         P.draw = draw;
