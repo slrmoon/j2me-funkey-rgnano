@@ -167,8 +167,8 @@
   <p>Kept in this browser, for every game. Changes apply when the game
     starts (or restarts).</p>
   <div class="row">
-    <label><input id="dbgJit" type="checkbox"> JIT compiler (experimental:
-      faster, but some games freeze or crash with it)</label>
+    <label><input id="dbgJit" type="checkbox"> JIT compiler (faster; turn
+      it off if a game freezes or crashes)</label>
   </div>
   <div class="row">
     <label>Java memory (heap):
@@ -878,20 +878,36 @@ $('keysClose').addEventListener('click', () => { capturing = null; $('keysDlg').
 $('keysDlg').addEventListener('cancel', e => { if (capturing) e.preventDefault(); });
 $('keysRestart').addEventListener('click', () => { saveRms(); setTimeout(() => startAgain(true), 300); });
 
-// debug dialog: the JIT, the Java heap and the frame counter. The address
-// (?jit=, ?heap=, ?fps=) wins over what is kept here.
-const DEBUG_DEFAULTS = { jit: false, heap: 0, fps: false };
-const debugSet = () => Object.assign({}, DEBUG_DEFAULTS, store.get('phoneme-debug', null) || {});
+// debug dialog: the JIT, the Java heap and the frame counter. ?jit= ?heap=
+// ?fps= in the address win over what is kept here, and the dialog shows
+// them; a change made in the dialog takes them out of the address, or the
+// dialog would seem to do nothing on a page opened with such a link.
+const DEBUG_DEFAULTS = { jit: true, heap: 0, fps: false };
+function debugSet() {
+  const d = Object.assign({}, DEBUG_DEFAULTS, store.get('phoneme-debug', null) || {});
+  if (params.get('jit')) d.jit = params.get('jit') !== '0';
+  if (+params.get('heap') > 0) d.heap = +params.get('heap');
+  if (params.get('fps')) d.fps = params.get('fps') !== '0';
+  return d;
+}
 function debugShow() {
-  const d = debugSet();
+  const d = debugSet(), heap = $('dbgHeap');
   $('dbgJit').checked = !!d.jit;
-  $('dbgHeap').value = String(d.heap || 0);
-  if ($('dbgHeap').selectedIndex < 0) $('dbgHeap').value = '0';
+  if (d.heap && ![...heap.options].some(o => +o.value === d.heap)) {
+    heap.add(new Option(d.heap + ' MB', String(d.heap)));
+  }
+  heap.value = String(d.heap || 0);
   $('dbgFps').checked = !!d.fps;
 }
 function debugKeep() {
   store.set('phoneme-debug', { jit: $('dbgJit').checked, heap: +$('dbgHeap').value || 0,
                                fps: $('dbgFps').checked });
+  let cut = false;
+  for (const k of ['jit', 'heap', 'fps']) if (params.has(k)) { params.delete(k); cut = true; }
+  if (cut) {
+    const q = params.toString();
+    history.replaceState(null, '', location.pathname + (q ? '?' + q : '') + location.hash);
+  }
   $('dbgRestart').hidden = !running;
 }
 for (const id of ['dbgJit', 'dbgHeap', 'dbgFps']) $(id).addEventListener('change', debugKeep);
@@ -901,9 +917,10 @@ $('dbgBtn').addEventListener('click', () => {
   $('dbgDlg').showModal();
 });
 $('dbgReset').addEventListener('click', () => {
-  store.set('phoneme-debug', DEBUG_DEFAULTS);
-  debugShow();
-  $('dbgRestart').hidden = !running;
+  $('dbgJit').checked = DEBUG_DEFAULTS.jit;
+  $('dbgHeap').value = '0';
+  $('dbgFps').checked = DEBUG_DEFAULTS.fps;
+  debugKeep();
 });
 $('dbgClose').addEventListener('click', () => { $('dbgDlg').close(); $('canvas').focus(); });
 $('dbgRestart').addEventListener('click', () => { saveRms(); setTimeout(() => startAgain(true), 300); });
@@ -962,7 +979,7 @@ $('start').addEventListener('click', async () => {
       Object.assign(ENV, {
         MIDP_HOME: '/midp',
         PHONEME_RMS_HOME: rmsDir,
-        PHONEME_HEAP_MB: params.get('heap') || String(debugSet().heap || 64),
+        PHONEME_HEAP_MB: String(debugSet().heap || 64),
         PHONEME_LCD_SIZE: params.get('lcd') || (game.doja ? game.doja.area : '240x320'),
         PHONEME_ENABLE_AUDIO: '1',
         PHONEME_RESTART_FLAG: '/tmp/restart-request',
@@ -992,10 +1009,9 @@ $('start').addEventListener('click', async () => {
           }
         }
         ENV.PHONEME_PC_KEYS = pcKeysSpec(game);
-        if (params.get('fps') || debugSet().fps) ENV.PHONEME_SHOW_FPS = '1';
+        if (debugSet().fps) ENV.PHONEME_SHOW_FPS = '1';
         if (params.get('limit')) ENV.PHONEME_FPS_LIMIT = params.get('limit');
-        // the JIT is off unless asked for: some games freeze or crash with it
-        ENV.PHONEME_JIT = params.get('jit') || (debugSet().jit ? '1' : '0');
+        ENV.PHONEME_JIT = debugSet().jit ? '1' : '0';
         // ?env=NAME=value (repeatable): any runtime setting, for testing
         for (const e of params.getAll('env')) {
           const i = e.indexOf('=');
