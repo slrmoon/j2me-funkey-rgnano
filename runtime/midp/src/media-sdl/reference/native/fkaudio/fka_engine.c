@@ -8,6 +8,7 @@
  * exact, and memory stays flat no matter how long the song is.
  */
 #include "fka.h"
+#include "fka_resample.h"
 #include "fka_decode.h"
 #include "fka_eas.h"
 
@@ -333,6 +334,11 @@ static void mix_pcm(Player *p, int32_t *acc, int n)
     if (p->rate != 100000) step = (uint64_t) ((double) step * p->rate / 100000.0);
     /* MLD loops at its cuepoints itself while more plays are wanted */
     src->mld_loop = p->loop_count < 0 || p->loops_done + 1 < p->loop_count;
+    /* high quality: a whole decoded sound is read through a windowed sinc
+     * (a WAV at 8 or 11 kHz read with a straight line leaves up to a sixth
+     * of its energy as images above its own band and dulls its top) */
+    const int16_t *sinc = fka_quality_high() && src->whole && src->mld == NULL && src->win != NULL
+            ? fka_sinc_table((int) (step * FKA_RATE >> 32), FKA_RATE) : NULL;
     for (i = 0; i < n; ++i) {
         int64_t idx = (int64_t) (p->pos >> 32);
         const int16_t *s;
@@ -373,7 +379,21 @@ static void mix_pcm(Player *p, int32_t *acc, int n)
         else
             s1 = (src->length < 0 || idx + 1 < src->length) ? s[1] : s0;
         frac = (int) ((p->pos >> 16) & 0xffff);
-        v = s0 + (((s1 - s0) * frac) >> 16);
+        if (sinc != NULL) {
+            int16_t edge[FKA_SINC_TAPS];
+            const int16_t *x = src->win + idx - (FKA_SINC_TAPS / 2 - 1);
+            if (idx < FKA_SINC_TAPS / 2 - 1 || idx + FKA_SINC_TAPS / 2 >= src->win_len) {
+                int t;      /* at the ends: silence outside the sound */
+                for (t = 0; t < FKA_SINC_TAPS; ++t) {
+                    int64_t at = idx - (FKA_SINC_TAPS / 2 - 1) + t;
+                    edge[t] = at >= 0 && at < src->win_len ? src->win[at] : 0;
+                }
+                x = edge;
+            }
+            v = fka_sinc_eval(sinc, x, (unsigned) frac);
+        } else {
+            v = s0 + (((s1 - s0) * frac) >> 16);
+        }
         acc[i] += (int) (((int64_t) v * g >> 15) * p->fade >> 15);
         if (p->playing) p->pos += step;
         if (p->playing && p->stop_time >= 0 && media_time(p) >= p->stop_time) {

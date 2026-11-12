@@ -11,6 +11,7 @@
  * PHONEME_AUDIO_SUM     1/0 forces the halving on/off
  */
 #include "fka.h"
+#include "fka_resample.h"
 #include "fka_config.h"
 
 #include <SDL.h>
@@ -28,6 +29,10 @@ static int g_buf_cap;
 static uint32_t g_phase, g_step;      /* 16.16 */
 static int16_t g_prev, g_next;
 static int g_have_next;
+/* high quality: the 22050 Hz mix goes to a 44100 Hz (or other) device
+ * through a windowed sinc; g_hist holds the last FKA_SINC_TAPS samples */
+static const int16_t *g_sinc;
+static int16_t g_hist[FKA_SINC_TAPS];
 
 static int detect_monocard(void)
 {
@@ -65,6 +70,16 @@ static void callback(void *user, Uint8 *stream, int bytes)
 
     if (g_rate == FKA_RATE) {
         fka_render(g_buf, frames);
+    } else if (g_sinc != NULL) {
+        for (i = 0; i < frames; ++i) {
+            g_buf[i] = (int16_t) fka_sinc_eval(g_sinc, g_hist, g_phase & 0xffff);
+            g_phase += g_step;
+            while (g_phase >= 0x10000) {
+                g_phase -= 0x10000;
+                memmove(g_hist, g_hist + 1, sizeof(g_hist) - sizeof(g_hist[0]));
+                g_hist[FKA_SINC_TAPS - 1] = next_sample();
+            }
+        }
     } else {
         /* linear interpolation, pulling engine samples one at a time is
          * fine: fka_render keeps a frame carry buffer internally */
@@ -110,7 +125,11 @@ int fka_output_open(void)
     }
     if (SDL_WasInit(SDL_INIT_AUDIO) == 0 && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return -1;
     memset(&want, 0, sizeof(want));
-    want.freq = FKA_RATE;
+    /* high quality: ask for 44100 Hz and convert here. Left to the device
+     * layer, 22050 Hz is doubled by repeating samples (SDL 1.2) or read
+     * along straight lines (browsers): a copy of the sound above 11 kHz. */
+    want.freq = fka_quality_high() ? 44100 : FKA_RATE;
+    if (want.freq > FKA_RATE) samples *= 2;     /* the same ~46 ms */
     want.format = AUDIO_S16SYS;
     want.channels = 2;
     want.samples = (Uint16) samples;
@@ -129,6 +148,8 @@ int fka_output_open(void)
     g_step = (uint32_t) (((uint64_t) FKA_RATE << 16) / (uint64_t) g_rate);
     g_phase = 0;
     g_have_next = 0;
+    g_sinc = fka_quality_high() && g_rate != FKA_RATE ? fka_sinc_table(FKA_RATE, g_rate) : NULL;
+    memset(g_hist, 0, sizeof(g_hist));
     g_sum = g_channels == 2 && detect_monocard();
     g_buf_cap = got.samples > 0 ? got.samples * 2 : 8192;
     g_buf = (int16_t *) malloc(sizeof(int16_t) * (size_t) g_buf_cap);

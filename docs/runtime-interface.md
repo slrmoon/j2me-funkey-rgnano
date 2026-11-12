@@ -138,7 +138,8 @@ Motorola 21/22, Siemens -1/-4), clear -8, call -10, end -11, game A–D
 | `PHONEME_ENABLE_AUDIO` | set: sound on |
 | `PHONEME_SOUND_VOLUME` | master volume `0`..`100` |
 | `PHONEME_SYNTH` | MIDI synthesizer: `hybrid` (default), `wavetable` or `fm` |
-| `PHONEME_MIDI_GAIN` | MIDI synthesizer gain `50`..`100` |
+| `PHONEME_AUDIO_QUALITY` | `low` or `high` (default: `low` in the FunKey build, `high` elsewhere). High: sampled sounds and the output (44100 Hz) go through a windowed-sinc resampler, the synthesizer presets are level-matched |
+| `PHONEME_MIDI_GAIN` | MIDI synthesizer gain `50`..`100` (dB below 100; default 90, at the high quality level 93 for the wavetable and 84 for the other presets) |
 | `PHONEME_AUDIO_BUFFER` | audio buffer in samples, `128`..`8192` (default 1024) |
 | `PHONEME_AUDIO_SUM` | `1`/`0`: mix stereo to mono (default: from `/etc/asound.conf`) |
 | `PHONEME_MLD_EXACT` | `1`: exact (slower) MLD (i-mode melody) synthesis |
@@ -154,7 +155,7 @@ file (or a console window).
 | `PHONEME_DISPLAY_DEBUG` | set: log display and scaling decisions |
 | `PHONEME_KEY_DEBUG` | set: log keys |
 | `PHONEME_EVENT_DEBUG` | set: log events sent to the game |
-| `PHONEME_AUDIO_TRACE` | set: log the audio device setup |
+| `PHONEME_AUDIO_TRACE` | set: log the audio device setup and every call a game makes on its players (`snd: <ms> start #3 ...`) |
 | `PHONEME_PROFILE` | `1`: sampling CPU profiler, report in the log (Linux) |
 | `PHONEME_PROFILE_SECONDS` | profiler report period in seconds (default 10) |
 

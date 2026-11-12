@@ -128,6 +128,7 @@ FKA_ENGINE_FILES = \
     fka_formats.c \
     fka_smaf.c \
     fka_decode.c \
+    fka_resample.c \
     fka_mld.c \
     fka_eas.c
 

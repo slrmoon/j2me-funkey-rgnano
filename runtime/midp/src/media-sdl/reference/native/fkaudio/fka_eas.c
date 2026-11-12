@@ -27,11 +27,32 @@
 #define FKA_EAS_DEFAULT_VOLUME 90
 #endif
 
+#include "fka_resample.h"
+
 static EAS_DATA_HANDLE g_eas;
 static const S_EAS_LIB_CONFIG *g_cfg;
 static int g_frame;     /* EAS render granularity (samples) */
 
 static S_SYNTH *stream_synth(void *stream);
+
+/* EAS volume is in dB (100 = 0 dB). At 0 dB dense GM songs sit in the
+ * limiter a tenth of the time; handsets ran it lower too. The handheld
+ * plays every instrument set at -10 dB. That leaves the FM and hybrid sets
+ * some 9 dB louder than the wavetable one and in the limiter for 2-6% of
+ * the samples of dense music; on its small speaker that passes for
+ * loudness. The high quality level matches the sets instead: -7 dB for
+ * the wavetable, -16 dB for FM and hybrid - music at -14...-24 dBFS RMS
+ * with under 1% of the samples in the knee. PHONEME_MIDI_GAIN overrides. */
+static void apply_volume(int engine)
+{
+    const char *env = FKA_CONFIG("PHONEME_MIDI_GAIN");
+    int v = FKA_EAS_DEFAULT_VOLUME;
+    if (fka_quality_high()) v = engine == 1 ? 93 : 84;
+    if (env != NULL && env[0] != '\0') v = atoi(env);
+    if (v < 50) v = 50;
+    if (v > 100) v = 100;
+    EAS_SetVolume(g_eas, NULL, v);
+}
 
 int fka_eas_init(int engine)
 {
@@ -53,15 +74,7 @@ int fka_eas_init(int engine)
         EAS_SetSoundLibrary(g_eas, NULL, EAS_GetSoundLibrary(g_eas, lib_name));
     EAS_SetParameter(g_eas, EAS_MODULE_REVERB, EAS_PARAM_REVERB_BYPASS, EAS_TRUE);
     EAS_SetParameter(g_eas, EAS_MODULE_CHORUS, EAS_PARAM_CHORUS_BYPASS, EAS_TRUE);
-    /* EAS volume is in dB (100 = 0 dB). At 0 dB dense GM songs sit in
-     * the limiter a tenth of the time; handsets ran it lower too. */
-    {
-        const char *env = FKA_CONFIG("PHONEME_MIDI_GAIN");
-        int v = env != NULL && env[0] != '\0' ? atoi(env) : FKA_EAS_DEFAULT_VOLUME;
-        if (v < 50) v = 50;
-        if (v > 100) v = 100;
-        EAS_SetVolume(g_eas, NULL, v);
-    }
+    apply_volume(engine);
     return 0;
 }
 
@@ -84,6 +97,7 @@ int fka_eas_set_engine(int engine)
     type = engine == 1 ? EAS_SNDLIB_WT : (engine == 2 ? EAS_SNDLIB_FM : EAS_SNDLIB_HYBRID);
     lib_name = EAS_GetDefaultSoundLibrary(type);
     if (lib_name == NULL) return -2;
+    apply_volume(engine);
     return EAS_SetSoundLibrary(g_eas, NULL, EAS_GetSoundLibrary(g_eas, lib_name)) == EAS_SUCCESS ? 0 : -3;
 }
 

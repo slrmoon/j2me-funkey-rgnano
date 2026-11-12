@@ -113,6 +113,39 @@ void MediaSDL_PauseAll(int paused)
 
 /* ------------------------------------------------------------------ */
 
+/*
+ * PHONEME_AUDIO_TRACE=1: every call a game makes on its players, with the
+ * time in ms since the first one - "snd: 1234 start #3". To see what a
+ * game does with its sound and to compare it with another emulator.
+ */
+#include <stdarg.h>
+#include <sys/time.h>
+
+static int trace_on(void)
+{
+    static int on = -1;
+    if (on < 0) on = FKA_CONFIG("PHONEME_AUDIO_TRACE") != NULL;
+    return on;
+}
+
+static void trace(const char *fmt, ...)
+{
+    static long long t0;
+    struct timeval tv;
+    long long now;
+    char line[200];
+    va_list ap;
+    gettimeofday(&tv, NULL);
+    now = (long long) tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (t0 == 0) t0 = now;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "snd: %lld %s\n", now - t0, line);
+}
+
+#define TRACE(args) do { if (trace_on()) trace args; } while (0)
+
 static uint8_t *copy_bytes(jobject handle, int offset, int len)
 {
     uint8_t *buf;
@@ -153,6 +186,14 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nNew(void)
         buf = copy_bytes(data, 0, len);
         if (buf != NULL) {
             id = fka_player_new(buf, len, hint[0] ? hint : NULL);
+            if (trace_on()) {
+                unsigned h = 2166136261u;
+                int i;
+                for (i = 0; i < len; ++i) h = (h ^ buf[i]) * 16777619u;
+                trace("new #%d %d bytes %08x hint=%s type=%s dur=%lld ms", id, len, h,
+                      hint[0] ? hint : "-", id > 0 ? fka_player_content_type(id) : "?",
+                      id > 0 ? (long long) (fka_player_get_duration(id) / 1000) : -1LL);
+            }
             free(buf);
         }
     }
@@ -162,7 +203,9 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nNew(void)
 
 KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nNewDevice(void)
 {
-    KNI_ReturnInt(fka_player_new_device());
+    int id = fka_player_new_device();
+    TRACE(("new #%d midi device", id));
+    KNI_ReturnInt(id);
 }
 
 KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nNewToneSequence(void)
@@ -178,6 +221,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nNewToneSeq
         buf = copy_bytes(seq, 0, len);
     }
     id = fka_player_new_tone_sequence(buf, buf != NULL ? len : 0);
+    TRACE(("new #%d tone sequence %d bytes", id, len));
     free(buf);
     KNI_EndHandles();
     KNI_ReturnInt(id);
@@ -204,6 +248,7 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nReplaceTon
 
 KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_FkaNative_nDelete(void)
 {
+    TRACE(("close #%d", (int) KNI_GetParameterAsInt(1)));
     fka_player_delete(KNI_GetParameterAsInt(1));
     KNI_ReturnVoid();
 }
@@ -224,22 +269,28 @@ KNIEXPORT KNI_RETURNTYPE_OBJECT Java_javax_microedition_media_FkaNative_nContent
 
 KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nPrefetch(void)
 {
+    TRACE(("prefetch #%d", (int) KNI_GetParameterAsInt(1)));
     KNI_ReturnInt(fka_player_prefetch(KNI_GetParameterAsInt(1)));
 }
 
 KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_FkaNative_nDeallocate(void)
 {
+    TRACE(("deallocate #%d", (int) KNI_GetParameterAsInt(1)));
     fka_player_deallocate(KNI_GetParameterAsInt(1));
     KNI_ReturnVoid();
 }
 
 KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nStart(void)
 {
+    TRACE(("start #%d at %lld ms", (int) KNI_GetParameterAsInt(1),
+           (long long) (fka_player_get_time(KNI_GetParameterAsInt(1)) / 1000)));
     KNI_ReturnInt(fka_player_start(KNI_GetParameterAsInt(1)));
 }
 
 KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_FkaNative_nStop(void)
 {
+    TRACE(("stop #%d at %lld ms", (int) KNI_GetParameterAsInt(1),
+           (long long) (fka_player_get_time(KNI_GetParameterAsInt(1)) / 1000)));
     fka_player_stop(KNI_GetParameterAsInt(1));
     KNI_ReturnVoid();
 }
@@ -251,6 +302,7 @@ KNIEXPORT KNI_RETURNTYPE_BOOLEAN Java_javax_microedition_media_FkaNative_nIsPlay
 
 KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_FkaNative_nSetLoopCount(void)
 {
+    TRACE(("loop #%d %d", (int) KNI_GetParameterAsInt(1), (int) KNI_GetParameterAsInt(2)));
     fka_player_set_loop_count(KNI_GetParameterAsInt(1), KNI_GetParameterAsInt(2));
     KNI_ReturnVoid();
 }
@@ -264,6 +316,7 @@ KNIEXPORT KNI_RETURNTYPE_LONG Java_javax_microedition_media_FkaNative_nSetTime(v
 {
     jint id = KNI_GetParameterAsInt(1);
     jlong us = KNI_GetParameterAsLong(2);
+    TRACE(("seek #%d %lld ms", (int) id, (long long) (us / 1000)));
     KNI_ReturnLong(fka_player_set_time(id, us));
 }
 
@@ -274,6 +327,8 @@ KNIEXPORT KNI_RETURNTYPE_LONG Java_javax_microedition_media_FkaNative_nGetDurati
 
 KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_FkaNative_nSetVolume(void)
 {
+    TRACE(("volume #%d %d%s", (int) KNI_GetParameterAsInt(1), (int) KNI_GetParameterAsInt(2),
+           KNI_GetParameterAsBoolean(3) ? " muted" : ""));
     fka_player_set_volume(KNI_GetParameterAsInt(1), KNI_GetParameterAsInt(2),
                           KNI_GetParameterAsBoolean(3) ? 1 : 0);
     KNI_ReturnVoid();
@@ -360,6 +415,8 @@ KNIEXPORT KNI_RETURNTYPE_INT Java_javax_microedition_media_FkaNative_nMidiBank(v
 
 KNIEXPORT KNI_RETURNTYPE_VOID Java_javax_microedition_media_FkaNative_nPlayTone(void)
 {
+    TRACE(("playTone note %d %d ms vol %d", (int) KNI_GetParameterAsInt(1),
+           (int) KNI_GetParameterAsInt(2), (int) KNI_GetParameterAsInt(3)));
     fka_play_tone(KNI_GetParameterAsInt(1), KNI_GetParameterAsInt(2), KNI_GetParameterAsInt(3));
     KNI_ReturnVoid();
 }
@@ -375,6 +432,8 @@ KNIEXPORT KNI_RETURNTYPE_BOOLEAN Java_javax_microedition_media_FkaNative_nPollEv
     int64_t arg;
     jlong out[4];
     got = fka_poll_event(&player, &type, &arg, &data);
+    if (got) TRACE(("event #%d type %d at %lld ms%s", player, type, (long long) (arg / 1000),
+                    data ? " (looped)" : ""));
     KNI_StartHandles(1);
     KNI_DeclareHandle(arr);
     KNI_GetParameterAsObject(1, arr);

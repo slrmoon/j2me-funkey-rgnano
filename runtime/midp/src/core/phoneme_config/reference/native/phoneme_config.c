@@ -70,6 +70,7 @@ static const PhoneMESetting Settings[] = {
     { "PHONEME_ENABLE_AUDIO",    "set: sound on" },
     { "PHONEME_SOUND_VOLUME",    "master volume 0..100" },
     { "PHONEME_SYNTH",           "MIDI synthesizer: hybrid, wavetable or fm" },
+    { "PHONEME_AUDIO_QUALITY",   "low or high: resampling quality, synth preset levels" },
     { "PHONEME_MIDI_GAIN",       "MIDI synthesizer gain 50..100" },
     { "PHONEME_AUDIO_BUFFER",    "audio buffer in samples, 128..8192" },
     { "PHONEME_AUDIO_SUM",       "1/0: mix stereo to mono (default: from /etc/asound.conf)" },
