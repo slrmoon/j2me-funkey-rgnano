@@ -496,9 +496,48 @@ games run several times faster than interpreted, still slower than the
 desktop builds. **Buttons** shows
 on-screen keys (soft keys, D-pad, keypad, menu; on by default on phones and
 tablets), **Keys** remaps the keyboard (several keys per phone key, soft key
-type per game). Page options: `?fps=1` (FPS counter), `?limit=off`,
-`?lcd=240x320`, `?jit=0` (interpreter only, if a game misbehaves with the
-JIT).
+type per game).
+
+Page options (address parameters; URLs in them encoded with
+`encodeURIComponent`):
+
+| Parameter | |
+|---|---|
+| `jar=URL` | load this game; a relative address is next to the page |
+| `jam=URL`, `sp=URL` | with `jar=`: an i-appli's `.jam` and scratchpad |
+| `main=Class` | the MIDlet class, if the manifest lacks or misnames it |
+| `lcd=WxH` | the screen size the game sees (default 240x320, i-appli: its DrawArea) |
+| `jit=0` / `jit=1` | interpreter only (if a game misbehaves with the JIT) / JIT |
+| `heap=MB` | Java heap |
+| `fps=1` | FPS counter |
+| `limit=off` | no frame limit |
+| `embed=1` | compact page for an `<iframe>`: only the game and its buttons |
+
+`jit`, `heap` and `fps` from the address win over the Debug dialog until it
+is changed. The game still starts with a click (browsers allow sound only
+after one).
+
+**On another site.** The page runs in an `<iframe>`:
+
+```html
+<iframe src="https://slrmoon.github.io/j2me-funkey-rgnano/?embed=1&jar=https%3A%2F%2Fexample.com%2Fgame.jar"
+        width="100%" height="600" allow="fullscreen; autoplay" allowfullscreen
+        style="border: 0"></iframe>
+```
+
+- A game on another server loads only if that server allows it: the file
+  must be sent with `Access-Control-Allow-Origin: *` (or the emulator's
+  origin). Otherwise the page says it cannot read it. Files next to the page
+  need nothing. Up to 64 MB per file.
+- Full screen needs `allowfullscreen` on the iframe; without it the button
+  is hidden.
+- Saves and recent games are kept in the emulator's browser storage. Inside
+  an iframe browsers keep them separately for each host site, and some may
+  clear them; **Export saves** works there too.
+- No `sandbox` attribute is needed; with one it needs at least
+  `allow-scripts allow-same-origin`.
+- The build uses no threads (no SharedArrayBuffer), so no COOP/COEP headers
+  are needed and GitHub Pages is enough.
 
 ## Repository structure
 
