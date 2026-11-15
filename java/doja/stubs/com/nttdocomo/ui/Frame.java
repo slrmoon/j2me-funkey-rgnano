@@ -32,10 +32,26 @@ public abstract class Frame {
             throw new IllegalArgumentException("key");
         }
         softLabels[key] = caption;
+        fkSoftChanged();
     }
 
     public void setSoftLabelVisible(boolean visible) {
         softLabelVisible = visible;
+        fkSoftChanged();
+    }
+
+    /**
+     * A Canvas has its soft key labels outside the drawing area (the
+     * handset's own bar under the screen): the launcher is told the labels
+     * of the current frame. A Panel draws its own.
+     */
+    void fkSoftChanged() {
+        if (Display.getCurrent() != this) {
+            return;
+        }
+        boolean show = softLabelVisible && this instanceof Canvas;
+        com.funkey.doja.DoJaRuntime.softLabels(show ? softLabels[0] : null,
+                show ? softLabels[1] : null);
     }
 
     public String getSoftLabel(int key) {

@@ -511,6 +511,7 @@ Page options (address parameters; URLs in them encoded with
 | `heap=MB` | Java heap |
 | `fps=1` | FPS counter |
 | `limit=off` | no frame limit |
+| `frame=66` | i-appli without timing of its own: milliseconds per frame (default by the game's age: 66 for 503i games, 50 for 504i–506i, 33 later; `0` = as fast as it goes) |
 | `embed=1` | compact page for an `<iframe>`: only the game and its buttons |
 
 `jit`, `heap` and `fps` from the address win over the Debug dialog until it

@@ -281,6 +281,11 @@ public final class DoJaRuntime implements Runnable {
                 statStart = now;
             }
         }
+        Thread cur = Thread.currentThread();
+        if (polled && cur != eventThread && cur != autoThread) {
+            polled = false;
+            pace();
+        }
         synchronized (presentLock) {
             presentPending = true;
             if (presenter == null) {
@@ -292,6 +297,161 @@ public final class DoJaRuntime implements Runnable {
                 presenter.start();
             }
             presentLock.notify();
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* soft key labels                                                     */
+
+    private static String softShown = "";
+
+    /**
+     * Labels of the two soft keys for the launcher to show next to the
+     * screen: a log line "DoJa: soft <left> <right>", each label as the
+     * hex digits of its UTF-16 text ("-": none). The web page shows them
+     * under the game.
+     */
+    public static synchronized void softLabels(String left, String right) {
+        String line = hex(left) + " " + hex(right);
+        if (!line.equals(softShown)) {
+            softShown = line;
+            System.out.println("DoJa: soft " + line);
+        }
+    }
+
+    private static String hex(String s) {
+        if (s == null || s.trim().length() == 0) {
+            return "-";
+        }
+        StringBuffer b = new StringBuffer();
+        for (int i = 0; i < s.length(); i++) {
+            String h = Integer.toHexString(s.charAt(i));
+            for (int k = h.length(); k < 4; k++) {
+                b.append('0');
+            }
+            b.append(h);
+        }
+        return b.toString();
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* device speed                                                        */
+
+    /*
+     * Early i-appli often have no timing of their own: the main loop reads
+     * the keys, draws and starts over, and the handset's slowness set the
+     * speed (503i/504i: some ten frames a second). Such a loop is given
+     * the frame time of the handsets the game was made for. A loop is
+     * taken as unpaced when it comes back with the next frame within
+     * BUSY_MS of the previous one; a game that sleeps between its frames
+     * is left alone. -Ddoja.frame.ms=N sets the frame time (0: off).
+     */
+    private static final int BUSY_MS = 12;
+    private static int frameMs = -1;
+    private static volatile boolean polled;
+    private static long frameEnd;
+    private static final Object paintDone = new Object();
+
+    private static int frameMs() {
+        if (frameMs < 0) {
+            int ms = 33;
+            String p = System.getProperty("doja.frame.ms");
+            if (p != null && p.length() > 0) {
+                try {
+                    ms = Integer.parseInt(p.trim());
+                } catch (NumberFormatException e) {
+                }
+            } else {
+                /* the jar size limit tells the generation: 10 KB 503i,
+                 * 30 KB 504i/505i/506i, more on FOMA */
+                int size = 0;
+                try {
+                    size = Integer.parseInt(getJam("AppSize").trim());
+                } catch (Throwable t) {
+                }
+                if (getJam("KvmVer") != null || (size > 0 && size <= 10240)) {
+                    ms = 66;
+                } else if (size > 0 && size <= 30720) {
+                    ms = 50;
+                }
+            }
+            frameMs = ms < 0 ? 0 : ms;
+        }
+        return frameMs;
+    }
+
+    /** A frame of the game's loop ends here (game thread). */
+    private static void pace() {
+        int ms = frameMs();
+        if (ms <= 0) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long work = now - frameEnd;
+        if (work >= 0 && work < BUSY_MS) {
+            /* the whole frame takes ms: the previous wait is part of it */
+            long wait = lastPaced + ms - now;
+            if (wait > 0 && wait <= ms) {
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException ie) {
+                }
+            }
+            lastPaced = System.currentTimeMillis();
+            frameEnd = lastPaced;
+        } else {
+            lastPaced = now;
+            frameEnd = now;
+        }
+    }
+
+    private static long lastPaced;
+
+    /**
+     * Canvas.repaint() from the game's own thread: a loop that does
+     * nothing but repaint() gets its frame painted and timed like a loop
+     * with lock()/unlock().
+     */
+    public static void repaintPace(com.nttdocomo.ui.Canvas c) {
+        Thread cur = Thread.currentThread();
+        if (cur == eventThread || frameMs() <= 0) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long work = now - frameEnd;
+        if (work < 0 || work >= BUSY_MS) {
+            lastPaced = now;
+            frameEnd = now;
+            return;
+        }
+        synchronized (paintDone) {
+            long end = now + 250;
+            while (com.nttdocomo.ui.FkBridge.repaintQueued(c) && !terminated) {
+                long left = end - System.currentTimeMillis();
+                if (left <= 0) {
+                    break;
+                }
+                try {
+                    paintDone.wait(left);
+                } catch (InterruptedException ie) {
+                    break;
+                }
+            }
+        }
+        long wait = lastPaced + frameMs - System.currentTimeMillis();
+        if (wait > 0 && wait <= frameMs) {
+            try {
+                Thread.sleep(wait);
+            } catch (InterruptedException ie) {
+            }
+        }
+        lastPaced = System.currentTimeMillis();
+        frameEnd = lastPaced;
+    }
+
+    public static void painted() {
+        synchronized (paintDone) {
+            paintDone.notifyAll();
         }
     }
 
@@ -395,11 +555,13 @@ public final class DoJaRuntime implements Runnable {
     /* keys                                                                */
 
     public static int keypadState() {
+        polled = true;
         return (int) keypadState;
     }
 
     /** group 0: keys 0..31, group 1: keys 32..63 */
     public static int keypadState(int group) {
+        polled = true;
         return group == 0 ? (int) keypadState : group == 1 ? (int) (keypadState >>> 32) : 0;
     }
 

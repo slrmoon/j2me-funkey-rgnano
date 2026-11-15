@@ -19,6 +19,8 @@ public abstract class Canvas extends Frame {
     private boolean inPaint;
     private boolean flushInPaint;
     private volatile boolean repaintQueued;
+    /** a repaint() is waiting for its paint() to end */
+    volatile boolean paintPending;
     private boolean everPainted;
     /* the last presented frame: the host paints it while the game already
      * draws the next one into the surface */
@@ -57,8 +59,10 @@ public abstract class Canvas extends Frame {
     public void repaint() {
         if (!repaintQueued) {
             repaintQueued = true;
+            paintPending = true;
             DoJaRuntime.postRepaint(this);
         }
+        DoJaRuntime.repaintPace(this);
     }
 
     public void repaint(int x, int y, int width, int height) {
@@ -154,6 +158,8 @@ public abstract class Canvas extends Frame {
         if (Display.getCurrent() == this) {
             DoJaRuntime.present();
         }
+        paintPending = false;
+        DoJaRuntime.painted();
     }
 
     /** unlock() reached zero or was forced. */

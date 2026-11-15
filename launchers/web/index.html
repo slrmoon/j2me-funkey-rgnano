@@ -39,6 +39,15 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
   #play:fullscreen { background: #000; display: flex; flex-direction: column; padding: 0; }
   #play:fullscreen #stage { flex: 1; min-height: 0; max-height: none; max-width: none !important;
                            border-radius: 0; aspect-ratio: auto; }
+  /* i-appli soft key labels: the handset's bar under the screen */
+  #softbar { display: flex; justify-content: space-between; gap: 8px; margin: 4px auto 0;
+             user-select: none; -webkit-user-select: none; }
+  #softbar[hidden] { display: none; }
+  #softbar button { flex: 0 1 46%; min-height: 26px; padding: 2px 8px; font-size: 13px;
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: none; }
+  #softbar button:empty { visibility: hidden; }
+  #softbar button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+  #play:fullscreen #softbar { width: 100%; padding: 0 8px 4px; }
   /* on-screen buttons */
   #pad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px;
          user-select: none; -webkit-user-select: none; touch-action: none; }
@@ -137,6 +146,10 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
     <button id="start" class="primary" disabled>Start</button>
     <div id="recent"></div>
   </div>
+</div>
+<div id="softbar" hidden>
+  <button data-act="soft1" title="Left soft key (F1 / Q)"></button>
+  <button data-act="soft2" title="Right soft key (F2 / E)"></button>
 </div>
 <div id="pad" hidden>
   <div class="softs">
@@ -250,7 +263,21 @@ const params = new URLSearchParams(location.search);
 const V = '?v=__BUILD__';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
-function log(s) { logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s); }
+function log(s) {
+  if (s.startsWith('DoJa: soft ')) softLabels(s);
+  logEl.textContent += s + '\n'; logEl.scrollTop = 1e9; console.log(s);
+}
+// "DoJa: soft <left> <right>": the i-appli's soft key labels (hex UTF-16, "-" none)
+function softLabels(line) {
+  const text = h => h === '-' || !h ? '' :
+    String.fromCharCode(...h.match(/.{4}/g).map(x => parseInt(x, 16))).trim();
+  const [l, r] = line.slice(11).trim().split(' ').map(text);
+  const bar = $('softbar'), b = bar.querySelectorAll('button');
+  b[0].textContent = l; b[1].textContent = r || '';
+  bar.hidden = !l && !r;
+  bar.style.maxWidth = $('stage').style.maxWidth || getComputedStyle($('stage')).maxWidth;
+  if (typeof fitEmbed === 'function') fitEmbed();
+}
 function status(s) { $('status').textContent = s; }
 
 let game = null;   // { name, bytes, main }
@@ -425,7 +452,8 @@ if (['jar', 'jam', 'sp'].some(k => params.get(k)) && !params.get('restart')) loa
 // embed: the game area takes the iframe's height left by the buttons under it
 function fitEmbed() {
   if (!EMBED) return;
-  const pad = $('pad').hidden ? 0 : $('pad').offsetHeight + 10;
+  const pad = ($('pad').hidden ? 0 : $('pad').offsetHeight + 10) +
+              ($('softbar').hidden ? 0 : $('softbar').offsetHeight + 4);
   const h = Math.max(120, innerHeight - $('bar').offsetHeight - pad - 20);
   document.documentElement.style.setProperty('--stage-h', h + 'px');
 }
@@ -684,7 +712,7 @@ $('import').addEventListener('change', async e => {
 async function startAgain(auto) {
   await stash(Object.assign({}, game, { auto }));
   leaving = true;
-  const keep = ['fps', 'jit', 'heap', 'limit', 'lcd', 'trace', 'embed'].filter(k => params.get(k))
+  const keep = ['fps', 'jit', 'heap', 'limit', 'lcd', 'trace', 'frame', 'embed'].filter(k => params.get(k))
     .map(k => '&' + k + '=' + encodeURIComponent(params.get(k))).join('');
   location.href = location.pathname + '?restart=1' + keep;
 }
@@ -880,7 +908,7 @@ function padKey(id, down) {
   SDL.events.push({ type: down ? 'keydown' : 'keyup', keyCode: VIRTUAL_SYM + i, charCode: 0,
                     location: 0, preventDefault() {} });
 }
-for (const b of document.querySelectorAll('#pad button[data-act]')) {
+for (const b of document.querySelectorAll('#pad button[data-act], #softbar button[data-act]')) {
   const press = e => {
     e.preventDefault();
     if (b.classList.contains('on')) return;
@@ -1066,6 +1094,7 @@ function dojaArgs(spPath) {
     '-Ddoja.app.class=' + d.cls, '-Ddoja.app.param=' + d.param, '-Ddoja.app.ver=' + d.ver,
     '-Dmicroedition.encoding=SJIS', '-Ddoja.scratchpad.path=' + spPath,
     ...(params.get('trace') ? ['-Ddoja.trace=1'] : []),
+    ...(/^\d+$/.test(params.get('frame') || '') ? ['-Ddoja.frame.ms=' + params.get('frame')] : []),
     '-Ddoja.spsize=' + d.spsize, '-Ddoja.jam.hex=' + hex, '-Ddoja.pictures=',
     '-classpathext', '/game/game.jar:/midp/lib/doja-support.jar',
     'internal', 'com.funkey.doja.DoJaMIDlet'];

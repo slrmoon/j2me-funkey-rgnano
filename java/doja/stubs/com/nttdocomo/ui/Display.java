@@ -105,6 +105,7 @@ public class Display {
             return;
         }
         current = frame;
+        frame.fkSoftChanged();
         final Frame f = frame;
         DoJaRuntime.postRun(new Runnable() {
             public void run() {

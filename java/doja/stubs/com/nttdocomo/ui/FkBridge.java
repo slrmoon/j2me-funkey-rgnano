@@ -17,6 +17,10 @@ public final class FkBridge {
         }
     }
 
+    public static boolean repaintQueued(Canvas c) {
+        return c.paintPending;
+    }
+
     public static void snapshot(Frame f) {
         f.fkSnapshot();
     }

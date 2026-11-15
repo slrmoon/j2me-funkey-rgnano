@@ -259,7 +259,47 @@ public final class BitmapFont {
                     }
                 } else {
                     gw = baseWidth(c);
-                    if (gw > 2 && c >= 0x80) {
+                    if (c >= 0x2460 && c <= 0x2473) {
+                        /* circled numbers (NEC special characters, not in
+                         * the JIS X 0208 font): the digits in a ring */
+                        int n = c - 0x245f;
+                        String d = String.valueOf(n);
+                        int dw = 0;
+                        for (int k = 0; k < d.length(); k++) {
+                            dw += baseWidth(d.charAt(k));
+                        }
+                        int dx = pen + (gw - dw) / 2;
+                        for (int k = 0; k < d.length(); k++) {
+                            int di = find(d.charAt(k));
+                            if (di < 0) {
+                                continue;
+                            }
+                            int w = base.widths[di] & 255;
+                            int rb = (w + 7) >> 3;
+                            int o = base.offsets[di];
+                            for (int row = 0; row < bh; row++) {
+                                for (int col = 0; col < w; col++) {
+                                    if ((base.bits[o + row * rb + (col >> 3)] & (0x80 >> (col & 7))) != 0) {
+                                        plot(buf, visW, startX, (dx + col) * scale, row * scale, argb, false);
+                                    }
+                                }
+                            }
+                            dx += w;
+                        }
+                        int ro = (gw - 1) * (gw - 1);
+                        int ri = (gw - 3) * (gw - 3);
+                        for (int row = 0; row < gw && row < bh; row++) {
+                            for (int col = 0; col < gw; col++) {
+                                int ex = 2 * col - (gw - 1);
+                                int ey = 2 * row - (gw - 1);
+                                int d2 = ex * ex + ey * ey;
+                                if (d2 <= ro + 2 && d2 > ri + 2) {
+                                    plot(buf, visW, startX, (pen + col) * scale,
+                                            (row + (bh - gw) / 2) * scale, argb, false);
+                                }
+                            }
+                        }
+                    } else if (gw > 2 && c >= 0x80) {
                         /* missing glyph: hollow box */
                         for (int col = 1; col < gw - 1; col++) {
                             plot(buf, visW, startX, (pen + col) * scale, 1 * scale, argb, false);
