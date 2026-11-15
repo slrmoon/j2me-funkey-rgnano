@@ -1109,6 +1109,8 @@ function dojaArgs(spPath) {
     '-Dmicroedition.encoding=SJIS', '-Ddoja.scratchpad.path=' + spPath,
     ...(params.get('trace') ? ['-Ddoja.trace=1'] : []),
     ...(/^\d+$/.test(params.get('frame') || '') ? ['-Ddoja.frame.ms=' + params.get('frame')] : []),
+    // ?prop=name=value (repeatable): any runtime property, for testing
+    ...params.getAll('prop').filter(x => /^[\w.]+=[\w.,:-]*$/.test(x)).map(x => '-D' + x),
     '-Ddoja.spsize=' + d.spsize, '-Ddoja.jam.hex=' + hex, '-Ddoja.pictures=',
     '-classpathext', '/game/game.jar:/midp/lib/doja-support.jar',
     'internal', 'com.funkey.doja.DoJaMIDlet'];

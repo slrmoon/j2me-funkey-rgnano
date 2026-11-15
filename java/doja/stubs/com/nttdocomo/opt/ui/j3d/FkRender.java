@@ -228,6 +228,7 @@ public final class FkRender {
         if (begin(!frameDepth)) {
             frameDepth = true;
             try {
+                sorted = ZSORT;
                 figure(f);
             } finally {
                 end();
@@ -293,7 +294,7 @@ public final class FkRender {
     private static short[] pos;
     private static byte[] col;
     private static short[] tex;
-    private static final Appearance[] plainApp = new Appearance[16];
+    private static final Appearance[] plainApp = new Appearance[32];
     private static boolean failed;
 
     private static void setup() {
@@ -477,6 +478,7 @@ public final class FkRender {
     private static final int F_BLEND = 3;      /* 0 opaque, 1 half, 2 add, 3 sub */
     private static final int F_KEY = 4;
     private static final int F_DOUBLE = 8;
+    private static final int F_NOZ = 16;       /* no depth buffer: drawn in sorted order */
 
     private static Appearance makeApp(Texture2D t, int flags) {
         Appearance a = new Appearance();
@@ -498,8 +500,8 @@ public final class FkRender {
             break;
         }
         cm.setAlphaThreshold(key ? (blend == 1 ? 0.25f : 0.5f) : 0f);
-        cm.setDepthWriteEnable(blend == 0);
-        cm.setDepthTestEnable(true);
+        cm.setDepthWriteEnable(blend == 0 && (flags & F_NOZ) == 0);
+        cm.setDepthTestEnable((flags & F_NOZ) == 0);
         a.setCompositingMode(cm);
         PolygonMode pm = new PolygonMode();
         pm.setCulling((flags & F_DOUBLE) != 0 ? PolygonMode.CULL_NONE : PolygonMode.CULL_BACK);
@@ -524,14 +526,14 @@ public final class FkRender {
         }
         Object[] cache = (Object[]) t.m3g;
         if (cache == null) {
-            cache = new Object[18];
+            cache = new Object[34];
             t.m3g = cache;
         }
         Appearance a = (Appearance) cache[flags];
         if (a == null) {
             /* keyed and opaque variants of the texture: index 0 transparent or not */
             boolean key = (flags & F_KEY) != 0;
-            int slot = key ? 16 : 17;
+            int slot = key ? 32 : 33;
             Texture2D t2 = (Texture2D) cache[slot];
             if (t2 == null) {
                 t2 = makeTexture(t, key);
@@ -684,6 +686,11 @@ public final class FkRender {
         if (need > cap) {
             grow(need);
         }
+        if (sorted) {
+            sorted = false;
+            figureSorted(f, shift, nrm);
+            return;
+        }
         /* collect the distinct (texture, flags) groups, opaque ones first */
         int groups = 0;
         for (int i = 0; i < m.numPolys; i++) {
@@ -724,6 +731,133 @@ public final class FkRender {
         }
         if (sphere && sphereTex != null) {
             figureSphere(f, shift, nrm);
+        }
+    }
+
+    /*
+     * MascotCapsule v3 has no depth buffer. drawFigure() paints a figure at
+     * once: its polygons sorted by distance, far to near, over whatever
+     * was drawn before. Games count on it (a shadow lying in the floor
+     * under a ball, decals, the order of the drawFigure calls); with a
+     * depth buffer those cut into each other. What is collected until
+     * flush() (renderFigure, renderPrimitives, command lists) is sorted
+     * as a whole on a handset: there the depth buffer stays, it gives the
+     * same picture between objects. -Ddoja.j3d.zbuffer=1: depth buffer
+     * for drawFigure() too.
+     */
+    private boolean sorted;
+    private static final boolean ZSORT = !"1".equals(System.getProperty("doja.j3d.zbuffer"));
+    private long[] sortKeys = new long[256];
+    private static short[] sph = new short[0];
+
+    private void figureSorted(Figure f, int shift, int[] nrm) {
+        FkModel m = f.model;
+        int[] p = f.posed;
+        if (sortKeys.length < m.numPolys) {
+            sortKeys = new long[m.numPolys];
+        }
+        long[] keys = sortKeys;
+        long zx = view[8];
+        long zy = view[9];
+        long zz = view[10];
+        int cnt = 0;
+        for (int i = 0; i < m.numPolys; i++) {
+            if (!visible(m.polyPattern[i], f.pattern)) {
+                continue;
+            }
+            int base = i * 4;
+            int nv = m.polyVerts[base + 3] >= 0 ? 4 : 3;
+            long z = 0;
+            for (int k = 0; k < nv; k++) {
+                int v = m.polyVerts[base + k] * 3;
+                z += zx * p[v] + zy * p[v + 1] + zz * p[v + 2];
+            }
+            /* far first; equal distance: the model's order */
+            keys[cnt++] = (((z / nv) >> 4) << 16) | (0xffff - (i & 0xffff));
+        }
+        for (int gap = cnt / 2; gap > 0; gap = gap == 2 ? 1 : gap * 5 / 11) {
+            for (int i = gap; i < cnt; i++) {
+                long k = keys[i];
+                int j = i;
+                while (j >= gap && keys[j - gap] < k) {
+                    keys[j] = keys[j - gap];
+                    j -= gap;
+                }
+                keys[j] = k;
+            }
+        }
+        boolean env = sphere && sphereTex != null;
+        if (env && sph.length < cap * 2) {
+            sph = new short[cap * 2];
+        }
+        Texture t = null;
+        int fl = -1;
+        int n = 0;
+        for (int s = 0; s < cnt; s++) {
+            int i = 0xffff - (int) (keys[s] & 0xffff);
+            Texture pt = m.polyColor[i] < 0 ? f.textureFor(m.polyTexture[i]) : null;
+            int pf = flags(m.polyMaterial[i], pt != null);
+            if (n > 0 && (pt != t || pf != fl)) {
+                flushSorted(n, t, fl, env);
+                n = 0;
+            }
+            t = pt;
+            fl = pf;
+            int alpha = (fl & F_BLEND) == 1 ? 128 : 255;
+            int base = i * 4;
+            int[] order = m.polyVerts[base + 3] >= 0 ? QUAD_STRIP : TRI;
+            int color = m.polyColor[i];
+            if (nrm == null) {
+                normalOf(p, m.polyVerts[base], m.polyVerts[base + 1], m.polyVerts[base + 2]);
+            }
+            int flat = nrm == null ? shade(faceNormal[0], faceNormal[1], faceNormal[2], t) : 0;
+            for (int k = 0; k < order.length; k++) {
+                int corner = order[k];
+                int v = m.polyVerts[base + corner];
+                pos[n * 3] = (short) (p[v * 3] >> shift);
+                pos[n * 3 + 1] = (short) (p[v * 3 + 1] >> shift);
+                pos[n * 3 + 2] = (short) (p[v * 3 + 2] >> shift);
+                int b = nrm == null ? flat : shade(nrm[v * 3], nrm[v * 3 + 1], nrm[v * 3 + 2], t);
+                if (t != null) {
+                    col[n * 4] = (byte) b;
+                    col[n * 4 + 1] = (byte) b;
+                    col[n * 4 + 2] = (byte) b;
+                    tex[n * 2] = (short) ((m.polyUV[i * 8 + corner * 2] << 12) / t.width);
+                    tex[n * 2 + 1] = (short) ((m.polyUV[i * 8 + corner * 2 + 1] << 12) / t.height);
+                } else {
+                    col[n * 4] = (byte) (((color >> 16) & 255) * b / 255);
+                    col[n * 4 + 1] = (byte) (((color >> 8) & 255) * b / 255);
+                    col[n * 4 + 2] = (byte) ((color & 255) * b / 255);
+                }
+                col[n * 4 + 3] = (byte) alpha;
+                if (env) {
+                    int nx = nrm == null ? faceNormal[0] : nrm[v * 3];
+                    int ny = nrm == null ? faceNormal[1] : nrm[v * 3 + 1];
+                    int nz = nrm == null ? faceNormal[2] : nrm[v * 3 + 2];
+                    sph[n * 2] = (short) ((((view[0] * nx + view[1] * ny + view[2] * nz) >> 12) + 4096) >> 1);
+                    sph[n * 2 + 1] = (short) ((((view[4] * nx + view[5] * ny + view[6] * nz) >> 12) + 4096) >> 1);
+                }
+                n++;
+            }
+        }
+        flushSorted(n, t, fl, env);
+    }
+
+    private void flushSorted(int n, Texture t, int fl, boolean env) {
+        if (n == 0) {
+            return;
+        }
+        draw(n, 0, t != null, appearance(t, fl | F_NOZ));
+        if (env && (fl & F_BLEND) == 0) {
+            /* the environment map, half over the polygons just painted */
+            for (int i = 0; i < n; i++) {
+                col[i * 4] = (byte) 255;
+                col[i * 4 + 1] = (byte) 255;
+                col[i * 4 + 2] = (byte) 255;
+                col[i * 4 + 3] = (byte) 128;
+            }
+            System.arraycopy(sph, 0, tex, 0, n * 2);
+            draw(n, 0, true, appearance(sphereTex, 1 | F_NOZ | (fl & F_DOUBLE)));
         }
     }
 
