@@ -35,6 +35,6 @@ public class Figure extends DrawableObject3D {
     public void setTransparency(float transparency) {
         com.funkey.doja.Stub.log("Figure.setTransparency");
     }
-    protected Figure() {
+    Figure() {
     }
 }

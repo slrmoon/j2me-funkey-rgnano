@@ -11,6 +11,6 @@ public class ActionTable extends Object3D {
         com.funkey.doja.Stub.log("ActionTable.getMaxFrame");
         return 0;
     }
-    protected ActionTable() {
+    ActionTable() {
     }
 }

@@ -102,7 +102,12 @@ Generated stubs replaced by real code: `opt.ui.Sprite` / `SpriteSet` (collision 
 
 Not bugs: Time Park / Time Cross / NeoPlanet start with key 1 or 2; Nekketsu Soccer kicks off with `*` (pass) and `#`; MotoGP3 needs lcd=176x176, BLOCK BREAKERS lcd=120x120 (catalog).
 
+Done later the same day:
+- **j3d drawFigure without a depth buffer**: the figure's polygons sorted far to near (`FkRender.figureSorted`), as MascotCapsule v3 does. BILLIARD's table and balls are whole. renderFigure / primitives / command lists keep the depth buffer. `-Ddoja.j3d.zbuffer=1` (web `?prop=doja.j3d.zbuffer=1`) is the old way.
+- **`ui.graphics3d` (DoJa 5), first part**: `FkG3D` on the software GL (FkGL): Primitive (points, lines, triangles, quads; colours, texture, colour key, alpha / add blending, transparency), Texture from BMP, Fog, perspective and parallel views, clip rectangle, view and object transforms. Final Fantasy Legends' world map is drawn.
+
 Open:
-- `ui.graphics3d` (DoJa 5) is still stubs: Final Fantasy Legends' world map has no ground.
-- MascotCapsule v3 figures are drawn with a z-buffer, handsets sort polygons: BILLIARD's ball shadows cut into the balls.
+- `ui.graphics3d`: Figure / ActionTable (MBAC, MTRA: the j3d engine could draw them), Group, Light, point sprites, isCross, environment maps.
+- The same sorting for MascotCapsule on MIDP (`com.funkey.mc3`): not done, no test game at hand.
+- BILLIARD+ `CartesianListener.setLookAt` unimplemented.
 - Dragon Quest Mystery Dungeon: the reported glitch was not found (needs a screenshot).

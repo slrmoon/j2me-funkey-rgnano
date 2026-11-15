@@ -973,22 +973,42 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
     }
 
     /* DoJa 5 graphics3d */
+    private com.nttdocomo.ui.graphics3d.FkG3D g3d() {
+        com.nttdocomo.ui.graphics3d.FkG3D r = (com.nttdocomo.ui.graphics3d.FkG3D) r3dUi;
+        com.funkey.doja.gl.FkGL gl = FkBridge.gl(this);
+        if (r == null || r3dUiGl != gl) {
+            r = new com.nttdocomo.ui.graphics3d.FkG3D(gl);
+            r3dUi = r;
+            r3dUiGl = gl;
+        }
+        return r;
+    }
+
+    private Object r3dUi;
+    private Object r3dUiGl;
+
     public void setClipRectFor3D(int x, int y, int w, int h) {
+        g3d().setClipRect(x, y, w, h);
     }
 
     public void setParallelView(int w, int h) {
+        g3d().setParallelView(w, h);
     }
 
     public void setPerspectiveView(float a, float b, int w, int h) {
+        g3d().setPerspectiveView(a, b, w, h);
     }
 
     public void setPerspectiveView(float a, float b, float c) {
+        g3d().setPerspectiveView(a, b, c);
     }
 
     public void flushBuffer() {
+        g3d().flush();
     }
 
     public void setTransform(com.nttdocomo.ui.util3d.Transform transform) {
+        g3d().setTransform(transform);
     }
 
     public void addLight(com.nttdocomo.ui.graphics3d.Light light,
@@ -999,10 +1019,12 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
     }
 
     public void setFog(com.nttdocomo.ui.graphics3d.Fog fog) {
+        g3d().setFog(fog);
     }
 
     public void renderObject3D(com.nttdocomo.ui.graphics3d.DrawableObject3D object,
             com.nttdocomo.ui.util3d.Transform transform) {
+        g3d().render(object, transform, originX, originY);
     }
 
     /* ------------------------------------------------------------------ */
