@@ -264,7 +264,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=d3e42c3-1794756889';
+const V = '?v=77177ca-1794760579';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) {
@@ -809,7 +809,9 @@ function saveRms() {
 function stagePixels() {
   const r = $('stage').getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
   const k = Math.min(1, 2048 / Math.max(r.width * dpr, r.height * dpr));
-  return [Math.max(120, Math.round(r.width * dpr * k)), Math.max(120, Math.round(r.height * dpr * k))];
+  const px = [Math.max(120, Math.round(r.width * dpr * k)), Math.max(120, Math.round(r.height * dpr * k))];
+  // ?rotate: the canvas lies turned in the stage, its own shape is the other way round
+  return typeof ROTATE === 'string' && ROTATE ? [px[1], px[0]] : px;
 }
 let resizeTimer = 0;
 function stageResized() {
@@ -1109,6 +1111,7 @@ function dojaArgs(spPath) {
     '-Dmicroedition.encoding=SJIS', '-Ddoja.scratchpad.path=' + spPath,
     ...(params.get('trace') ? ['-Ddoja.trace=1'] : []),
     ...(/^\d+$/.test(params.get('frame') || '') ? ['-Ddoja.frame.ms=' + params.get('frame')] : []),
+    ...(ROTATE ? ['-Ddoja.screen.rotate=' + ROTATE] : []),
     // ?prop=name=value (repeatable): any runtime property, for testing
     ...params.getAll('prop').filter(x => /^[\w.]+=[\w.,:-]*$/.test(x)).map(x => '-D' + x),
     '-Ddoja.spsize=' + d.spsize, '-Ddoja.jam.hex=' + hex, '-Ddoja.pictures=',
@@ -1124,20 +1127,24 @@ $('start').addEventListener('click', async () => {
   started = true;
   $('start').disabled = true;
   const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x320'));
-  if (lcd && ROTATE) {
+  if (lcd && ROTATE) [lcd[1], lcd[2]] = [lcd[2], lcd[1]];
+  if (lcd) {
+    $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
+    $('stage').style.maxWidth = 'calc(var(--stage-h) * ' + lcd[1] + ' / ' + lcd[2] + ')';
+  }
+  if (ROTATE) {
+    // the canvas keeps the game's own shape and is turned inside the stage
     const st = $('stage');
-    [lcd[1], lcd[2]] = [lcd[2], lcd[1]];
     st.classList.add('rot', 'rot-' + ROTATE);
     const fit = () => {
       st.style.setProperty('--rot-w', st.clientHeight + 'px');
       st.style.setProperty('--rot-h', st.clientWidth + 'px');
     };
     new ResizeObserver(fit).observe(st);
+    window.addEventListener('resize', fit);
+    document.addEventListener('fullscreenchange', () => setTimeout(fit, 50));
     fit();
-  }
-  if (lcd) {
-    $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
-    $('stage').style.maxWidth = 'calc(var(--stage-h) * ' + lcd[1] + ' / ' + lcd[2] + ')';
+    requestAnimationFrame(fit);
   }
   status('Starting ' + game.name + '…');
   const rmsDir = rmsDirOf(game);
