@@ -84,6 +84,10 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
   dialog select { border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain;
            image-rendering: pixelated; outline: none; }
+  /* ?rotate=left|right: games made for the phone held sideways */
+  #stage.rot canvas { position: absolute; left: 50%; top: 50%; width: var(--rot-w, 100%); height: var(--rot-h, 100%); }
+  #stage.rot-left canvas { transform: translate(-50%, -50%) rotate(-90deg); }
+  #stage.rot-right canvas { transform: translate(-50%, -50%) rotate(90deg); }
   #overlay { position: absolute; inset: 0; display: flex; flex-direction: column;
              align-items: center; justify-content: center; gap: 14px; padding: 16px;
              background: var(--panel); text-align: center; }
@@ -260,7 +264,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=b912730-1794738319';
+const V = '?v=cc36e47-1794739026';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) {
@@ -712,7 +716,7 @@ $('import').addEventListener('change', async e => {
 async function startAgain(auto) {
   await stash(Object.assign({}, game, { auto }));
   leaving = true;
-  const keep = ['fps', 'jit', 'heap', 'limit', 'lcd', 'trace', 'frame', 'embed'].filter(k => params.get(k))
+  const keep = ['fps', 'jit', 'heap', 'limit', 'lcd', 'trace', 'frame', 'rotate', 'embed'].filter(k => params.get(k))
     .map(k => '&' + k + '=' + encodeURIComponent(params.get(k))).join('');
   location.href = location.pathname + '?restart=1' + keep;
 }
@@ -883,11 +887,21 @@ function boundTo(e) {
   return null;
 }
 // "sym=code;..." with the SDL key symbols Emscripten's SDL gives these keys
+// ?rotate=left|right: the picture is turned (a game played with the phone
+// held sideways), and the direction keys with it: the key that points up on
+// the screen is the phone's right key when the picture is turned left
+const ROTATE = ['left', 'right'].includes(params.get('rotate')) ? params.get('rotate') : '';
+const TURNED = { left: { up: 'right', right: 'down', down: 'left', left: 'up' },
+                 right: { up: 'left', left: 'down', down: 'right', right: 'up' } };
+function turned(a) {
+  const id = ROTATE && TURNED[ROTATE][a.id];
+  return id ? ACTIONS.find(x => x.id === id) : a;
+}
 function pcKeysSpec(g) {
   const parts = [];
   ACTIONS.forEach((a, i) => {
     if (a.code === null) return;   // full screen: the page does it
-    const code = phoneCode(a, g);
+    const code = phoneCode(turned(a), g);
     for (const k of keymap[a.id] || []) {
       parts.push(SDL.lookupKeyCodeForEvent({ keyCode: k.keyCode, location: 0 }) + '=' + code);
     }
@@ -1108,6 +1122,17 @@ $('start').addEventListener('click', async () => {
   started = true;
   $('start').disabled = true;
   const lcd = /^(\d+)x(\d+)$/.exec(params.get('lcd') || (game.doja ? game.doja.area : '240x320'));
+  if (lcd && ROTATE) {
+    const st = $('stage');
+    [lcd[1], lcd[2]] = [lcd[2], lcd[1]];
+    st.classList.add('rot', 'rot-' + ROTATE);
+    const fit = () => {
+      st.style.setProperty('--rot-w', st.clientHeight + 'px');
+      st.style.setProperty('--rot-h', st.clientWidth + 'px');
+    };
+    new ResizeObserver(fit).observe(st);
+    fit();
+  }
   if (lcd) {
     $('stage').style.aspectRatio = lcd[1] + ' / ' + lcd[2];
     $('stage').style.maxWidth = 'calc(var(--stage-h) * ' + lcd[1] + ' / ' + lcd[2] + ')';
