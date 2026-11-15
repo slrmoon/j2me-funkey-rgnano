@@ -274,7 +274,8 @@ function log(s) {
 // "DoJa: soft <left> <right>": the i-appli's soft key labels (hex UTF-16, "-" none)
 function softLabels(line) {
   const text = h => h === '-' || !h ? '' :
-    String.fromCharCode(...h.match(/.{4}/g).map(x => parseInt(x, 16))).trim();
+    String.fromCharCode(...h.match(/.{4}/g).map(x => parseInt(x, 16))
+      .filter(c => c < 0xe000 || c > 0xf8ff)).trim();   // handset pictographs: no glyph here
   const [l, r] = line.slice(11).trim().split(' ').map(text);
   const bar = $('softbar'), b = bar.querySelectorAll('button');
   b[0].textContent = l; b[1].textContent = r || '';

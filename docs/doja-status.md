@@ -106,8 +106,14 @@ Done later the same day:
 - **j3d drawFigure without a depth buffer**: the figure's polygons sorted far to near (`FkRender.figureSorted`), as MascotCapsule v3 does. BILLIARD's table and balls are whole. renderFigure / primitives / command lists keep the depth buffer. `-Ddoja.j3d.zbuffer=1` (web `?prop=doja.j3d.zbuffer=1`) is the old way.
 - **`ui.graphics3d` (DoJa 5), first part**: `FkG3D` on the software GL (FkGL): Primitive (points, lines, triangles, quads; colours, texture, colour key, alpha / add blending, transparency), Texture from BMP, Fog, perspective and parallel views, clip rectangle, view and object transforms. Final Fantasy Legends' world map is drawn.
 
+- **`ui.graphics3d`, second part**: renderObject3D collects, flushBuffer (or unlock / end of paint) draws over the 2D painted in between. Figures and actions (MBAC/MTRA posed by the j3d engine through `FkMesh`), Group, ambient Light, point sprites, transparency in percent. Trace: `-Ddoja.g3dtrace=1`; `-Ddoja.g3d.cull=0`, `-Ddoja.g3d.front=ccw` for faces.
+- **AccelerationSensor** on keys (arrows tilt, 5 shakes, mG values); with the web page's `?rotate` gravity lies along x (Tamarun asks for the phone held sideways).
+- `-Dkey=value` now wins over the built-in MIDP property table; Connector no longer builds protocol class names from `microedition.platform`. The platform is still "j2me": a handset name ("N905i") breaks games that check the scratchpad against it (Final Fantasy Legends).
+
+graphics3d games in the user's collection (27 titles): drawn — Final Fantasy Legends, THE Skydiving, Tamarun, Chin-san's Fishing, High-Speed Flight 4, High Speed Operation 9, HomeRun Competition, Strongest City Planning 5, Mobile Sports Taizen, Touhou Fuyaku Hina, Densha de GO! Type P, Edotan, Devil May Cry Dante x Vergil, Shutokou Battle (title, tutorial). Need the network: Moba games, 3D Swimming, Tactic Switch, The Horror You Create, Goldfish Scooping. Not supported: D4 group meshes (Lymphatic Massage).
+
 Open:
-- `ui.graphics3d`: Figure / ActionTable (MBAC, MTRA: the j3d engine could draw them), Group, Light, point sprites, isCross, environment maps.
-- The same sorting for MascotCapsule on MIDP (`com.funkey.mc3`): not done, no test game at hand.
+- `ui.graphics3d`: D4 meshes, directional / point lights, environment maps, isCross.
+- MascotCapsule on MIDP keeps its depth buffer: Asphalt 3D and Splinter Cell PT 3D look right with it.
 - BILLIARD+ `CartesianListener.setLookAt` unimplemented.
 - Dragon Quest Mystery Dungeon: the reported glitch was not found (needs a screenshot).
