@@ -91,3 +91,18 @@ Cafe Far Niente Offline: `ClassFormatError 154` = verification error: its stackm
 
 ## 2D stubs implemented (2026-10-24)
 Generated stubs replaced by real code: `opt.ui.Sprite` / `SpriteSet` (collision flags) and `Graphics2.drawSpriteSet` (per-sprite flip and render mode); `ui.PalettedImage` / `Palette` and the `opt.ui` pair (GIF and 1/4/8-bit BMP kept as indices, other formats reduced to 256 colors; palette changes recolor on the next draw); `opt.ui.TransparentImage`; `util.Base64`, `util.MessageDigest` (MD5, SHA-1), `lang.MemoryManager`, `io.PrintWriter`. Checked with a test i-appli (digests match the reference values). Render modes: ratios are 0..255 (openDoJa math). Remaining stubs: 3D (j3d, j3d2, graphics3d, ogl), ImageEncoder, Audio/VisualPresenter extras, phone features (FeliCa, GPS, camera, phone book, mail).
+
+## j2me.one reports, batch 1 (2026-11-15, web build)
+17 reports, 15 games. Fixed in the runtime / web page:
+- **Speed** (Super Merio II, BLOCK BREAKERS, Wild Chase wipes): loops without timing get a frame time by the game's age (`DoJaRuntime.pace`, `-Ddoja.frame.ms`, `?frame=`).
+- **Soft key labels** of a Canvas: log line `DoJa: soft <hex> <hex>`, shown by the web page under the game (Tokkun 2 starts with the left soft key).
+- **Circled numbers** ①..⑳ drawn by `BitmapFont` (Time Park, NeoPlanet menus).
+- **gesturereader** on keys, **ui.util3d** math (Chokkan Crash Bandicoot).
+- **`?rotate=left|right`** in the web page: BILLIARD (Sony Ericsson) is played with the phone sideways.
+
+Not bugs: Time Park / Time Cross / NeoPlanet start with key 1 or 2; Nekketsu Soccer kicks off with `*` (pass) and `#`; MotoGP3 needs lcd=176x176, BLOCK BREAKERS lcd=120x120 (catalog).
+
+Open:
+- `ui.graphics3d` (DoJa 5) is still stubs: Final Fantasy Legends' world map has no ground.
+- MascotCapsule v3 figures are drawn with a z-buffer, handsets sort polygons: BILLIARD's ball shadows cut into the balls.
+- Dragon Quest Mystery Dungeon: the reported glitch was not found (needs a screenshot).
