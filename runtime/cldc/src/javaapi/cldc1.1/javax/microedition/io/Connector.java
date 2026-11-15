@@ -139,10 +139,10 @@ public class Connector {
      */
     static {
         /* Set up the platform name */
-        platform = System.getProperty("microedition.platform");
-        if ((platform == null) || (platform.equals("generic"))) {
-            platform = "j2me";
-        }
+        /* The protocol classes all live under "j2me": microedition.platform
+         * is the handset's model for the games (i-appli read it, e.g.
+         * "N905i"), not a package name */
+        platform = "j2me";
 
         /* Set up the library class root path */
         /* This may vary from one CLDC implementation to another */

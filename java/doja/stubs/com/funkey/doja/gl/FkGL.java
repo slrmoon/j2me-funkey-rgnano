@@ -246,6 +246,9 @@ public final class FkGL {
         }
     }
 
+    /** another 3D layer drawing through this GL keeps its state here (graphics3d) */
+    public Object layer;
+
     public javax.microedition.lcdui.Image target() {
         return target;
     }
@@ -853,6 +856,9 @@ public final class FkGL {
         vaCol = new VertexArray(c, 4, 1);
         vaNrm = new VertexArray(c, 3, 2);
         vaTex = new VertexArray(c, 2, 2);
+        /* a fresh buffer: the old one still holds arrays of the old length,
+         * and M3G refuses arrays of different lengths in one buffer */
+        vb = new VertexBuffer();
     }
 
     private static TriangleStripArray strip(int tris) {

@@ -135,6 +135,7 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
             canvas.lockCount--;
         }
         if (forced || canvas.lockCount == 0) {
+            fkFlush3D();
             canvas.flushFromGraphics();
         }
     }
@@ -432,6 +433,16 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
             changed();
             return;
         }
+        if (src == target) {
+            /* an image drawn onto itself (scrolling its own contents):
+             * MIDP refuses that, so the piece is taken out first */
+            src = javax.microedition.lcdui.Image.createImage(src, sx, sy, sw, sh,
+                    javax.microedition.lcdui.game.Sprite.TRANS_NONE);
+            sx = 0;
+            sy = 0;
+            iw = sw;
+            ih = sh;
+        }
         if (flipMode == 0 && sx == 0 && sy == 0 && sw == iw && sh == ih) {
             g.drawImage(src, dx, dy, TL);
         } else {
@@ -505,6 +516,21 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
                 System.arraycopy(out, (oh - 1 - y) * ow, out, y * ow, ow);
                 System.arraycopy(tmp, 0, out, (oh - 1 - y) * ow, ow);
             }
+        }
+        if (renderOp != 0 || renderSrc != 255) {
+            /* setRenderMode(): blended with what is there, like drawImage */
+            int[] d = new int[ow * oh];
+            target.getRGB(d, 0, ow, x0 + originX, y0 + originY, ow, oh);
+            for (int i = 0; i < d.length; i++) {
+                int sp = out[i];
+                int sa = sp >>> 24;
+                if (sa != 0) {
+                    d[i] = mix(sp, sa, d[i]);
+                }
+            }
+            g.drawRGB(d, 0, ow, x0, y0, ow, oh, false);
+            changed();
+            return;
         }
         g.drawRGB(out, 0, ow, x0, y0, ow, oh, true);
         changed();
@@ -974,18 +1000,26 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
 
     /* DoJa 5 graphics3d */
     private com.nttdocomo.ui.graphics3d.FkG3D g3d() {
-        com.nttdocomo.ui.graphics3d.FkG3D r = (com.nttdocomo.ui.graphics3d.FkG3D) r3dUi;
+        /* one for the surface: every Graphics of a canvas draws the same 3D */
         com.funkey.doja.gl.FkGL gl = FkBridge.gl(this);
-        if (r == null || r3dUiGl != gl) {
+        com.nttdocomo.ui.graphics3d.FkG3D r = (com.nttdocomo.ui.graphics3d.FkG3D) gl.layer;
+        if (r == null) {
             r = new com.nttdocomo.ui.graphics3d.FkG3D(gl);
-            r3dUi = r;
-            r3dUiGl = gl;
+            gl.layer = r;
         }
         return r;
     }
 
-    private Object r3dUi;
-    private Object r3dUiGl;
+    /** 3D still waiting for its flushBuffer() goes to the screen */
+    void fkFlush3D() {
+        Object o = canvas != null ? canvas.fkgl : image != null ? image.fkgl : null;
+        if (o != null) {
+            Object r = ((com.funkey.doja.gl.FkGL) o).layer;
+            if (r != null) {
+                ((com.nttdocomo.ui.graphics3d.FkG3D) r).flush();
+            }
+        }
+    }
 
     public void setClipRectFor3D(int x, int y, int w, int h) {
         g3d().setClipRect(x, y, w, h);
@@ -1013,9 +1047,11 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
 
     public void addLight(com.nttdocomo.ui.graphics3d.Light light,
             com.nttdocomo.ui.util3d.Transform transform) {
+        g3d().addLight(light);
     }
 
     public void resetLights() {
+        g3d().resetLights();
     }
 
     public void setFog(com.nttdocomo.ui.graphics3d.Fog fog) {

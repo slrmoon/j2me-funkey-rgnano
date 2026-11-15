@@ -57,16 +57,16 @@ public abstract class Object3D {
         if (data[0] == 'B' && data[1] == 'M') {
             return new Texture(data);
         }
-        if (data[0] == 'M' && data[1] == 'B') {
-            Figure f = new Figure();
-            f.fkType(TYPE_FIGURE);
-            com.funkey.doja.Stub.log("graphics3d Figure (not drawn yet)");
-            return f;
-        }
-        if (data[0] == 'M' && data[1] == 'T') {
-            ActionTable a = new ActionTable();
-            a.fkType(TYPE_ACTION_TABLE);
-            return a;
+        try {
+            if (data[0] == 'M' && data[1] == 'B') {
+                return new Figure(data);
+            }
+            if (data[0] == 'M' && data[1] == 'T') {
+                return new ActionTable(data);
+            }
+        } catch (IllegalArgumentException e) {
+            com.funkey.doja.Stub.log("Object3D.createInstance: " + e.getMessage());
+            return null;
         }
         com.funkey.doja.Stub.log("Object3D.createInstance: unknown data "
                 + (char) data[0] + (char) data[1]);

@@ -152,6 +152,7 @@ public abstract class Canvas extends Frame {
         flushInPaint = false;
         try {
             paint(g);
+            g.fkFlush3D();
         } finally {
             inPaint = false;
         }

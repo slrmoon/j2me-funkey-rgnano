@@ -58,7 +58,7 @@ public class Primitive extends DrawableObject3D {
         default: break;
         }
         switch (primitiveParam & 0x0c00) {
-        case COLOR_PER_PRIMITIVE: fkColor = new int[1]; break;
+        case COLOR_PER_PRIMITIVE:
         case COLOR_PER_FACE: fkColor = new int[primitiveCount]; break;
         case COLOR_PER_VERTEX_INTERNAL: fkColor = new int[verts]; break;
         default: break;
@@ -144,6 +144,8 @@ public class Primitive extends DrawableObject3D {
     }
 
     public void setTransparency(float transparency) {
-        fkAlpha = transparency < 0 ? 0 : transparency > 1 ? 1 : transparency;
+        /* games give 0..1 or a percentage */
+        float t = transparency > 1f ? transparency / 100f : transparency;
+        fkAlpha = t < 0 ? 0 : t > 1 ? 1 : t;
     }
 }

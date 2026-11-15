@@ -227,7 +227,11 @@ initializeProp(Property** propertySet, const char* key[], char* value[]) {
     int i = 0;
 
     while (key[i] != NULL) {
-        setProp(propertySet, key[i], value[i], KNI_FALSE);
+        /* a value given on the command line (-Dkey=value, set before
+         * this runs) wins over the built-in one */
+        if (getProp(propertySet, key[i]) == NULL) {
+            setProp(propertySet, key[i], value[i], KNI_FALSE);
+        }
         i++;
     }
 }
