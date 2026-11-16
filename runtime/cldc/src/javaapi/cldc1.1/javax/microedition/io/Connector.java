@@ -85,6 +85,9 @@ import com.sun.cldc.io.*;
 
 public class Connector {
 
+    private static String netLogged = "";
+
+
 /*
  * Implementation notes: The open parameter is used for
  * dynamically constructing a class name in the form:
@@ -306,6 +309,18 @@ public class Connector {
              * ClassCastException killed them at start. No network here
              * anyway, so answer as for an unknown protocol (an
              * IOException, which games handle). */
+            if (protocol.equals("http") || protocol.equals("https")
+                    || protocol.equals("socket") || protocol.equals("ssl")
+                    || protocol.equals("datagram") || protocol.equals("sms")) {
+                /* the log tells a game that quits after a failed connection
+                 * from one that quits for other reasons (the catalog's runner
+                 * reads it); once per protocol */
+                if (netLogged.indexOf(protocol + " ") < 0) {
+                    netLogged += protocol + " ";
+                    System.out.println("network: " + protocol + ":"
+                        + (name.length() > 80 ? name.substring(0, 80) : name));
+                }
+            }
             if ((protocol.equals("http") || protocol.equals("https"))
                     && System.getProperty("doja.app.class") != null) {
                 throw new ConnectionNotFoundException(
