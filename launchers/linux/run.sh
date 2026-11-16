@@ -236,12 +236,18 @@ if [ -n "$APP_CLASS" ]; then
     param=$(jam_value "$JAM" AppParam)
     ver=$(jam_value "$JAM" AppVer)
     spsize=$(jam_value "$JAM" SPsize)
+    # the handset the i-appli was made for (TargetDevice): its microedition.platform
+    model=$(jam_value "$JAM" TargetDevice | tr ',' ' ' | awk '{print $1}')
+    case "$model" in *[!A-Za-z0-9_-]*) model="" ;; esac
+    platform_arg=-Ddoja.platform.default=1
+    [ -n "$model" ] && platform_arg="-Dmicroedition.platform=$model"
     [ -n "${FKT_PRELOAD:-}" ] && export LD_PRELOAD=$FKT_PRELOAD
     run_vm $VMARGS =MaxMethodToCompile3000 \
         "-Ddoja.app.class=$APP_CLASS" \
         "-Ddoja.app.param=$param" \
         "-Ddoja.app.ver=$ver" \
         -Dmicroedition.encoding=SJIS \
+        "$platform_arg" \
         "-Ddoja.scratchpad.path=$SP" \
         "-Ddoja.spsize=$spsize" \
         "-Ddoja.jam.hex=$hex" \

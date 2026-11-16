@@ -18,6 +18,68 @@ public abstract class Canvas extends Frame {
     int lockCount;
     private boolean inPaint;
     private boolean flushInPaint;
+    private long paintStart;
+    private int paintSerial;
+
+    /* one thread for all canvases: a frame unlocked early in a paint that is
+     * still running 200 ms later is shown then (the paint may run for long) */
+    private static final Object watchLock = new Object();
+    private static Canvas watchCanvas;
+    private static int watchSerial;
+    private static long watchAt;
+    private static Thread watcher;
+
+    private static void watchLongPaint(Canvas c, int serial) {
+        synchronized (watchLock) {
+            if (watchCanvas == c && watchSerial == serial) {
+                return;
+            }
+            watchCanvas = c;
+            watchSerial = serial;
+            watchAt = System.currentTimeMillis() + 200;
+            if (watcher == null) {
+                watcher = new Thread() {
+                    public void run() {
+                        watchLoop();
+                    }
+                };
+                watcher.start();
+            }
+            watchLock.notify();
+        }
+    }
+
+    private static void watchLoop() {
+        while (true) {
+            Canvas c;
+            int serial;
+            synchronized (watchLock) {
+                while (watchCanvas == null) {
+                    try {
+                        watchLock.wait();
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                }
+                long wait = watchAt - System.currentTimeMillis();
+                if (wait > 0) {
+                    try {
+                        watchLock.wait(wait);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    continue;
+                }
+                c = watchCanvas;
+                serial = watchSerial;
+                watchCanvas = null;
+            }
+            if (c.inPaint && c.paintSerial == serial && c.flushInPaint
+                    && Display.getCurrent() == c) {
+                DoJaRuntime.present();
+            }
+        }
+    }
     private volatile boolean repaintQueued;
     /** a repaint() is waiting for its paint() to end */
     volatile boolean paintPending;
@@ -150,6 +212,8 @@ public abstract class Canvas extends Frame {
         Graphics g = FkBridge.newGraphics(this);
         inPaint = true;
         flushInPaint = false;
+        paintStart = System.currentTimeMillis();
+        paintSerial++;
         try {
             paint(g);
             g.fkFlush3D();
@@ -168,6 +232,16 @@ public abstract class Canvas extends Frame {
         everPainted = true;
         if (inPaint) {
             flushInPaint = true;
+            /* a paint() that keeps running (a loading or download loop, a
+             * wait for a key inside paint) shows what it unlocked, as a
+             * handset does; a short paint still shows once, at its end */
+            if (System.currentTimeMillis() - paintStart > 150) {
+                if (Display.getCurrent() == this) {
+                    DoJaRuntime.present();
+                }
+            } else {
+                watchLongPaint(this, paintSerial);
+            }
             return;
         }
         if (Display.getCurrent() == this) {

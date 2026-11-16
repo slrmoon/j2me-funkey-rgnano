@@ -2174,7 +2174,17 @@ public class Display {
      * @param t The <code>Throwable</code> caught during the call into
      *          application code.
      */
+    private static int throwablesLogged;
+
     static void handleThrowable(Throwable t) {
+        /* paint(), keyPressed()... threw: handsets went on silently, but
+         * say it in the log (the first few), a game that stops drawing
+         * after it is otherwise a mystery */
+        if (throwablesLogged < 5) {
+            throwablesLogged++;
+            System.out.println("lcdui: the application's callback threw " + t);
+            t.printStackTrace();
+        }
         if (Logging.TRACE_ENABLED) {
             Logging.trace(t, "Exception caught in Display class");
         }

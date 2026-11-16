@@ -183,6 +183,13 @@ public class RepaintEventProducer implements EventListener {
         RepaintEvent event = (RepaintEvent)genericEvent;
 
         synchronized (this) {
+            if (callerWaiting != null && handoff == null
+                    && callerWaiting != Thread.currentThread()) {
+                /* a thread blocked in serviceRepaints() paints it */
+                handoff = event;
+                notifyAll();
+                return;
+            }
             queuedEvent = null;
             eventInProcess = event;
         }
@@ -240,12 +247,59 @@ public class RepaintEventProducer implements EventListener {
             }
         } else {
             /*
-             * We only want paint events to be process in the dispatch
-             * to avoid deadlocks. So wait for the repaint event to occur.
+             * Handsets (Nokia, Sony Ericsson...) ran the pending paint on
+             * the thread that called serviceRepaints(), and games rely on
+             * it: C.O. paints only when Thread.currentThread() is its game
+             * thread (a black screen otherwise). Take the pending repaint
+             * and paint here; if the dispatch thread is painting already,
+             * wait for it as before.
+             * -Dmidp.paint.caller=0: always wait for the dispatch thread.
              */
+            Event event = null;
+            if (CALLER_PAINTS) {
+                synchronized (this) {
+                    if (eventInProcess == null && queuedEvent != null) {
+                        event = eventQueue.remove(EventTypes.REPAINT_EVENT);
+                        if (event == null) {
+                            /*
+                             * The dispatch thread has taken the event off
+                             * the queue but not painted yet: ask it to hand
+                             * the event over (see process).
+                             */
+                            callerWaiting = Thread.currentThread();
+                            try {
+                                while (handoff == null && queuedEvent != null
+                                       && eventInProcess == null) {
+                                    try {
+                                        wait(50);
+                                    } catch (InterruptedException e) {
+                                        break;
+                                    }
+                                }
+                                event = handoff;
+                            } finally {
+                                handoff = null;
+                                callerWaiting = null;
+                            }
+                        }
+                    }
+                }
+            }
+            if (event != null) {
+                process(event);
+                return;
+            }
             waitForCurrentRepaintEvents();
         }
     }
+
+    /** thread waiting in serviceRepaints() for the event to paint itself */
+    private Thread callerWaiting;
+    /** the repaint event the dispatch thread handed to callerWaiting */
+    private Event handoff;
+
+    private static final boolean CALLER_PAINTS =
+        !"0".equals(System.getProperty("midp.paint.caller"));
 
     /**
      * Wait for the event queue to process all of the events currently

@@ -2751,6 +2751,7 @@ static int launch_game_once(int idx) {
             char prop_scratchpad[PATH_MAX + 32];
             char prop_spsize[160];
             char prop_pictures[PATH_MAX + 32];
+            char prop_platform[96];
             static char prop_jam[2 * 8192 + 32];
             prop_jam[0] = '\0';
             if (games[idx].is_doja) {
@@ -2792,6 +2793,24 @@ static int launch_game_once(int idx) {
                          games[idx].app_ver);
                 snprintf(prop_scratchpad, sizeof(prop_scratchpad),
                          "-Ddoja.scratchpad.path=%s", doja_scratchpad_path);
+                /* the handset the i-appli was made for (TargetDevice): its
+                 * microedition.platform; games compare it with model names */
+                prop_platform[0] = '\0';
+                {
+                    char model[64];
+                    int k = 0;
+                    if (!read_jam_value(games[idx].jam_path, "TargetDevice", model, sizeof(model)))
+                        model[0] = '\0';
+                    while (model[k] && model[k] != ',' && model[k] != ' ' && model[k] != '\t') {
+                        char c = model[k];
+                        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                              || c == '-' || c == '_')) { k = 0; break; }
+                        k++;
+                    }
+                    model[k] = '\0';
+                    if (model[0])
+                        snprintf(prop_platform, sizeof(prop_platform), "-Dmicroedition.platform=%s", model);
+                }
                 {
                     char sizes[128];
                     if (!read_jam_value(games[idx].jam_path, "SPsize", sizes, sizeof(sizes)))
@@ -2837,6 +2856,7 @@ static int launch_game_once(int idx) {
             prop_param,
             prop_ver,
             prop_encoding,
+            prop_platform[0] ? prop_platform : "-Ddoja.platform.default=1",
             prop_scratchpad,
             prop_spsize,
             prop_jam[0] ? prop_jam : "-Ddoja.jam.hex=",

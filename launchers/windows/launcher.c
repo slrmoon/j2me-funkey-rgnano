@@ -1426,6 +1426,21 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
         cmd_argf("-Ddoja.app.param=%s", param);
         cmd_argf("-Ddoja.app.ver=%s", ver);
         cmd_arg("-Dmicroedition.encoding=SJIS");
+        {
+            /* the handset the i-appli was made for (TargetDevice): its
+             * microedition.platform; games compare it with model names */
+            char model[64];
+            int k = 0;
+            desc_value(jt, "TargetDevice", '=', model, sizeof(model));
+            while (model[k] && model[k] != ',' && model[k] != ' ' && model[k] != '\t') {
+                char c = model[k];
+                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                      || c == '-' || c == '_')) { k = 0; break; }
+                k++;
+            }
+            model[k] = 0;
+            if (model[0]) cmd_argf("-Dmicroedition.platform=%s", model);
+        }
         cmd_argf("-Ddoja.scratchpad.path=%s", sp_a);
         cmd_argf("-Ddoja.spsize=%s", spsize);
         cmd_argf("-Ddoja.jam.hex=%s", hex);

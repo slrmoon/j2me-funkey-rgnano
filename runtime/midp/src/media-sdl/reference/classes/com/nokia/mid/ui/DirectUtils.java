@@ -275,11 +275,14 @@ public final class DirectUtils {
             int out = 0;
 
             if (format == TYPE_BYTE_1_GRAY) {
+                /* offset and scanlength count pixels (bits), most
+                 * significant bit first, as on the Nokia handsets */
                 for (row = 0; row < height; row++) {
                     int src = offset + row * scanlength;
                     for (col = 0; col < width; col++) {
-                        argb[out++] = packedGrayToArgb(pixels, alpha, src + (col / 8),
-                                7 - (col & 7));
+                        int bit = src + col;
+                        argb[out++] = packedGrayToArgb(pixels, alpha, bit >> 3,
+                                7 - (bit & 7));
                     }
                 }
             } else {
@@ -296,13 +299,17 @@ public final class DirectUtils {
             drawArgb(argb, true, x, y, width, height, manipulation);
         }
 
+        /* 1-bit gray: a set bit is a dark pixel (black on the mono
+         * screens these games were made for); opaque unless an alpha
+         * mask clears the bit */
         private int packedGrayToArgb(byte[] pixels, byte[] alpha, int index, int shift) {
-            int color = isBitSet(pixels[index] & 0xff, shift) ? 0x00ffffff : 0x00000000;
-            int a;
+            if (index < 0 || index >= pixels.length) {
+                return 0;
+            }
+            int color = isBitSet(pixels[index] & 0xff, shift) ? 0x00000000 : 0x00ffffff;
+            int a = 0xff;
 
-            if (alpha == null) {
-                a = (color == 0) ? 0 : 0xff;
-            } else {
+            if (alpha != null && index < alpha.length) {
                 a = isBitSet(alpha[index] & 0xff, shift) ? 0xff : 0x00;
             }
             return (a << 24) | color;

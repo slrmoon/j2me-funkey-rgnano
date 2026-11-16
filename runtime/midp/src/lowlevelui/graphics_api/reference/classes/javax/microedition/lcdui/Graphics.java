@@ -1334,6 +1334,11 @@ public class Graphics {
      * @see Image
      */
     public void drawImage(Image img, int x, int y, int anchor) {
+        if (img != null && img == this.img) {
+            /* an image drawn onto itself: handsets (Nokia...) allowed it,
+             * games scale images this way. Draw a copy. */
+            img = Image.createImage(img);
+        }
         if (!img.render(this, x, y, anchor)) {
             /* an anchor handsets accepted (BASELINE, two horizontal bits...):
              * keep one valid choice per axis, as they did */
@@ -1451,6 +1456,9 @@ public class Graphics {
                                   int transform,
                                   int x_dest, int y_dest, 
                                   int anchor) {
+        if (src != null && src == this.img) {
+            src = Image.createImage(src);    /* onto itself: see drawImage */
+        }
         if (!src.renderRegion(this, x_src, y_src, width, height,
                               transform, x_dest, y_dest, anchor)) {
             throw new IllegalArgumentException("");
