@@ -264,7 +264,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=569285a-1794865891';
+const V = '?v=9011302-1794868600';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) {
@@ -374,6 +374,9 @@ async function pick(files) {
       jam: chosen.jam.bytes, cls: jam.AppClass,
       area: /^\d+x\d+$/.test(jam.DrawArea || '') ? jam.DrawArea : '240x240',
       param: ascii(jam.AppParam), ver: ascii(jam.AppVer), spsize: ascii(jam.SPsize),
+      // the handset the i-appli was made for: its microedition.platform (games compare
+      // it with model names: Columns, Number Place...); none given: "j2me" as before
+      model: (ascii(jam.TargetDevice).split(/[\s,]+/).find(x => /^[\w-]{2,16}$/.test(x)) || ''),
       sp: chosen.sp ? chosen.sp.bytes : null } };
     $('picked').textContent = jar.name + ' + ' + chosen.jam.name +
       (chosen.sp ? ' + ' + chosen.sp.name : '') + ' — i-appli ' + jam.AppClass;
@@ -1110,6 +1113,8 @@ function dojaArgs(spPath) {
   return ['-UseVerifier', '=MaxMethodToCompile3000',
     '-Ddoja.app.class=' + d.cls, '-Ddoja.app.param=' + d.param, '-Ddoja.app.ver=' + d.ver,
     '-Dmicroedition.encoding=SJIS', '-Ddoja.scratchpad.path=' + spPath,
+    ...(d.model && !params.getAll('prop').some(x => x.startsWith('microedition.platform='))
+      ? ['-Dmicroedition.platform=' + d.model] : []),
     ...(params.get('trace') ? ['-Ddoja.trace=1'] : []),
     ...(/^\d+$/.test(params.get('frame') || '') ? ['-Ddoja.frame.ms=' + params.get('frame')] : []),
     ...(ROTATE ? ['-Ddoja.screen.rotate=' + ROTATE] : []),
