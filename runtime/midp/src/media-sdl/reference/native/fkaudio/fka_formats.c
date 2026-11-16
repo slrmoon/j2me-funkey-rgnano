@@ -61,15 +61,20 @@ static void mono_note(Mono *m, int key, int vel, double dur_us, double rest_us)
     m->t += dur_us;
 }
 
-static int mono_end(Mono *m)
+static int mono_end_ex(Mono *m, int allow_silent)
 {
     fka_song_sort(m->s);
     fka_song_finish(m->s, (uint32_t) m->t);
-    if (m->s->error || m->s->count <= 2) {
+    if (m->s->error || (m->s->count <= 2 && !allow_silent)) {
         fka_song_free(m->s);
         return -1;
     }
     return 0;
+}
+
+static int mono_end(Mono *m)
+{
+    return mono_end_ex(m, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,7 +198,8 @@ int fka_parse_tone_sequence(const uint8_t *data, int len, FkaSong *out)
         fka_song_free(out);
         return -1;
     }
-    return mono_end(&ts.m);
+    /* a sequence of rests only is valid (Nokia Sound(0, ms) is one): a silent song */
+    return mono_end_ex(&ts.m, 1);
 }
 
 /* ------------------------------------------------------------------ */

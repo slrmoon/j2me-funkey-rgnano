@@ -116,7 +116,15 @@ SUBSYSTEM_MEDIA_JAVA_FILES += \
     $(FKA_CLASSES_DIR)/com/siemens/mp/media/Manager.java \
     $(FKA_CLASSES_DIR)/com/siemens/mp/media/SiemensPlayer.java \
     $(FKA_CLASSES_DIR)/com/siemens/mp/media/protocol/DataSource.java \
-    $(FKA_CLASSES_DIR)/com/motorola/midi/MidiPlayer.java
+    $(FKA_CLASSES_DIR)/com/motorola/midi/MidiPlayer.java \
+    $(FKA_CLASSES_DIR)/com/motorola/multimedia/Lighting.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/game/Vibrator.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/game/Light.java \
+    $(FKA_CLASSES_DIR)/com/siemens/mp/media/control/VolumeControl.java \
+    $(FKA_CLASSES_DIR)/com/mitsubishielectric/carnavi/Sound.java \
+    $(FKA_CLASSES_DIR)/mmpp/media/MediaPlayer.java \
+    $(FKA_CLASSES_DIR)/mmpp/media/BackLight.java \
+    $(FKA_CLASSES_DIR)/mmpp/media/Vibration.java
 
 # Native files for the ( media ) subsystem
 #

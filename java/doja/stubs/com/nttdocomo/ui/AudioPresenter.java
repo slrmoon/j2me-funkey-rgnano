@@ -90,6 +90,17 @@ public class AudioPresenter implements MediaPresenter {
     }
 
     /** runtime: stop every sound (application exit). */
+    private Audio3D audio3d;
+
+    /* 3D sound control of this port (DoJa 4+): a control that never enables, sound plays
+     * as ordinary stereo (P904i Puyo Puyo and many 90x games ask for it at start) */
+    public Audio3D getAudio3D() {
+        if (audio3d == null) {
+            audio3d = new Audio3D();
+        }
+        return audio3d;
+    }
+
     public static void stopAll() {
         synchronized (all) {
             for (int i = 0; i < all.size(); i++) {

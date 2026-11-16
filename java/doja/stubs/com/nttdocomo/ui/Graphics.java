@@ -700,12 +700,26 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
         }
         int ax = x + originX;
         int ay = y + originY;
-        if (ax < 0 || ay < 0 || ax + w > width || ay + h > height) {
+        if (w <= 0 || h <= 0) {
+            return pixels;
+        }
+        if (offset < 0 || offset + w * h > pixels.length) {
             throw new ArrayIndexOutOfBoundsException();
         }
-        target.getRGB(pixels, offset, w, ax, ay, w, h);
-        for (int i = 0; i < w * h; i++) {
-            pixels[offset + i] &= 0xffffff;
+        /* outside the surface reads as black (handsets differ; some games read a row or
+         * column past the edge, or ask for the full screen of a bigger model) */
+        int cx0 = Math.max(ax, 0), cy0 = Math.max(ay, 0);
+        int cx1 = Math.min(ax + w, width), cy1 = Math.min(ay + h, height);
+        if (cx0 > ax || cy0 > ay || cx1 < ax + w || cy1 < ay + h) {
+            for (int i = 0; i < w * h; i++) {
+                pixels[offset + i] = 0;
+            }
+        }
+        if (cx1 > cx0 && cy1 > cy0) {
+            target.getRGB(pixels, offset + (cy0 - ay) * w + (cx0 - ax), w, cx0, cy0, cx1 - cx0, cy1 - cy0);
+            for (int i = 0; i < w * h; i++) {
+                pixels[offset + i] &= 0xffffff;
+            }
         }
         return pixels;
     }

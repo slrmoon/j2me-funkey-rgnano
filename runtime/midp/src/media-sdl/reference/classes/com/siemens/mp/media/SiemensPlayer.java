@@ -108,6 +108,18 @@ final class SiemensPlayer implements Player, javax.microedition.media.PlayerList
     }
 
     public Control getControl(String type) {
+        if (type == null) return null;
+        if (type.endsWith("VolumeControl")) {
+            final javax.microedition.media.control.VolumeControl vc =
+                    (javax.microedition.media.control.VolumeControl) p.getControl("VolumeControl");
+            if (vc == null) return null;
+            return new com.siemens.mp.media.control.VolumeControl() {
+                public void setMute(boolean mute) { vc.setMute(mute); }
+                public boolean isMuted() { return vc.isMuted(); }
+                public int setLevel(int level) { return vc.setLevel(level); }
+                public int getLevel() { return vc.getLevel(); }
+            };
+        }
         return null;
     }
 }

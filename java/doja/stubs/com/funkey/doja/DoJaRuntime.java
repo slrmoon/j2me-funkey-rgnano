@@ -763,6 +763,11 @@ public final class DoJaRuntime implements Runnable {
     }
 
     public static void terminate() {
+        if (!terminated) {
+            /* who asked: a game that quits on its own at start (a check that fails here) shows up in the log */
+            System.out.println("DoJa: terminate() called by the application");
+            new Throwable("terminate").printStackTrace();
+        }
         terminated = true;
         synchronized (queue) {
             queue.notify();
