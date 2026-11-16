@@ -219,6 +219,11 @@ public abstract class MIDlet {
      *
      */
     public final void notifyDestroyed() {
+        if (!getClass().getName().startsWith("com.funkey.")) {
+            /* a game that quits on its own (a failed check at start) shows who asked */
+            System.out.println("MIDlet: notifyDestroyed() called by the application");
+            new Throwable("notifyDestroyed").printStackTrace();
+        }
         peer.notifyDestroyed();
     }
 

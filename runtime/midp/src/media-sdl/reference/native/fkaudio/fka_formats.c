@@ -116,6 +116,9 @@ static void ts_note(ToneSeq *ts, int note, int dur)
     }
 }
 
+/* Handsets played sequences that bend the JSR-135 grammar (zero lengths, a
+ * missing VERSION, an undefined block, an unclosed block...), so this parser
+ * skips what it cannot use instead of refusing the whole sequence. */
 static int ts_play(ToneSeq *ts, int from, int to)
 {
     int i = from;
@@ -124,29 +127,26 @@ static int ts_play(ToneSeq *ts, int from, int to)
         int a = ts->d[i], b = ts->d[i + 1];
         if (++ts->events > 200000) return -1;
         if (a >= TS_SILENCE) {
-            if (b <= 0) return -1;
-            ts_note(ts, a, b);
+            if (b > 0) ts_note(ts, a, b);
             i += 2;
         } else if (a == TS_SET_VOLUME) {
             ts->volume = b < 0 ? 0 : (b > 100 ? 100 : b);
             i += 2;
         } else if (a == TS_REPEAT) {
             int k;
-            if (b < 2 || i + 3 >= to) return -1;
-            for (k = 0; k < b; ++k) {
-                if (ts->d[i + 2] < TS_SILENCE || ts->d[i + 3] <= 0) return -1;
-                ts_note(ts, ts->d[i + 2], ts->d[i + 3]);
+            if (i + 3 >= to) break;
+            if (b < 1) b = 1;
+            if (ts->d[i + 2] >= TS_SILENCE && ts->d[i + 3] > 0) {
+                for (k = 0; k < b; ++k) ts_note(ts, ts->d[i + 2], ts->d[i + 3]);
             }
             i += 4;
         } else if (a == TS_PLAY_BLOCK) {
-            if (b < 0 || ts->block_start[b] < 0 || ts->block_end[b] < 0) return -1;
-            if (ts_play(ts, ts->block_start[b], ts->block_end[b]) != 0) return -1;
+            if (b >= 0 && ts->block_start[b] >= 0 && ts->block_end[b] >= 0) {
+                if (ts_play(ts, ts->block_start[b], ts->block_end[b]) != 0) return -1;
+            }
             i += 2;
-        } else if (a == TS_BLOCK_START || a == TS_BLOCK_END ||
-                   a == TS_TEMPO || a == TS_RESOLUTION || a == TS_VERSION) {
-            i += 2;  /* structure already indexed */
         } else {
-            return -1;
+            i += 2;  /* structure (already indexed) or an unknown event */
         }
     }
     --ts->depth;
@@ -156,29 +156,28 @@ static int ts_play(ToneSeq *ts, int from, int to)
 int fka_parse_tone_sequence(const uint8_t *data, int len, FkaSong *out)
 {
     ToneSeq ts;
-    int i, tempo = 30, resolution = 64, open = -1, main_start = -1;
+    int i, tempo = 30, resolution = 64, open = -1, main_start = -1, first = 0;
     memset(&ts, 0, sizeof(ts));
     ts.d = (const signed char *) data;
     ts.n = len & ~1;
-    if (ts.n < 4 || ts.d[0] != TS_VERSION || ts.d[1] != 1) return -1;
+    if (ts.n < 2) return -1;
+    if (ts.d[0] == TS_VERSION) first = 2;   /* some games leave the header out */
     for (i = 0; i < 128; ++i) ts.block_start[i] = ts.block_end[i] = -1;
 
     /* index header and block structure */
-    for (i = 2; i + 1 < ts.n; i += 2) {
+    for (i = first; i + 1 < ts.n; i += 2) {
         int a = ts.d[i], b = ts.d[i + 1];
         if (a == TS_TEMPO && main_start < 0 && open < 0) {
-            if (b < 5) return -1;
-            tempo = b;
+            tempo = b < 5 ? 5 : b;
         } else if (a == TS_RESOLUTION && main_start < 0 && open < 0) {
-            if (b < 1) return -1;
-            resolution = b;
+            if (b >= 1) resolution = b;
         } else if (a == TS_BLOCK_START) {
-            if (b < 0 || open >= 0 || main_start >= 0) return -1;
+            if (b < 0) continue;
+            if (open >= 0) ts.block_end[open] = i;   /* an unclosed block ends here */
             open = b;
             ts.block_start[b] = i + 2;
         } else if (a == TS_BLOCK_END) {
-            if (open < 0 || b != open) return -1;
-            ts.block_end[b] = i;
+            if (open >= 0) ts.block_end[open] = i;
             open = -1;
         } else if (a == TS_REPEAT) {
             if (open < 0 && main_start < 0) main_start = i;
@@ -187,7 +186,7 @@ int fka_parse_tone_sequence(const uint8_t *data, int len, FkaSong *out)
             main_start = i;
         }
     }
-    if (open >= 0) return -1;
+    if (open >= 0) ts.block_end[open] = ts.n;
     if (main_start < 0) main_start = ts.n;
 
     /* tempo is in units of 4 beats per minute */

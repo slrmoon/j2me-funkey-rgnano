@@ -655,11 +655,11 @@ public class Graphics {
      * @see #getColor
      */
     public synchronized void setColor(int red, int green, int blue) {
-        if ((red < 0)   || (red > 255) 
-            || (green < 0) || (green > 255)
-            || (blue < 0)  || (blue > 255)) {
-            throw new IllegalArgumentException("Value out of range");
-        }
+        /* handsets took the low 8 bits of each component; games pass 256
+         * or a negative value at fade ends and stopped here with an exception */
+        red &= 0xff;
+        green &= 0xff;
+        blue &= 0xff;
 
         rgbColor = (red << 16) | (green << 8) | blue;
         gray = grayVal(red, green, blue);
@@ -1335,7 +1335,17 @@ public class Graphics {
      */
     public void drawImage(Image img, int x, int y, int anchor) {
         if (!img.render(this, x, y, anchor)) {
-            throw new IllegalArgumentException("");
+            /* an anchor handsets accepted (BASELINE, two horizontal bits...):
+             * keep one valid choice per axis, as they did */
+            int h = anchor & (LEFT | HCENTER | RIGHT);
+            int v = anchor & (TOP | VCENTER | BOTTOM);
+            if (h != LEFT && h != HCENTER && h != RIGHT) h = LEFT;
+            if (v != TOP && v != VCENTER && v != BOTTOM) {
+                v = (anchor & BASELINE) != 0 ? BOTTOM : TOP;
+            }
+            if ((h | v) == anchor || !img.render(this, x, y, h | v)) {
+                throw new IllegalArgumentException("");
+            }
         }
     }
 
