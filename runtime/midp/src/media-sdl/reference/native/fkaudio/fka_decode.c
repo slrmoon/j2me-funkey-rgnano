@@ -374,8 +374,21 @@ static int decode_amr(const uint8_t *d, int n, FkaPcm *out)
     Decoder_Interface_exit(dec);
     return set_pcm(out, pcm, k, 8000);
 #else
-    (void) d; (void) n; (void) out;
-    return -10;
+    /* no AMR decoder in this build: a silent clip of the right length, so games
+     * that load AMR sounds at start (often as Nokia FORMAT_WAV) keep running */
+    static const int frame_size[16] = { 12, 13, 15, 17, 19, 20, 26, 31, 5, 6, 5, 5, 0, 0, 0, 0 };
+    int pos = 6, frames = 0;
+    int16_t *pcm;
+    while (pos < n) {
+        int sz = frame_size[(d[pos] >> 3) & 15];
+        if (pos + 1 + sz > n) break;
+        pos += 1 + sz;
+        ++frames;
+    }
+    if (frames == 0) frames = 1;
+    pcm = (int16_t *) calloc((size_t) frames * 160, sizeof(int16_t));
+    if (pcm == NULL) return -2;
+    return set_pcm(out, pcm, frames * 160, 8000);
 #endif
 }
 

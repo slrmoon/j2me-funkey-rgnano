@@ -42,7 +42,8 @@ MIDP_JAVADOC_SOURCEPATH += $(GRAPHICS_MODULE_DIR)/classes
 #
 SUBSYSTEM_GRAPHICS_JAVA_FILES += \
     $(GRAPHICS_MODULE_DIR)/classes/javax/microedition/lcdui/ImageData.java \
-    $(GRAPHICS_MODULE_DIR)/classes/javax/microedition/lcdui/ImageDataFactory.java
+    $(GRAPHICS_MODULE_DIR)/classes/javax/microedition/lcdui/ImageDataFactory.java \
+    $(GRAPHICS_MODULE_DIR)/classes/javax/microedition/lcdui/GifDecoder.java
 
 # vpath for putixel module
 #

@@ -555,6 +555,30 @@ class ImageDataFactory implements AbstractImageDataFactory {
     }
 
     /**
+     * GIF (first frame), as many handsets of the MIDP 1/2 years read it.
+     */
+    private void decodeGIF(ImageData imageData,
+                           byte[] imageBytes,
+                           int imageOffset, int imageLength) {
+        byte[] b = imageBytes;
+        if (imageOffset != 0 || imageLength != imageBytes.length) {
+            b = new byte[imageLength];
+            System.arraycopy(imageBytes, imageOffset, b, 0, imageLength);
+        }
+        GifDecoder.DecodedImage d;
+        try {
+            d = GifDecoder.decode(b);
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException();
+        }
+        if (d == null || d.width <= 0 || d.height <= 0) {
+            throw new IllegalArgumentException();
+        }
+        imageData.initImageData(d.width, d.height, false, d.hasAlpha);
+        loadRGB(imageData, d.argb);
+    }
+
+    /**
      * Function to decode an <code>ImageData</code> from JPEG data.
      *
      * @param imageData the <code>ImageData</code> to be populated
@@ -701,6 +725,10 @@ class ImageDataFactory implements AbstractImageDataFactory {
                                imageOffset, imageLength)) {
             // image type is RAW
             decodeRAW(imageData, imageBytes, imageOffset, imageLength);
+        } else if (imageLength > 13 && imageBytes[imageOffset] == 'G'
+                   && imageBytes[imageOffset + 1] == 'I'
+                   && imageBytes[imageOffset + 2] == 'F') {
+            decodeGIF(imageData, imageBytes, imageOffset, imageLength);
         } else {
             // does not match supported image type
             throw new IllegalArgumentException();
