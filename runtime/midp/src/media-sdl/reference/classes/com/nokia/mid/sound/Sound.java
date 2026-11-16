@@ -77,12 +77,18 @@ public class Sound {
         }
     }
 
+    private boolean empty;
+
     public void init(byte[] data, int type) {
         if (data == null) throw new NullPointerException();
         if (type != FORMAT_TONE && type != FORMAT_WAV) {
             throw new IllegalArgumentException("Unsupported format " + type);
         }
         releasePlayer();
+        empty = data.length == 0;
+        if (empty) {
+            return;     /* an empty sound: handsets took it and played nothing */
+        }
         try {
             attach(Manager.createPlayer(new ByteArrayInputStream(data),
                     type == FORMAT_TONE ? "audio/x-nokia-ota" : "audio/x-wav"));
@@ -133,7 +139,10 @@ public class Sound {
     /** loop: 1..255 plays, 0 forever. */
     public void play(int loop) {
         if (loop < 0 || loop > 255) throw new IllegalArgumentException("loop = " + loop);
-        if (player == null) throw new IllegalStateException("Sound released");
+        if (player == null) {
+            if (empty) return;
+            throw new IllegalStateException("Sound released");
+        }
         try {
             if (player.getState() == Player.STARTED) player.stop();
             player.setMediaTime(0);

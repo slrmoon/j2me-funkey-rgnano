@@ -123,6 +123,33 @@ public class InternalMIDletSuiteImpl implements MIDletSuite {
         }
 
         loadJadProperties(deriveJadPath(jarPath));
+        loadManifestProperties(jarPath);
+    }
+
+    /**
+     * The JAR's own manifest fills what no JAD gave (on a handset the
+     * suite's attributes come from both): games read their settings with
+     * getAppProperty ("Period-Speed-ms" in Nokia's Highroller Casino...).
+     * Read from the launched JAR itself: a resource lookup finds the
+     * system classes' manifest first.
+     */
+    private void loadManifestProperties(String jarPath) {
+        try {
+            byte[] mf = JarReader.readOwnJarEntry(jarPath, "META-INF/MANIFEST.MF");
+            if (mf == null) {
+                return;
+            }
+            ManifestProperties props = new ManifestProperties();
+            props.load(new java.io.ByteArrayInputStream(mf));
+            for (int i = 0; i < props.size(); i++) {
+                String key = props.getKeyAt(i);
+                if (key != null && properties.getProperty(key) == null) {
+                    properties.setProperty(key, props.getValueAt(i));
+                }
+            }
+        } catch (Throwable t) {
+            /* a broken manifest: keep what the JAD gave */
+        }
     }
 
     /**

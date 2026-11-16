@@ -781,6 +781,19 @@ int fka_decode(const uint8_t *data, int len, const char *hint, FkaContent *out)
         out->type = "audio/mpeg";
         return decode_mp3(data, len, &out->pcm);
     }
+    /* OTA as sent over SMS: a user data header first (06 05 04 <port 1581>
+     * 00 00: port addressing, the ringtone port), then the OTA bytes */
+    if (len > 10 && data[0] >= 3 && data[0] < 16 && data[0] + 1 < len &&
+            (data[1] == 0x05 || data[1] == 0x04 || data[1] == 0x00) &&
+            data[data[0] + 1] >= 1 && data[data[0] + 1] <= 8 &&
+            (data[data[0] + 2] >> 1) == 0x25) {
+        int skip = data[0] + 1;
+        if (fka_parse_ota(data + skip, len - skip, &out->song) == 0) {
+            out->kind = FKA_KIND_SONG;
+            out->type = "audio/x-nokia-ota";
+            return 0;
+        }
+    }
     if (data[0] >= 1 && data[0] <= 8 && (data[1] >> 1) == 0x25) {
         out->kind = FKA_KIND_SONG;
         out->type = "audio/x-nokia-ota";

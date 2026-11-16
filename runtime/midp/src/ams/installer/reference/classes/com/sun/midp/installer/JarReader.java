@@ -108,6 +108,15 @@ public class JarReader {
     }
 
     /**
+     * For the runtime itself (no permission check: no suite exists yet when
+     * an internal suite reads its own JAR's manifest).
+     */
+    static byte[] readOwnJarEntry(String jarFilePath, String entryName)
+            throws IOException {
+        return readJarEntry0(jarFilePath, entryName);
+    }
+
+    /**
      * Performs the same function as readJarEntry.
      *
      * @param localJarFilePath file pathname of the JAR file to read. May
