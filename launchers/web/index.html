@@ -375,7 +375,7 @@ async function pick(files) {
       area: /^\d+x\d+$/.test(jam.DrawArea || '') ? jam.DrawArea : '240x240',
       param: ascii(jam.AppParam), ver: ascii(jam.AppVer), spsize: ascii(jam.SPsize),
       // the handset the i-appli was made for: its microedition.platform (games compare
-      // it with model names: Columns, Number Place...); none given: "j2me" as before
+      // it with model names: Columns, Number Place...); none given: the generic "j2me/phoneME"
       model: (ascii(jam.TargetDevice).split(/[\s,]+/).find(x => /^[\w-]{2,16}$/.test(x)) || ''),
       sp: chosen.sp ? chosen.sp.bytes : null } };
     $('picked').textContent = jar.name + ' + ' + chosen.jam.name +

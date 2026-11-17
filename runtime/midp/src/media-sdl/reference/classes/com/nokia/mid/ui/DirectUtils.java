@@ -113,14 +113,109 @@ public final class DirectUtils {
 
         public void getPixels(short[] pixels, int offset, int scanlength,
                 int x, int y, int width, int height, int format) {
+            int[] argb = readArgb(x, y, width, height);
+            if (pixels == null || argb == null) {
+                return;
+            }
+            for (int row = 0; row < height; row++) {
+                int dst = offset + row * scanlength;
+                for (int col = 0; col < width; col++) {
+                    int p = argb[row * width + col];
+                    int a = (p >>> 24), r = (p >> 16) & 0xff, g = (p >> 8) & 0xff, b = p & 0xff;
+                    int v;
+                    if (format == TYPE_USHORT_565_RGB) {
+                        v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+                    } else if (format == TYPE_USHORT_555_RGB) {
+                        v = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+                    } else if (format == TYPE_USHORT_1555_ARGB) {
+                        v = (a >= 0x80 ? 0x8000 : 0) | ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+                    } else if (format == TYPE_USHORT_444_RGB) {
+                        v = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+                    } else {   /* 4444 ARGB */
+                        v = ((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+                    }
+                    int i = dst + col;
+                    if (i >= 0 && i < pixels.length) {
+                        pixels[i] = (short)v;
+                    }
+                }
+            }
         }
 
         public void getPixels(byte[] pixels, byte[] alpha, int offset, int scanlength,
                 int x, int y, int width, int height, int format) {
+            int[] argb = readArgb(x, y, width, height);
+            if (pixels == null || argb == null) {
+                return;
+            }
+            for (int row = 0; row < height; row++) {
+                for (int col = 0; col < width; col++) {
+                    int p = argb[row * width + col];
+                    int a = p >>> 24, r = (p >> 16) & 0xff, g = (p >> 8) & 0xff, b = p & 0xff;
+                    boolean opaque = a >= 0x80;
+                    if (format == TYPE_BYTE_1_GRAY) {
+                        int bit = offset + row * scanlength + col;
+                        int i = bit >> 3, m = 0x80 >> (bit & 7);
+                        if (i < 0 || i >= pixels.length) continue;
+                        boolean dark = (r * 30 + g * 59 + b * 11) / 100 < 128;
+                        pixels[i] = (byte)(dark ? pixels[i] | m : pixels[i] & ~m);
+                        if (alpha != null && i < alpha.length) {
+                            alpha[i] = (byte)(opaque ? alpha[i] | m : alpha[i] & ~m);
+                        }
+                    } else {
+                        int i = offset + row * scanlength + col;
+                        if (i < 0 || i >= pixels.length) continue;
+                        int v = format == TYPE_BYTE_332_RGB
+                                ? ((r >> 5) << 5) | ((g >> 5) << 2) | (b >> 6)
+                                : (r * 30 + g * 59 + b * 11) / 100;
+                        pixels[i] = (byte)v;
+                        if (alpha != null && i < alpha.length) {
+                            alpha[i] = (byte)a;
+                        }
+                    }
+                }
+            }
         }
 
         public void getPixels(int[] pixels, int offset, int scanlength,
                 int x, int y, int width, int height, int format) {
+            int[] argb = readArgb(x, y, width, height);
+            if (pixels == null || argb == null) {
+                return;
+            }
+            for (int row = 0; row < height; row++) {
+                for (int col = 0; col < width; col++) {
+                    int i = offset + row * scanlength + col;
+                    if (i < 0 || i >= pixels.length) continue;
+                    int p = argb[row * width + col];
+                    pixels[i] = format == TYPE_INT_888_RGB ? (p & 0x00ffffff) : p;
+                }
+            }
+        }
+
+        /* the pixels of the image this Graphics draws into (the screen
+         * cannot be read back: null) */
+        private int[] readArgb(int x, int y, int width, int height) {
+            logOnce("getPixels", width, height, 0, 0);
+            if (width <= 0 || height <= 0) {
+                return null;
+            }
+            com.sun.midp.lcdui.GraphicsAccess ga =
+                    com.sun.midp.lcdui.GameMap.getGraphicsAccess();
+            Image img = ga == null ? null : ga.getGraphicsImage(graphics);
+            if (img == null) {
+                return null;
+            }
+            x += graphics.getTranslateX();
+            y += graphics.getTranslateY();
+            int[] argb = new int[width * height];
+            /* clip to the image; outside stays 0 (transparent black) */
+            int x0 = Math.max(x, 0), y0 = Math.max(y, 0);
+            int x1 = Math.min(x + width, img.getWidth()), y1 = Math.min(y + height, img.getHeight());
+            if (x1 > x0 && y1 > y0) {
+                img.getRGB(argb, (y0 - y) * width + (x0 - x), width, x0, y0, x1 - x0, y1 - y0);
+            }
+            return argb;
         }
 
         public void drawImage(Image image, int x, int y, int anchor, int manipulation) {

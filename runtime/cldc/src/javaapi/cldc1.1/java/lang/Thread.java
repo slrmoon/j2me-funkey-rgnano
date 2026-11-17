@@ -237,8 +237,16 @@ class Thread implements Runnable {
      *               started.
      * @see        java.lang.Thread#run()
      */
-    public synchronized void start() {
-        start(this);
+    public void start() {
+        synchronized (this) {
+            start(this);
+        }
+        /*
+         * Let the new thread run first, as handsets did: games start a
+         * loading thread and then a timer whose first tick expects the
+         * thread to have begun (Need for Speed ProStreet).
+         */
+        yield();
     }
 
     private static synchronized void start(Thread thread) {

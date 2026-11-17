@@ -94,6 +94,13 @@ public interface GraphicsAccess {
     public Object getGraphicsCreator(Graphics g);
 
     /**
+     * Get the image a Graphics object draws into
+     * @param g Graphics object
+     * @return the target image, null for the screen
+     */
+    public Image getGraphicsImage(Graphics g);
+
+    /**
      * Set the creator of the Graphics object
      * @param g Graphics object to set creator for
      * @param creator Graphics creator reference

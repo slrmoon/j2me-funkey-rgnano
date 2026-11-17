@@ -236,7 +236,8 @@ public final class System {
 /* #endif */
             );
         }
-        return getProperty0(key);
+        String v = com.sun.cldc.util.PropertyOverrides.get(key);
+        return v != null ? v : getProperty0(key);
     }
 
     private native static String getProperty0(String key);

@@ -124,6 +124,187 @@ public class InternalMIDletSuiteImpl implements MIDletSuite {
 
         loadJadProperties(deriveJadPath(jarPath));
         loadManifestProperties(jarPath);
+        guessPlatform(jarPath);
+    }
+
+    /**
+     * Games made for one handset check microedition.platform and refuse to
+     * run elsewhere (KaoKang wants "Nokia3510i"). When the JAR's classes
+     * name exactly one handset model and no platform was given
+     * (-Dmicroedition.platform), report that model. Several models are
+     * per-handset tweaks (Siberian Strike picks its sound mode, an NPE
+     * with the wrong one): keep the generic platform then.
+     * -Dmidp.platform.guess=0 turns this off.
+     */
+    private void guessPlatform(String jarPath) {
+        try {
+            if (!"j2me/phoneME".equals(System.getProperty("microedition.platform"))
+                    || System.getProperty("doja.app.class") != null
+                    || "0".equals(System.getProperty("midp.platform.guess"))) {
+                return;
+            }
+            String[] names = jarClassNames(jarPath);
+            String best = null;
+            boolean several = false;
+            for (int i = 0; names != null && i < names.length; i++) {
+                byte[] b = JarReader.readOwnJarEntry(jarPath, names[i]);
+                if (b == null) {
+                    continue;
+                }
+                for (int k = 0; k + 8 < b.length; k++) {
+                    String m = modelAt(b, k);
+                    if (m == null) {
+                        continue;
+                    }
+                    if (best == null) {
+                        best = m;
+                    } else if (!best.equals(m)) {
+                        several = true;
+                    }
+                }
+            }
+            if (best != null && !several) {
+                com.sun.cldc.util.PropertyOverrides.set("microedition.platform", best);
+                System.out.println("platform: " + best + " (a handset model named in the JAR)");
+            }
+        } catch (Throwable t) {
+            /* keep the default platform */
+        }
+    }
+
+    /** "Nokia3510i", "SonyEricssonK660" at b[k] (a whole string), or null */
+    private static String modelAt(byte[] b, int k) {
+        String prefix;
+        int digitsMin;
+        if (b[k] == 'N' && match(b, k, "Nokia")) {
+            prefix = "Nokia";
+            digitsMin = 4;
+        } else if (b[k] == 'S' && match(b, k, "SonyEricsson")) {
+            prefix = "SonyEricsson";
+            digitsMin = 3;
+        } else {
+            return null;
+        }
+        /* a string of its own in the constant pool: length bytes before */
+        if (k > 0 && isAlnum(b[k - 1])) {
+            return null;
+        }
+        int i = k + prefix.length();
+        int start = i;
+        if (prefix.charAt(0) == 'S') {
+            if (i >= b.length || b[i] < 'A' || b[i] > 'Z') {
+                return null;
+            }
+            i++;
+            start = i;
+        }
+        while (i < b.length && b[i] >= '0' && b[i] <= '9') {
+            i++;
+        }
+        int digits = i - start;
+        if (digits < digitsMin || digits > 4) {
+            return null;
+        }
+        if (i < b.length && b[i] >= 'a' && b[i] <= 'z') {
+            i++;
+        }
+        if (i < b.length && isAlnum(b[i])) {
+            return null;
+        }
+        return new String(b, k, i - k);
+    }
+
+    private static boolean match(byte[] b, int k, String s) {
+        if (k + s.length() > b.length) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            if (b[k + i] != s.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isAlnum(byte c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+    }
+
+    /** the .class entries of a JAR, from its central directory */
+    private static String[] jarClassNames(String jarPath) throws IOException {
+        RandomAccessStream stream = new RandomAccessStream();
+        try {
+            stream.connect(jarPath, Connector.READ);
+            int size = stream.getSizeOf();
+            int tail = size < 65557 ? size : 65557;
+            byte[] t = new byte[tail];
+            stream.setPosition(size - tail);
+            readFully(stream, t);
+            int e = -1;
+            for (int i = tail - 22; i >= 0; i--) {
+                if (u32(t, i) == 0x06054b50) {
+                    e = i;
+                    break;
+                }
+            }
+            if (e < 0) {
+                return null;
+            }
+            int count = u16(t, e + 10);
+            int cdSize = u32(t, e + 12);
+            int cdOff = u32(t, e + 16);
+            if (cdSize <= 0 || cdOff < 0 || cdOff + cdSize > size) {
+                return null;
+            }
+            byte[] cd = new byte[cdSize];
+            stream.setPosition(cdOff);
+            readFully(stream, cd);
+            java.util.Vector v = new java.util.Vector();
+            int p = 0;
+            for (int n = 0; n < count && p + 46 <= cdSize; n++) {
+                if (u32(cd, p) != 0x02014b50) {
+                    break;
+                }
+                int nl = u16(cd, p + 28);
+                int xl = u16(cd, p + 30);
+                int cl = u16(cd, p + 32);
+                if (p + 46 + nl > cdSize) {
+                    break;
+                }
+                String name = new String(cd, p + 46, nl);
+                if (name.endsWith(".class")) {
+                    v.addElement(name);
+                }
+                p += 46 + nl + xl + cl;
+            }
+            String[] r = new String[v.size()];
+            v.copyInto(r);
+            return r;
+        } finally {
+            try {
+                stream.disconnect();
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static void readFully(RandomAccessStream s, byte[] b) throws IOException {
+        int off = 0;
+        while (off < b.length) {
+            int n = s.readBytes(b, off, b.length - off);
+            if (n <= 0) {
+                throw new IOException("short read");
+            }
+            off += n;
+        }
+    }
+
+    private static int u16(byte[] b, int i) {
+        return (b[i] & 0xff) | ((b[i + 1] & 0xff) << 8);
+    }
+
+    private static int u32(byte[] b, int i) {
+        return u16(b, i) | (u16(b, i + 2) << 16);
     }
 
     /**

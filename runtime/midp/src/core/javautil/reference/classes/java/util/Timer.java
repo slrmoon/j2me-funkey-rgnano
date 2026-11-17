@@ -380,6 +380,8 @@ class TimerThread extends Thread {
         this.queue = queue;
     }
     /** start the main processing loop.  */
+    private static int taskErrors;
+
     public void run() {
         try {
             mainLoop();
@@ -446,8 +448,17 @@ class TimerThread extends Thread {
 		    try {
 			task.run();
 		    } catch (Exception e) {
-			// Cancel tasks that cause exceptions
-			task.cancel();
+			/*
+			 * The reference cancelled the task, which froze games
+			 * whose first tick runs before their loading thread is
+			 * done (Need for Speed ProStreet: an NPE once, a black
+			 * screen for ever). Keep it, say it in the log.
+			 */
+			if (taskErrors < 5) {
+			    taskErrors++;
+			    System.out.println("Timer: a TimerTask threw " + e);
+			    e.printStackTrace();
+			}
 		    }
 		}
             } catch (InterruptedException e) {

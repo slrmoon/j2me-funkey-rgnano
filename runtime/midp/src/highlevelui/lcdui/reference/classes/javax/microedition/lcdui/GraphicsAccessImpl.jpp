@@ -139,6 +139,10 @@ class GraphicsAccessImpl implements com.sun.midp.lcdui.GraphicsAccess {
         return g.getCreator();
     }
 
+    public Image getGraphicsImage(Graphics g) {
+        return g.getTargetImage();
+    }
+
     /**
      * Set the creator of the Graphics object
      * @param g Graphics object to set creator for

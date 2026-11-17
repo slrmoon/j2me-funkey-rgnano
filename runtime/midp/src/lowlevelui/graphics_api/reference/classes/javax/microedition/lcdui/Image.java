@@ -665,10 +665,20 @@ public class Image {
             // a new object
             return Graphics.getImageGraphics(this);
         } else {
-            // SYNC NOTE: Not accessing any shared data, no locking necessary
-            throw new IllegalStateException();
+            /*
+             * MIDP says IllegalStateException, but Nokia handsets gave a
+             * Graphics for a loaded image too: games use it to read the
+             * pixels back with DirectGraphics.getPixels (Ice Age Skater).
+             */
+            if (!immutableGraphicsLogged) {
+                immutableGraphicsLogged = true;
+                System.out.println("lcdui: getGraphics() on an immutable image (allowed, as on Nokia)");
+            }
+            return Graphics.getImageGraphics(this);
         }
     }
+
+    private static boolean immutableGraphicsLogged;
 
     /**
      * Gets the width of the image in pixels. The value returned

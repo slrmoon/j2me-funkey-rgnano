@@ -172,7 +172,7 @@
 		Scope="system"
 		Comment="System locale."/>
   <property Key="microedition.platform" 
-		Value="j2me" 
+		Value="j2me/phoneME" 
 		Scope="system"
 		Comment="Platform name."/>
   <!-- property Key="microedition.encoding" 
