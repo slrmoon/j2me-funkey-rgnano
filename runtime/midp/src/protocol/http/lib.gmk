@@ -56,7 +56,12 @@ SUBSYSTEM_HTTP_JAVA_FILES += \
     $(SUBSYSTEM_DIR)/protocol/http/classes/javax/microedition/io/HttpConnection.java \
     $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/Protocol.java \
     $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/StreamConnectionElement.java \
-    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/StreamConnectionPool.java
+    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/StreamConnectionPool.java \
+    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/NetReplay.java \
+    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/ReplayConnection.java \
+    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/sun/midp/io/j2me/http/ReplayHttp.java \
+    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/nttdocomo/io/HttpConnection.java \
+    $(SUBSYSTEM_DIR)/protocol/http/reference/classes/com/nttdocomo/io/ConnectionException.java
 
 ifeq ($(USE_I3_TEST), true)
 

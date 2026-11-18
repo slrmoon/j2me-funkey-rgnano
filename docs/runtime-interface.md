@@ -39,6 +39,21 @@ i-appli (DoJa) game:
   `doja.app.*` values are only fallbacks, so non-ASCII ones can be left
   empty.
 
+Recorded server answers (both kinds of game): when `<game>.net` lies next to
+the jar, every launcher passes `-Dnet.replay=<game.net>` (the web page fetches
+it beside a `?jar=` address, or takes it with the picked files; `?net=` gives
+another address). The game's `http:`/`https:` requests are answered from it
+(`com.sun.midp.io.j2me.http.NetReplay`); without the file there is no network,
+as before. Unanswered requests are logged as `network: <url>` and
+`net-miss: <METHOD> <url> [body=<hex>]` (every url once). Format: `J2MENET 1`,
+then per answer `REQ <METHOD|*> <url>`, `STATUS <code> <message>`, any
+`HDR <Name>: <value>`, `BODY <n>` and n bytes. An url recorded without a
+`?query` answers any query; `/../` segments are resolved. The catalog
+builder's `netcapture` stage makes these files from servers that still answer
+(the Keitai Archive revival servers `*.gs.keitaiarchive.org`).
+`com.nttdocomo.io.HttpConnection` and `ConnectionException` are system classes
+now (runtime/midp/src/protocol/http): do not regenerate them in java/doja/api.
+
 VM options (CLDC flags, `+Name` / `-Name` / `=NameValue`):
 
 | Option | Meaning |

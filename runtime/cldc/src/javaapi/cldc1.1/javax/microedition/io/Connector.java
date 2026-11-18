@@ -309,6 +309,23 @@ public class Connector {
              * ClassCastException killed them at start. No network here
              * anyway, so answer as for an unknown protocol (an
              * IOException, which games handle). */
+            /* http(s): answered from the game's recorded server answers
+             * (-Dnet.replay, a .net file next to the jar); the classes log
+             * every url they cannot answer */
+            if (protocol.equals("http") || protocol.equals("https")) {
+                boolean doja = System.getProperty("doja.app.class") != null;
+                if (doja || System.getProperty("net.replay") != null) {
+                    try {
+                        ConnectionBaseInterface replay = (ConnectionBaseInterface)
+                            Class.forName(doja ? "com.sun.midp.io.j2me.http.ReplayHttp"
+                                : "com.sun.midp.io.j2me.http.ReplayConnection").newInstance();
+                        return replay.openPrim(protocol + ":" + name, mode, timeouts);
+                    } catch (ClassNotFoundException e) {
+                    } catch (InstantiationException e) {
+                    } catch (IllegalAccessException e) {
+                    }
+                }
+            }
             if (protocol.equals("http") || protocol.equals("https")
                     || protocol.equals("socket") || protocol.equals("ssl")
                     || protocol.equals("datagram") || protocol.equals("sms")) {

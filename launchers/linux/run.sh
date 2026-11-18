@@ -187,9 +187,9 @@ run_vm() {
             # the terminal and the log file
             mkdir -p "$DATA/logs"
             [ -f "$LOGFILE" ] && mv -f "$LOGFILE" "${LOGFILE%.log}.prev.log"
-            { launch_log $nojit "$@"; ./runMidlet $nojit "$@"; } > >(tee "$LOGFILE") 2>&1 && rc=0 || rc=$?
+            { launch_log $nojit "$NETARG" "$@"; ./runMidlet $nojit "$NETARG" "$@"; } > >(tee "$LOGFILE") 2>&1 && rc=0 || rc=$?
         else
-            ./runMidlet $nojit "$@" && rc=0 || rc=$?
+            ./runMidlet $nojit "$NETARG" "$@" && rc=0 || rc=$?
         fi
         [ -f "$PHONEME_RESTART_FLAG" ] || break
     done
@@ -197,6 +197,10 @@ run_vm() {
     return "$rc"
 }
 [ "${VERIFY:-0}" = 1 ] || VMARGS="-UseVerifier ${VMARGS:-}"
+# recorded server answers next to the jar (game.net): the game's http
+# requests are answered from it
+NETARG=-Dnet.replay.none=1
+for f in "$BASE.net" "$BASE.NET"; do [ -f "$f" ] && NETARG="-Dnet.replay=$f" && break; done
 export PHONEME_RMS_HOME=$DATA/rms/$NAME
 export PHONEME_WINDOW_SCALE=${SCALE:-3}
 export PHONEME_SCALE_MODE=${MODE:-fit}

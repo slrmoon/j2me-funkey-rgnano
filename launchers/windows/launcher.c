@@ -1347,6 +1347,25 @@ static int run_game(HWND owner, const wchar_t *path, int wait) {
     if (!st.verify) cmd_arg("-UseVerifier");
     if (!st.jit) cmd_arg("-UseCompiler");
     cmd_args_split(st.vmargs);
+    {
+        /* recorded server answers next to the jar (game.net): the game's
+         * http requests are answered from it */
+        wchar_t net[WBUF];
+        char *net_a = NULL;
+        _snwprintf(net, WBUF, L"%ls.net", base);
+        if (!file_exists(net)) _snwprintf(net, WBUF, L"%ls.NET", base);
+        if (file_exists(net)) {
+            net_a = ascii_alias(net);
+            if (net_a == NULL) {
+                _snwprintf(tmp, WBUF, L"%ls\\game.net", rundir);
+                if (link_or_copy(net, tmp)) net_a = ascii_alias(tmp);
+            }
+        }
+        if (net_a != NULL) {
+            cmd_argf("-Dnet.replay=%s", net_a);
+            free(net_a);
+        }
+    }
 
     ri = (RunInfo *)calloc(1, sizeof(RunInfo));
     if (ri == NULL) { zip_close(&zip); return 0; }

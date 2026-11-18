@@ -2752,6 +2752,7 @@ static int launch_game_once(int idx) {
             char prop_spsize[160];
             char prop_pictures[PATH_MAX + 32];
             char prop_platform[96];
+            static char prop_net[PATH_MAX + 32];
             static char prop_jam[2 * 8192 + 32];
             prop_jam[0] = '\0';
             if (games[idx].is_doja) {
@@ -2776,6 +2777,23 @@ static int launch_game_once(int idx) {
                              jp, PM_DIR, plat->support_jar);
                 } else {
                     snprintf(classpath, sizeof(classpath), "%s", jp);
+                }
+            }
+            {
+                /* recorded server answers next to the jar (game.net): the
+                 * game's http requests are answered from it */
+                char net_path[PATH_MAX], net_link[PATH_MAX];
+                size_t jl = strlen(jar_path);
+                prop_net[0] = '\0';
+                if (jl > 4 && jl < sizeof(net_path)) {
+                    struct stat nst;
+                    memcpy(net_path, jar_path, jl - 4);
+                    strcpy(net_path + jl - 4, ".net");
+                    if (stat(net_path, &nst) != 0) strcpy(net_path + jl - 4, ".NET");
+                    if (stat(net_path, &nst) == 0 && S_ISREG(nst.st_mode)) {
+                        const char *np = ascii_path(net_path, "pm-run.net", net_link, sizeof(net_link));
+                        snprintf(prop_net, sizeof(prop_net), "-Dnet.replay=%s", np);
+                    }
                 }
             }
             if (plat->encoding != NULL) {
@@ -2852,6 +2870,7 @@ static int launch_game_once(int idx) {
             "=MaxMethodToCompile3000",
             debug_values[DEBUG_OPT_JIT] ? "-UseVerifier" : "-UseCompiler",
             "-UseVerifier",
+            prop_net[0] ? prop_net : "-Dnet.replay.none=1",
             prop_app,
             prop_param,
             prop_ver,
@@ -2875,6 +2894,7 @@ static int launch_game_once(int idx) {
              * (ClassFormatError 154) but run, as on most emulators */
             "-UseVerifier",
             debug_values[DEBUG_OPT_JIT] ? "-UseVerifier" : "-UseCompiler",
+            prop_net[0] ? prop_net : "-Dnet.replay.none=1",
             "-classpathext",
             classpath,
             "internal",
