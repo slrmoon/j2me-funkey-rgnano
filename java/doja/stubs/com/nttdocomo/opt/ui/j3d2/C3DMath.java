@@ -53,6 +53,15 @@ public final class C3DMath {
         return f(java.lang.Math.cos(rad(value)));
     }
 
+    /** fixed-point add / sub: plain integer arithmetic */
+    public static int add(int a, int b) {
+        return a + b;
+    }
+
+    public static int sub(int a, int b) {
+        return a - b;
+    }
+
     public static int div(int a, int b) {
         return (int) (((long) a << 16) / b);
     }

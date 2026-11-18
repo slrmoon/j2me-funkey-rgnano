@@ -54,16 +54,12 @@ public class SpeechSynthesizer {
     }
 
     public void speak(String words) {
-        if (words == null) {
-            throw new NullPointerException();
-        }
+        /* null: games clear the queue with it (Healthy Life Journal) */
         done(SpeechListener.SPEECH_COMPLETE);
     }
 
     public void speak(XString words) {
-        if (words == null) {
-            throw new NullPointerException();
-        }
+        /* null: games clear the queue with it (Healthy Life Journal) */
         done(SpeechListener.SPEECH_COMPLETE);
     }
 

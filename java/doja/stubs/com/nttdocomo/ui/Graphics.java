@@ -11,7 +11,8 @@ import com.nttdocomo.lang.XString;
  * created with the four argument getColorOfRGB()).
  */
 public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
-        com.nttdocomo.ui.graphics3d.Graphics3D, com.nttdocomo.ui.ogl.GraphicsOGL {
+        com.nttdocomo.ui.graphics3d.Graphics3D, com.nttdocomo.ui.ogl.GraphicsOGL,
+        com.nttdocomo.opt.ui.ogl.GraphicsOGL2 {
     public static final int BLACK = 0;
     public static final int BLUE = 1;
     public static final int LIME = 2;
@@ -1582,5 +1583,26 @@ public class Graphics implements com.nttdocomo.opt.ui.j3d.Graphics3D,
 
     public void glWeightPointerOES(int size, int type, int stride, int pointer) {
         com.funkey.doja.gl.Ogl.glWeightPointerOES(fkgl(), size, type, stride, pointer);
+    }
+
+    /* opt.ui.ogl.GraphicsOGL2 (texture coordinate generation: environment
+     * maps): not drawn, the texture keeps the vertex coordinates. Ridge
+     * Racers casts the Graphics to it. */
+    public void glTexGenf(int coord, int pname, float param) {
+    }
+
+    public void glTexGenfv(int coord, int pname, float[] params) {
+    }
+
+    public void glTexGeni(int coord, int pname, int param) {
+    }
+
+    public void glTexGeniv(int coord, int pname, int[] params) {
+    }
+
+    public void glGetTexGenfv(int coord, int pname, float[] params) {
+    }
+
+    public void glGetTexGeniv(int coord, int pname, int[] params) {
     }
 }

@@ -212,7 +212,7 @@ public final class C3DGraphics extends Graphics {
             OP_FOG = 24, OP_FOGV = 25, OP_LIGHT = 26, OP_MATERIAL = 27, OP_LIGHTMODEL = 28,
             OP_FRONTFACE = 29, OP_BINDTEXTURE = 30, OP_TEXPARAM = 31, OP_TEXENV = 32,
             OP_VIEWPORT = 33, OP_CALLLIST = 34, OP_CLEARCOLOR = 35, OP_ALPHAFUNC = 36,
-            OP_CLEAR = 37, OP_CLEAR2 = 38, OP_TEXIMAGE = 39;
+            OP_CLEAR = 37, OP_CLEAR2 = 38, OP_TEXIMAGE = 39, OP_TEXENVV = 40;
 
     private boolean rec(int op, int[] args, Object data) {
         if (recording == null) {
@@ -287,6 +287,7 @@ public final class C3DGraphics extends Graphics {
         case OP_BINDTEXTURE: bindTexture(a[0], a[1]); break;
         case OP_TEXPARAM: texParameter(a[0], a[1], a[2]); break;
         case OP_TEXENV: texEnvi(a[0], a[1], a[2]); break;
+        case OP_TEXENVV: texEnvf(a[0], a[1], (int[]) c[2]); break;
         case OP_VIEWPORT: viewport(a[0], a[1], a[2], a[3]); break;
         case OP_CALLLIST: callList(a[0]); break;
         case OP_CLEARCOLOR: clearColor(a[0], a[1], a[2], a[3]); break;
@@ -825,6 +826,27 @@ public final class C3DGraphics extends Graphics {
             return;
         }
         gl().texEnv(mapShifted(pname), new float[] { (float) mapShifted(param) });
+    }
+
+    /** vector form (TEXTURE_ENV_COLOR: four fixed-point values) — Dokodemo Chocobo 2 */
+    public void texEnvf(int target, int pname, int[] params) {
+        tr("texEnvfv " + target + " " + pname + " " + (params == null ? "null" : "[" + params.length + "]"));
+        if (rec(OP_TEXENVV, new int[] { target, pname }, copy(params))) {
+            return;
+        }
+        if (params != null && params.length > 0) {
+            float[] v = fx(params);
+            if (v.length < 4) {
+                float[] w = { 0f, 0f, 0f, 1f };
+                System.arraycopy(v, 0, w, 0, v.length);
+                v = w;
+            }
+            gl().texEnv(mapShifted(pname), v);
+        }
+    }
+
+    public void texEnvi(int target, int pname, int[] params) {
+        texEnvf(target, pname, params);
     }
 
     public void texGenf(int coord, int pname, int param) {

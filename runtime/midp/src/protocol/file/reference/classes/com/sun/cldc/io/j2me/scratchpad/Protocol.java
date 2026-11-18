@@ -14,6 +14,7 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
     private boolean inputOpen;
     private boolean outputOpen;
     private int remaining;
+    private int filePos, fileEnd;   // for available()
     private int mode;
     private ScratchOutputStream out;
 
@@ -159,6 +160,8 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
             }
         }
         stream.setPosition(dataStart + base + pos);
+        filePos = dataStart + base + pos;
+        fileEnd = Math.max(stream.getSizeOf(), filePos);
         this.mode = mode;
         remaining = length;
         open = true;
@@ -225,8 +228,11 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
             len = remaining;
         }
         int got = stream.readBytes(b, off, len);
-        if (got > 0 && remaining > 0) {
-            remaining -= got;
+        if (got > 0) {
+            filePos += got;
+            if (remaining > 0) {
+                remaining -= got;
+            }
         }
         return got;
     }
@@ -312,8 +318,15 @@ public class Protocol implements ConnectionBaseInterface, StreamConnection {
             return done + n;
         }
 
+        /* what is left to read (games size their buffer with it:
+         * new byte[in.available()], Deathsmiles' images) */
         public int available() throws IOException {
-            return buf == null ? 0 : bufLen - bufPos;
+            if (closed) {
+                return 0;
+            }
+            int buffered = buf == null ? 0 : bufLen - bufPos;
+            int left = remaining >= 0 ? remaining : fileEnd - filePos;
+            return buffered + (left > 0 ? left : 0);
         }
 
         public void close() throws IOException {

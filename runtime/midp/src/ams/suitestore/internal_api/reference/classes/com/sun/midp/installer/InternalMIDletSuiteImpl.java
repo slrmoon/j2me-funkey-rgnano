@@ -138,9 +138,28 @@ public class InternalMIDletSuiteImpl implements MIDletSuite {
      */
     private void guessPlatform(String jarPath) {
         try {
+            if (System.getProperty("doja.app.class") != null) {
+                /* DoCoMo handsets: "DoCoMoProfile-<DoJa version>" (games
+                 * read the digits after "Profile-": Yurepai Jan, Mobage) */
+                String ver = jamValue("ProfileVer");
+                if (ver != null && ver.startsWith("DoJa-")) {
+                    ver = ver.substring(5);
+                }
+                if (ver == null || ver.length() < 3 || ver.charAt(1) != '.') {
+                    ver = "5.1";
+                }
+                com.sun.cldc.util.PropertyOverrides.set("microedition.profiles",
+                                                        "DoCoMoProfile-" + ver.substring(0, 3));
+            }
             if (!"j2me/phoneME".equals(System.getProperty("microedition.platform"))
-                    || System.getProperty("doja.app.class") != null
                     || "0".equals(System.getProperty("midp.platform.guess"))) {
+                return;
+            }
+            if (System.getProperty("doja.app.class") != null) {
+                /* an i-appli whose .jam names no TargetDevice: a handset
+                 * name, as every DoCoMo phone had (games cut the maker
+                 * prefix before the series digit: Downtown Special) */
+                com.sun.cldc.util.PropertyOverrides.set("microedition.platform", "N905i");
                 return;
             }
             String[] names = jarClassNames(jarPath);
@@ -170,6 +189,31 @@ public class InternalMIDletSuiteImpl implements MIDletSuite {
         } catch (Throwable t) {
             /* keep the default platform */
         }
+    }
+
+    /** a value of the i-appli's .jam (passed whole as -Ddoja.jam.hex), or null */
+    private static String jamValue(String key) {
+        String hex = System.getProperty("doja.jam.hex");
+        if (hex == null) {
+            return null;
+        }
+        StringBuffer line = new StringBuffer();
+        int n = hex.length() / 2;
+        for (int i = 0; i <= n; i++) {
+            int c = i < n ? (Character.digit(hex.charAt(2 * i), 16) << 4)
+                    | Character.digit(hex.charAt(2 * i + 1), 16) : '\n';
+            if (c == '\n' || c == '\r') {
+                String l = line.toString();
+                line.setLength(0);
+                int eq = l.indexOf('=');
+                if (eq > 0 && l.substring(0, eq).trim().equals(key)) {
+                    return l.substring(eq + 1).trim();
+                }
+            } else {
+                line.append(c < 128 ? (char)c : '?');
+            }
+        }
+        return null;
     }
 
     /** "Nokia3510i", "SonyEricssonK660" at b[k] (a whole string), or null */
