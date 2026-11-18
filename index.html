@@ -143,7 +143,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
       if you have one: it replaces the scratchpad kept in this browser) —
       the files stay on this computer.</div>
     <div class="row">
-      <label class="file">Choose game<input id="file" type="file" accept=".jar,.jam,.sp" multiple></label>
+      <label class="file">Choose game<input id="file" type="file" accept=".jar,.jam,.sp,.net" multiple></label>
       <button id="demo">MotherLoad (demo)</button>
     </div>
     <div id="picked"></div>
@@ -264,7 +264,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=49bb9c8-1794875298';
+const V = '?v=976f2d1-1794970211';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) {
@@ -339,12 +339,12 @@ function jamValues(bytes) {
 }
 
 // files picked or dropped so far (a DoJa game is two or three files)
-const chosen = { jar: null, jam: null, sp: null };
+const chosen = { jar: null, jam: null, sp: null, net: null };
 
 async function pick(files) {
   for (const f of files) {
     const ext = f.name.toLowerCase().split('.').pop();
-    if (ext === 'jar' || ext === 'jam' || ext === 'sp') chosen[ext] = f;
+    if (ext === 'jar' || ext === 'jam' || ext === 'sp' || ext === 'net') chosen[ext] = f;
   }
   game = null;
   $('start').disabled = true;
@@ -378,10 +378,11 @@ async function pick(files) {
       // it with model names: Columns, Number Place...); none given: the generic "j2me/phoneME"
       model: (ascii(jam.TargetDevice).split(/[\s,]+/).find(x => /^[\w-]{2,16}$/.test(x)) || ''),
       sp: chosen.sp ? chosen.sp.bytes : null } };
+    game.net = chosen.net ? chosen.net.bytes : null;
     $('picked').textContent = jar.name + ' + ' + chosen.jam.name +
       (chosen.sp ? ' + ' + chosen.sp.name : '') + ' — i-appli ' + jam.AppClass;
   } else {
-    game = { name, bytes, main, jad: mf };
+    game = { name, bytes, main, jad: mf, net: chosen.net ? chosen.net.bytes : null };
     $('picked').textContent = jar.name + ' — ' + main;
   }
   $('start').disabled = false;
@@ -449,9 +450,17 @@ async function fetchFile(raw, ext) {
   return { name, bytes };
 }
 async function loadRemoteGame() {
-  const want = ['jar', 'jam', 'sp'].filter(k => params.get(k));
-  if (!want.includes('jar')) throw new Error('?jam= / ?sp= need a ?jar= too');
-  await pick(await Promise.all(want.map(k => fetchFile(params.get(k), k))));
+  const want = ['jar', 'jam', 'sp', 'net'].filter(k => params.get(k));
+  if (!want.includes('jar')) throw new Error('?jam= / ?sp= / ?net= need a ?jar= too');
+  const files = await Promise.all(want.map(k => fetchFile(params.get(k), k)));
+  // recorded server answers (game.net next to game.jar): optional, a
+  // missing file is no error
+  const jarUrl = params.get('jar');
+  if (!params.get('net') && /\.jar$/i.test(jarUrl.split(/[?#]/)[0])) {
+    const netUrl = jarUrl.replace(/\.jar(?=$|[?#])/i, '.net');
+    try { files.push(await fetchFile(netUrl, 'net')); } catch (e) {}
+  }
+  await pick(files);
 }
 $('demo').addEventListener('click', () =>
   fetchFile('MotherLoad.jar', 'jar').then(f => pick([f])).catch(e => status(e.message)));
@@ -1157,14 +1166,15 @@ $('start').addEventListener('click', async () => {
   window.Module = {
     locateFile: path => path + V,   // midp-files.data
     canvas: $('canvas'),
-    arguments: game.doja ? dojaArgs(rmsDir + '/game.sp')
-                         : ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', game.main],
+    arguments: (game.net ? ['-Dnet.replay=/game/game.net'] : []).concat(game.doja ? dojaArgs(rmsDir + '/game.sp')
+                         : ['-UseVerifier', '-classpathext', '/game/game.jar', 'internal', game.main]),
     print: log,
     printErr: log,
     setStatus: s => s && status(s),
     preRun: [function () {
       FS.mkdir('/game');
       FS.writeFile('/game/game.jar', game.bytes);
+      if (game.net) FS.writeFile('/game/game.net', game.net);
       // getAppProperty() reads a .jad next to the jar: made from the
       // manifest, as the other launchers do
       if (!game.doja) FS.writeFile('/game/game.jad', game.jad);
