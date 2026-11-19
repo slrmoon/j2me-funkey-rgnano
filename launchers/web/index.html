@@ -461,6 +461,9 @@ async function loadRemoteGame() {
     try { files.push(await fetchFile(netUrl, 'net')); } catch (e) {}
   }
   await pick(files);
+  // a .sp in the address (a site's player): the game's data downloaded on the phone; it starts
+  // the game the first time, later the scratchpad the game kept in this browser is used
+  if (game && game.doja && game.doja.sp) game.doja.spSeedOnly = true;
 }
 $('demo').addEventListener('click', () =>
   fetchFile('MotherLoad.jar', 'jar').then(f => pick([f])).catch(e => status(e.message)));
@@ -1229,7 +1232,12 @@ $('start').addEventListener('click', async () => {
           // a .sp picked with the game replaces the kept one (its downloaded
           // data); written once, so a restart keeps what the game saved
           const sp = rmsDir + '/game.sp';
-          if (game.doja.sp) {
+          const kept = FS.analyzePath(sp).exists && FS.stat(sp).size > 0;
+          if (game.doja.sp && game.doja.spSeedOnly && kept) {
+            log('scratchpad: the one kept in this browser (' + FS.stat(sp).size + ' bytes); the .sp '
+                + 'from the address only starts a new game');
+            game.doja.sp = null;
+          } else if (game.doja.sp) {
             FS.writeFile(sp, game.doja.sp);
             log('scratchpad: ' + game.doja.sp.length + ' bytes from the picked .sp');
             game.doja.sp = null;
