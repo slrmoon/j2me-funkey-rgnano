@@ -573,6 +573,15 @@ function saveButtons() {
   $('export').disabled = !game;
   $('import').disabled = !game;
   $('importLabel').setAttribute('aria-disabled', game ? 'false' : 'true');
+  // an i-appli keeps everything in its scratchpad: its saves go out and come in as one .sp
+  // file (the one the phone has next to the jar); a MIDlet's record stores as a .zip
+  const doja = !!(game && game.doja);
+  $('export').textContent = doja ? 'Export .sp' : 'Export saves';
+  $('export').title = doja ? "the game's scratchpad as <game>.sp (its saves)"
+    : "the game's saves as a .zip (the files of rms/<game> on the FunKey, Linux and Windows)";
+  $('importLabel').firstChild.nodeValue = doja ? 'Import .sp' : 'Import saves';
+  $('import').accept = doja ? '.sp' : '';
+  $('import').multiple = !doja;
 }
 function idbfs(dir) {
   return new Promise((ok, fail) => {
@@ -695,10 +704,13 @@ $('export').addEventListener('click', async () => {
     let files = await readSaves(game);
     // the scratchpad goes out as <game>.sp, as it lies next to the jar elsewhere
     files = files.map(f => f.name === 'game.sp' ? { name: game.name + '.sp', bytes: f.bytes } : f);
+    // an i-appli: only its .sp, as it is (no .zip)
+    if (game.doja) files = files.filter(f => /\.sp$/i.test(f.name) && f.bytes.length);
     if (!files.length) { status('No saves for ' + game.name + ' yet'); return; }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(makeZip(files));
-    a.download = game.name + '-saves.zip';
+    a.href = URL.createObjectURL(game.doja ? new Blob([files[0].bytes], { type: 'application/octet-stream' })
+                                           : makeZip(files));
+    a.download = game.doja ? files[0].name : game.name + '-saves.zip';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -712,8 +724,15 @@ $('import').addEventListener('change', async e => {
   if (!game || !list.length) return;
   try {
     let files = [];
-    for (const f of list) files.push(...(/\.zip$/i.test(f.name) ? await readZip(f.bytes) : [f]));
-    files = files.map(f => /\.sp$/i.test(f.name) ? { name: 'game.sp', bytes: f.bytes } : f);
+    if (game.doja) {
+      // an i-appli: its saves are one .sp file
+      const sp = list.find(f => /\.sp$/i.test(f.name));
+      if (!sp) { status('The saves of an i-appli are its .sp file (scratchpad)'); return; }
+      files = [{ name: 'game.sp', bytes: sp.bytes }];
+    } else {
+      for (const f of list) files.push(...(/\.zip$/i.test(f.name) ? await readZip(f.bytes) : [f]));
+      files = files.map(f => /\.sp$/i.test(f.name) ? { name: 'game.sp', bytes: f.bytes } : f);
+    }
     if (!files.length) { status('Nothing to import'); return; }
     if (!confirm('Replace the saves of ' + game.name + ' with ' + files.length + ' imported file(s)?')) return;
     await writeSaves(game, files);
