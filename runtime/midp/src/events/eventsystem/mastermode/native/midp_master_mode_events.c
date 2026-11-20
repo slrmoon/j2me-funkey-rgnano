@@ -257,6 +257,9 @@ int midpRunVm(JvmPathChar* classPath,
             if (timeout <= -2) break;          /* all Java code ended */
             frame = fk_web_frame_wait_ms();
             if (timeout >= 0 && (jlong)frame > timeout) timeout = frame;
+            /* switch_thread_slave_mode uses INT32_MAX when no Java thread
+             * is runnable. Recheck for expired timers even without input. */
+            if (timeout == 0x7fffffff) timeout = 100;
             blocked = SNI_GetBlockedThreads(&count);
             midp_check_events(blocked, count, timeout);
             if (timeout != 0) os_emscripten_idle_end();
