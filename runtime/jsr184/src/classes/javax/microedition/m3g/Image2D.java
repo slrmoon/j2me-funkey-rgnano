@@ -20,6 +20,8 @@ package javax.microedition.m3g;
 import javax.microedition.lcdui.Image;
 
 public class Image2D extends Object3D {
+	private byte[] fkPixels;
+	private byte[] fkPalette;
 	//------------------------------------------------------------------
 	// Static data
 	//------------------------------------------------------------------
@@ -46,6 +48,7 @@ public class Image2D extends Object3D {
 
 	public Image2D(int format, int width, int height, byte[] image) {
 		super(createHandle(format, width, height, image));
+		fkPixels = image;
 	}
 
 	public Image2D(int format,
@@ -53,6 +56,8 @@ public class Image2D extends Object3D {
 				   byte[] image,
 				   byte[] palette) {
 		super(createHandle(format, width, height, image, palette));
+		fkPixels = image;
+		fkPalette = palette;
 	}
 
 	public Image2D(int format, int width, int height) {
@@ -89,6 +94,10 @@ public class Image2D extends Object3D {
 	public int getHeight() {
 		return _getHeight(handle);
 	}
+
+	/** Raw data retained for compatibility adapters such as DoJa D4D. */
+	public byte[] fkGetPixels() { return fkPixels; }
+	public byte[] fkGetPalette() { return fkPalette; }
 
 	//------------------------------------------------------------------
 	// Private methods

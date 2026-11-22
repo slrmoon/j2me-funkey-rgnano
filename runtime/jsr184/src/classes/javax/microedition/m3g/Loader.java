@@ -154,6 +154,55 @@ public class Loader {
 		}
 	}
 
+	/** Loads the object sections used by DoJa's D4D container. */
+	public static Object3D[] loadD4(byte[] data) throws IOException {
+		if (data == null) throw new NullPointerException();
+		if (data.length < 10 || data[0] != 'D' || data[1] != '4') {
+			throw new IOException("Invalid D4D header");
+		}
+		Loader loader = new Loader();
+		loader.iResourceName = "D4D byte array";
+		Vector refs = new Vector();
+		Vector local = new Vector();
+		Hashtable referenced = new Hashtable();
+		int content = readUInt32(data, 4);
+		int end = 10 + content;
+		if (content < 0 || end < 10 || end > data.length) {
+			throw new IOException("Invalid D4D length");
+		}
+		int pos = 10;
+		while (pos < end) {
+			if (pos + 13 > end) throw new IOException("D4D section header");
+			int compression = data[pos++] & 255;
+			int totalLength = readUInt32(data, pos); pos += 4;
+			int uncompressedLength = readUInt32(data, pos); pos += 4;
+			int payloadLength = totalLength - 13;
+			if (payloadLength < 0 || pos + payloadLength + 4 > end) {
+				throw new IOException("D4D section length");
+			}
+			byte[] payload = new byte[uncompressedLength];
+			if (compression == 0) {
+				if (uncompressedLength != payloadLength) throw new IOException("D4D section size");
+				System.arraycopy(data, pos, payload, 0, payloadLength);
+			} else if (compression == 1) {
+				byte[] packed = new byte[payloadLength];
+				System.arraycopy(data, pos, packed, 0, payloadLength);
+				if (!loader._inflate(packed, payload)) throw new IOException("D4D decompression");
+			} else throw new IOException("D4D compression " + compression);
+			loader.parseM3GSection(payload, refs, local, referenced);
+			pos += payloadLength + 4;
+		}
+		Vector roots = new Vector();
+		for (int i = 0; i < local.size(); i++) {
+			Object3D o = (Object3D)local.elementAt(i);
+			if (o instanceof Group && ((Group)o).getParent() == null) roots.addElement(o);
+		}
+		if (roots.size() == 0) throw new IOException("No D4D root group");
+		Object3D[] out = new Object3D[roots.size()];
+		roots.copyInto(out);
+		return out;
+	}
+
 	/**
 	 * @see javax.microedition.m3g.Loader#load(String)
 	 */

@@ -58,13 +58,25 @@ public abstract class Object3D {
             return new Texture(data);
         }
         try {
+            if (data[0] == 'D' && data[1] == '4') {
+                StringBuffer head = new StringBuffer();
+                for (int i = 0; i < data.length && i < 16; i++) {
+                    int b = data[i] & 255;
+                    if (i != 0) head.append(' ');
+                    if (b < 16) head.append('0');
+                    head.append(Integer.toHexString(b));
+                }
+                com.funkey.doja.Stub.log("Object3D.createInstance: resource=<byte[]> size="
+                        + data.length + " head=" + head);
+                return D4GroupLoader.load(data);
+            }
             if (data[0] == 'M' && data[1] == 'B') {
                 return new Figure(data);
             }
             if (data[0] == 'M' && data[1] == 'T') {
                 return new ActionTable(data);
             }
-        } catch (IllegalArgumentException e) {
+        } catch (Exception e) {
             com.funkey.doja.Stub.log("Object3D.createInstance: " + e.getMessage());
             return null;
         }

@@ -42,6 +42,13 @@ public class Texture extends Object3D {
         super(TYPE_TEXTURE);
     }
 
+    Texture(int width, int height, byte[] rgba) {
+        super(TYPE_TEXTURE);
+        fkWidth = width;
+        fkHeight = height;
+        fkRgba = rgba;
+    }
+
     public void setBlendMode(int blendMode) {
         fkBlend = blendMode;
     }
