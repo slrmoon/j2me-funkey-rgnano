@@ -48,7 +48,6 @@ public class Image2D extends Object3D {
 
 	public Image2D(int format, int width, int height, byte[] image) {
 		super(createHandle(format, width, height, image));
-		fkPixels = image;
 	}
 
 	public Image2D(int format,
@@ -56,8 +55,6 @@ public class Image2D extends Object3D {
 				   byte[] image,
 				   byte[] palette) {
 		super(createHandle(format, width, height, image, palette));
-		fkPixels = image;
-		fkPalette = palette;
 	}
 
 	public Image2D(int format, int width, int height) {
@@ -98,6 +95,10 @@ public class Image2D extends Object3D {
 	/** Raw data retained for compatibility adapters such as DoJa D4D. */
 	public byte[] fkGetPixels() { return fkPixels; }
 	public byte[] fkGetPalette() { return fkPalette; }
+	void fkSetData(byte[] pixels, byte[] palette) {
+		fkPixels = pixels;
+		fkPalette = palette;
+	}
 
 	//------------------------------------------------------------------
 	// Private methods

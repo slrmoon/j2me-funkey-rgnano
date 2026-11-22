@@ -84,6 +84,7 @@ public class Loader {
 
 	private byte[] iStreamData = null;
 	private int iStreamOffset = 0;
+	private boolean iD4;
 
 	private Interface iInterface;
 
@@ -161,6 +162,7 @@ public class Loader {
 			throw new IOException("Invalid D4D header");
 		}
 		Loader loader = new Loader();
+		loader.iD4 = true;
 		loader.iResourceName = "D4D byte array";
 		Vector refs = new Vector();
 		Vector local = new Vector();
@@ -892,6 +894,7 @@ public class Loader {
 			obj = paletteLength > 0 ?
 					new Image2D(format, width, height, pixels, palette) :
 					new Image2D(format, width, height, pixels);
+			if (iD4) obj.fkSetData(pixels, palette);
 		}
 		applyObject3D(obj, info);
 		return obj;
