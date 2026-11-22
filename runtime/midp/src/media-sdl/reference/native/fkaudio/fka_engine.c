@@ -221,7 +221,7 @@ static int64_t duration(Player *p)
     return -1;
 }
 
-/* Lets every sounding note finish its release. Sonivox EAS implements All
+/* Lets every sounding note finish its release. The synthesizer implements All
  * Notes Off (CC 123) as a fast mute, so notes_off() cut the decay of the last
  * notes (cymbals, timpani, gunshots...) the moment a song ended or looped. */
 static void notes_release(Player *p)

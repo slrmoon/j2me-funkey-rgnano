@@ -671,7 +671,7 @@ static void settings_default(Settings *s) {
     strcpy(s->fps, "30");
     s->jit = 1;
     s->volume = 100;
-    strcpy(s->synth, "hybrid");
+    strcpy(s->synth, "soundfont");
     s->log = 1;
     strcpy(s->phone, "standard");
     for (i = 0; i < ACTION_COUNT; i++)
@@ -1602,7 +1602,7 @@ static const struct { const char *id; const wchar_t *label; } Fpss[] = {
     { "20", L"20 FPS" }, { "off", L"No limit" }
 };
 static const struct { const char *id; const wchar_t *label; } Synths[] = {
-    { "hybrid", L"Hybrid" }, { "wavetable", L"Wavetable" }, { "fm", L"FM" }
+    { "soundfont", L"TinySoundFont (TimGM6mb)" }
 };
 static const wchar_t *Lcds[] = {
     L"Auto", L"128x128", L"128x160", L"176x208", L"176x220", L"208x208", L"240x240",

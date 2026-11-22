@@ -38,6 +38,8 @@ mkdir -p "$STAGE/bin"
 cp "$MIDP/bin/i386/runMidlet.exe" "$STAGE/bin/"
 "${MINGW_PREFIX}strip" "$STAGE/bin/runMidlet.exe" 2>/dev/null || true
 cp -R "$MIDP/lib" "$STAGE/lib"
+cp "$ROOT/runtime/midp/src/media-sdl/reference/resource/soundbank/TimGM6mb.sf2" "$STAGE/lib/soundbank.sf2"
+cp "$ROOT/runtime/midp/src/media-sdl/reference/resource/soundbank/LICENSE.TimGM6mb" "$STAGE/lib/"
 cp -R "$MIDP/appdb" "$STAGE/appdb"
 
 echo "Building DoJa support (lib/doja-support.jar)"

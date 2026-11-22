@@ -440,15 +440,13 @@ static int FrameLimitFps = 30;
  * "start a new schedule" (after start-up, a limit change or the menu). */
 static unsigned long long FrameLimitNext;
 
-/* MIDI synth presets (fkaudio engine ids: 1 wavetable, 2 FM, 3 hybrid) */
+/* The GPLv2-compatible MIDI path has one SoundFont synthesizer. */
 static const struct {
     const char *id;
     const char *label;
     int engine;
 } OverlaySynths[] = {
-    { "hybrid",    "Hybrid",    3 },
-    { "wavetable", "Wavetable", 1 },
-    { "fm",        "FM",        2 }
+    { "soundfont", "TinySoundFont", 1 }
 };
 #define OVERLAY_SYNTH_COUNT ((int) (sizeof(OverlaySynths) / sizeof(OverlaySynths[0])))
 

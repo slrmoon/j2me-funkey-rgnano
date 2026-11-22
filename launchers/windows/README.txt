@@ -2,7 +2,7 @@ phoneME J2ME runtime for Windows
 ===============================
 
 The same phoneME runtime as on the FunKey S / RG Nano (M3G software 3D,
-fkaudio/Sonivox sound, DoJa i-appli support), built for a PC window.
+fkaudio/TinySoundFont sound, DoJa i-appli support), built for a PC window.
 Windows 7 or newer, 32 or 64 bit (also Windows 11 on ARM). Nothing to
 install: no Java, no WSL.
 

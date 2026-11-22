@@ -88,7 +88,7 @@ keeps its scratchpad as `<game>.sp` next to the `.jar`.
   **MascotCapsule Micro3D v3** (`com.mascotcapsule.micro3d.v3`) on the same
   renderer. See [3D (M3G)](#3d-m3g).
 - **Sound: MMAPI (JSR 135)** on a new audio engine with the handset MIDI synth
-  (Sonivox EAS), all common phone formats and the vendor sound APIs.
+  (TinySoundFont with the TimGM6mb bank), all common phone formats and the vendor sound APIs.
   See [Sound](#sound).
 - **Scaling** for every phone resolution, with sharp / smooth filtering and a
   movable view for cropped modes. See [Scaling](#scaling).
@@ -245,9 +245,8 @@ slow game faster.
 
 Sound is played by **fkaudio**, a small engine written for this device:
 one 22 kHz mono mixer (the FunKey has one speaker), its own parsers for
-every phone music format, and the **Sonivox EAS** synthesizer — the MIDI
-engine that shipped on many handsets and in Android — for the authentic
-phone sound.
+every phone music format, and the lightweight **TinySoundFont** synthesizer
+with the GPLv2 **TimGM6mb** General MIDI sample bank.
 
 **Formats** (detected from the data; the content type a game declares is
 only a hint, games often get it wrong):
@@ -271,18 +270,13 @@ of clipping.
 **In-game menu → Sound**
 
 - **Volume** — 0–100%.
-- **MIDI synth** — the instrument set, applied immediately:
-  - **Hybrid** (default) — FM + small wavetable at 22 kHz, the typical phone sound
-  - **Wavetable** — sampled instruments, fuller
-  - **FM** — pure FM, the oldest phones
+- **MIDI synth** — TinySoundFont with the bundled TimGM6mb bank.
 
 Advanced (environment variables in `r.sh`):
 
 | Variable | Meaning |
 |---|---|
-| `PHONEME_SYNTH` | `hybrid` / `wavetable` / `fm` (normally set from the menu) |
-| `PHONEME_SOUNDBANK` | path to your own DLS or SF2 bank; `lib/soundbank.dls` / `.sf2` in the runtime folder is picked up automatically |
-| `PHONEME_MIDI_GAIN` | MIDI loudness, 50–100 (default 90) |
+| `PHONEME_SOUNDBANK` | path to another SF2 bank; `lib/soundbank.sf2` in the runtime folder is picked up automatically |
 | `PHONEME_AUDIO_BUFFER` | output buffer in samples (default 1024 ≈ 46 ms); lower = less latency, more risk of crackles |
 | `PHONEME_AUDIO_TRACE` | print the audio device setup to the log |
 
@@ -675,7 +669,8 @@ runtime, the SDL launcher, desktop entry and icon (plus a tiny built-in
 | Component | License | Used for |
 |---|---|---|
 | [phoneME](https://github.com/j2me-preservation/phoneME-GP2X-SDL) (CLDC VM, MIDP) | GPL 2.0 | the runtime |
-| [Sonivox EAS](https://github.com/pedrolcl/sonivox) | Apache 2.0 | MIDI synthesizer |
+| [TinySoundFont](https://github.com/schellingb/TinySoundFont) | MIT | MIDI synthesizer |
+| [TimGM6mb](https://github.com/musescore/musescore-old/commit/90c33ef9d87b3f5ff92efd3b07d89eb455fb1fef) | GPL 2.0 | General MIDI sample bank |
 | [minimp3](https://github.com/lieff/minimp3) | CC0 | MP3 decoding |
 | Keitai Wiki MLD / MA-3 music implementation (Guy Perfect, SquirrelJME) | Unlicense / MPL 2.0 | MLD sequencer and MA-3 FM synth (C port) |
 | fdlibm 5.3 | Sun (free use with notice) | log/pow in the MLD synth |

@@ -1,4 +1,4 @@
-/* FunKey audio engine: thin wrapper over Sonivox EAS (call under the engine lock). */
+/* FunKey audio engine: TinySoundFont wrapper (call under the engine lock). */
 #ifndef FKA_EAS_H
 #define FKA_EAS_H
 

@@ -393,7 +393,7 @@ static int    source_sel = 0;
 static int    display_mode_sel = 5;
 static int    fps_limit_sel = 3;
 static int    sound_volume = 100;
-static char   synth_id[16] = "hybrid";   /* MIDI synth preset, set in the in-game menu */
+static char   synth_id[16] = "soundfont"; /* retained in config for compatibility */
 static char   filter_id[16] = "sharp";   /* scaling filter, set in the in-game menu */
 static int    pan_x, pan_y;              /* view position for cropped modes, -1000..1000 */
 static int    key_profile_sel = 0;
@@ -1737,7 +1737,7 @@ static void load_binds(const char *game_name, const char *jar_path) {
     display_mode_sel = 5;
     fps_limit_sel = 3;
     sound_volume = 100;
-    strcpy(synth_id, "hybrid");
+    strcpy(synth_id, "soundfont");
     strcpy(filter_id, "sharp");
     pan_x = pan_y = 0;
     key_profile_sel = 0;

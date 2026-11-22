@@ -2,7 +2,7 @@ phoneME J2ME runtime for desktop Linux (32-bit x86)
 ==================================================
 
 The same phoneME runtime as on the FunKey S / RG Nano (M3G software 3D,
-fkaudio/Sonivox sound, DoJa i-appli support), built for a PC window.
+fkaudio/TinySoundFont sound, DoJa i-appli support), built for a PC window.
 
 Requirements
 ------------

@@ -79,7 +79,7 @@ int  fka_poll_event(int *player, int *type, int64_t *arg, int *data);
 /* configuration */
 void fka_set_synth(int engine);            /* FKA_SYNTH_*, also live */
 int  fka_get_synth(void);
-int  fka_load_soundbank(const char *path); /* external DLS / SF2 */
+int  fka_load_soundbank(const char *path); /* external SF2 */
 
 /* output driver (fka_sdl.c) */
 int  fka_output_open(void);

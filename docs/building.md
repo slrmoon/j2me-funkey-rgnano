@@ -64,7 +64,8 @@ FunKey-specific subsystems in this tree:
 | `jsr184/src/native/upstream/m3g/` | Nokia M3G core (EPL 1.0) |
 | `midp/src/media-sdl/reference/classes/` | MMAPI (JSR 135) player, controls, vendor sound APIs (Nokia, Samsung, Siemens, Motorola) |
 | `midp/src/media-sdl/reference/native/fkaudio/` | fkaudio: format parsers/decoders, sequencer, mixer, SDL output, KNI |
-| `midp/src/media-sdl/reference/native/sonivox/` | Sonivox EAS synthesizer (Apache 2.0), see `README.funkey` for local changes |
+| `midp/src/media-sdl/reference/native/tinysoundfont/` | TinySoundFont MIDI synthesizer (MIT) |
+| `midp/src/media-sdl/reference/resource/soundbank/` | TimGM6mb General MIDI bank (GPL 2.0) |
 | `midp/src/highlevelui/lfjport/sdl/native/` | screen presenter, scaler (`lfjport_scale.h`) and the in-game menu |
 | `midp/src/events/mastermode_port/sdl/native/` | input, key profiles, PC key map, modal menu loop |
 | `midp/src/core/phoneme_config/` | the settings a launcher passes (see `runtime-interface.md`) |

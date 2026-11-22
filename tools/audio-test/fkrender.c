@@ -23,6 +23,11 @@ int main(int c, char **v) {
     if (fread(d, 1, n, f) != (size_t) n) return 1;
     fclose(f);
     fka_init();
+    {
+        const char *bank = getenv("PHONEME_SOUNDBANK");
+        if (!bank || !bank[0]) bank = "runtime/midp/src/media-sdl/reference/resource/soundbank/TimGM6mb.sf2";
+        if (fka_load_soundbank(bank) != 0) { fprintf(stderr, "cannot load sound bank %s\n", bank); return 3; }
+    }
     if (synth) fka_set_synth(synth);
     id = fka_player_new(d, (int) n, NULL);
     if (id <= 0) { printf("unsupported\n"); return 2; }

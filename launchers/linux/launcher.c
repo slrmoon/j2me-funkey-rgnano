@@ -434,7 +434,7 @@ static void settings_default(Settings *s) {
     strcpy(s->fps, "30");
     s->jit = 1;
     s->volume = 100;
-    strcpy(s->synth, "hybrid");
+    strcpy(s->synth, "soundfont");
     s->log = 1;
     strcpy(s->phone, "standard");
     for (i = 0; i < ACTION_COUNT; i++)
@@ -872,8 +872,8 @@ static const char *const FilterIds[] = { "sharp", "scale2x", "smooth", "pixel" }
 static const char *const FilterNames[] = { "Sharp", "Scale2x", "Smooth", "Pixel" };
 static const char *const FpsIds[] = { "0", "20", "25", "30", "50", "60" };
 static const char *const FpsNames[] = { "No limit", "20", "25", "30", "50", "60" };
-static const char *const SynthIds[] = { "hybrid", "sonivox", "fm" };
-static const char *const SynthNames[] = { "Hybrid (default)", "Sonivox (soundbank)", "FM" };
+static const char *const SynthIds[] = { "soundfont" };
+static const char *const SynthNames[] = { "TinySoundFont (TimGM6mb)" };
 
 static int opt_index(const char *v, const char *const *ids, int n) {
     int i;
@@ -903,7 +903,7 @@ static Item ItemsDisplay[] = {
 static Item ItemsSound[] = {
     { "Sound", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
     { "Volume", IT_NUM, NULL, 0, NULL, NULL, 0, 0, 100, 5, NULL, NULL },
-    { "MIDI synthesizer", IT_OPT, NULL, 0, SynthIds, SynthNames, 3, 0, 0, 0, NULL, NULL }
+    { "MIDI synthesizer", IT_OPT, NULL, 0, SynthIds, SynthNames, 1, 0, 0, 0, NULL, NULL }
 };
 #define N_SOUND ((int)(sizeof(ItemsSound) / sizeof(ItemsSound[0])))
 

@@ -93,7 +93,7 @@ screen), so launchers show a message only for the other codes.
 | `PHONEME_CONFIG_PATH` | file the runtime menu saves its choices to (see below) |
 | `PHONEME_DEBUG_CONFIG` | file with debug switches shared with the launcher (see below) |
 | `PHONEME_RESTART_FLAG` | file the runtime creates when the user picks Restart in its menu |
-| `PHONEME_SOUNDBANK` | sound bank file for the MIDI synthesizer |
+| `PHONEME_SOUNDBANK` | optional SF2 sound bank for the MIDI synthesizer |
 
 ### Memory
 
@@ -152,9 +152,8 @@ Motorola 21/22, Siemens -1/-4), clear -8, call -10, end -11, game A–D
 |---|---|
 | `PHONEME_ENABLE_AUDIO` | set: sound on |
 | `PHONEME_SOUND_VOLUME` | master volume `0`..`100` |
-| `PHONEME_SYNTH` | MIDI synthesizer: `hybrid` (default), `wavetable` or `fm` |
-| `PHONEME_AUDIO_QUALITY` | `low` or `high` (default: `low` in the FunKey build, `high` elsewhere). High: sampled sounds and the output (44100 Hz) go through a windowed-sinc resampler, the synthesizer presets are level-matched |
-| `PHONEME_MIDI_GAIN` | MIDI synthesizer gain `50`..`100` (dB below 100; default 90, at the high quality level 93 for the wavetable and 84 for the other presets) |
+| `PHONEME_SOUNDBANK` | optional path to an SF2 bank; defaults to `lib/soundbank.sf2` (TimGM6mb) |
+| `PHONEME_AUDIO_QUALITY` | `low` or `high` (default: `low` in the FunKey build, `high` elsewhere). High: sampled sounds and the output (44100 Hz) go through a windowed-sinc resampler |
 | `PHONEME_AUDIO_BUFFER` | audio buffer in samples, `128`..`8192` (default 1024) |
 | `PHONEME_AUDIO_SUM` | `1`/`0`: mix stereo to mono (default: from `/etc/asound.conf`) |
 | `PHONEME_MLD_EXACT` | `1`: exact (slower) MLD (i-mode melody) synthesis |

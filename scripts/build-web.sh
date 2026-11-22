@@ -124,6 +124,12 @@ echo "=== DoJa support (lib/doja-support.jar)"
 "$ROOT/scripts/build-doja-support.sh" "$BUILD_OUTPUT_DIR/midp" "$CLDC_DIST_DIR" \
     "$BUILD_OUTPUT_DIR/midp/lib/doja-support.jar"
 
+echo "=== GPLv2 MIDI sound bank (TimGM6mb)"
+cp "$ROOT/runtime/midp/src/media-sdl/reference/resource/soundbank/TimGM6mb.sf2" \
+   "$BUILD_OUTPUT_DIR/midp/lib/soundbank.sf2"
+cp "$ROOT/runtime/midp/src/media-sdl/reference/resource/soundbank/LICENSE.TimGM6mb" \
+   "$BUILD_OUTPUT_DIR/midp/lib/"
+
 # the page: launchers/web/index.html, runMidlet.js/.wasm and the runtime
 # files (lib/, appdb/ as /midp in the browser's file system)
 SITE=$BUILD_OUTPUT_DIR/site

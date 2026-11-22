@@ -7,7 +7,7 @@
  *   RTTTL (Nokia text ringtones, "name:d=4,o=5,b=100:...")
  *
  * Note numbering, default octaves, articulation and velocity curves follow
- * the Sonivox EAS parsers, which shipped in real handsets, so melodies come
+ * the fkaudio sequencer, so melodies come
  * out at the pitch and loudness phones used.
  */
 #include "fka_song.h"

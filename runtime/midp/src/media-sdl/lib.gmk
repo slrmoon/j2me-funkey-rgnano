@@ -54,20 +54,19 @@ MIDP_JAVADOC_ALL += \
 	$(shell echo $(SUBSYSTEM_MEDIA_PACKAGES)|tr ' ' $(PATHSEP))
 
 #
-# FunKey audio engine (fkaudio): own decoders and sequencer, Sonivox EAS
-# synthesizer (Apache 2.0, the MIDI engine of many handsets and Android)
+# FunKey audio engine (fkaudio): own decoders and sequencer, TinySoundFont
+# synthesizer (MIT) with a GPL-2-compatible SF2 bank.
 #
 FKA_NATIVE_DIR = $(SUBSYSTEM_DIR)/media-sdl/reference/native
 FKA_CLASSES_DIR = $(SUBSYSTEM_DIR)/media-sdl/reference/classes
 
 vpath % \
     $(FKA_NATIVE_DIR)/fkaudio \
-    $(FKA_NATIVE_DIR)/sonivox
+    $(FKA_NATIVE_DIR)/tinysoundfont
 
 EXTRA_INCLUDES += \
     -I$(FKA_NATIVE_DIR)/fkaudio \
-    -I$(FKA_NATIVE_DIR)/sonivox \
-    -I$(FKA_NATIVE_DIR)/sonivox/fakes
+    -I$(FKA_NATIVE_DIR)/tinysoundfont
 
 # Java files for the ( media ) subsystem
 #
@@ -138,46 +137,13 @@ FKA_ENGINE_FILES = \
     fka_decode.c \
     fka_resample.c \
     fka_mld.c \
-    fka_eas.c
+    fka_eas.c \
+    tsf_impl.c
 
-# wt_22khz.c and wt_200k_samples.c are #included by wt_200k_G.c
-FKA_EAS_FILES = \
-    eas_chorus.c \
-    eas_config.c \
-    eas_dlssynth.c \
-    eas_filter_float.c \
-    eas_flog.c \
-    eas_fmengine.c \
-    eas_fmsndlib.c \
-    eas_fmsynth.c \
-    eas_fmtables.c \
-    eas_math.c \
-    eas_mdls.c \
-    eas_midi.c \
-    eas_mixbuf.c \
-    eas_mixer.c \
-    eas_pan.c \
-    eas_pcm.c \
-    eas_public.c \
-    eas_report.c \
-    eas_reverb.c \
-    eas_sf2.c \
-    eas_smf.c \
-    eas_sndlibmgt.c \
-    eas_tonecontrol.c \
-    eas_voicemgt.c \
-    eas_wtengine.c \
-    eas_wtsynth.c \
-    eas_xmf.c \
-    hostmm_ng.c \
-    hybrid_22khz_mcu.c \
-    rmidi.c \
-    wt_200k_G.c
+SUBSYSTEM_MEDIA_NATIVE_FILES += $(FKA_ENGINE_FILES)
 
-SUBSYSTEM_MEDIA_NATIVE_FILES += $(FKA_ENGINE_FILES) $(FKA_EAS_FILES)
-
-# the global build is gnu89; EAS and the engine are C99
-$(patsubst %.c,$(OBJ_DIR)/%.o,$(FKA_ENGINE_FILES) $(FKA_EAS_FILES)): \
+# The global build is gnu89; fkaudio and TinySoundFont are C99.
+$(patsubst %.c,$(OBJ_DIR)/%.o,$(FKA_ENGINE_FILES)): \
     override CFLAGS += -std=gnu99 -fno-strict-aliasing
 
 # MLD / MA-3 synth: Java float semantics (no FMA contraction, wrapping ints)
@@ -188,6 +154,3 @@ ifneq ($(wildcard $(FKA_NATIVE_DIR)/opencore-amrnb/libopencore-amrnb.a),)
 $(OBJ_DIR)/fka_decode.o: override CFLAGS += -DFKA_HAVE_AMR -I$(FKA_NATIVE_DIR)/opencore-amrnb
 endif
 endif
-
-# zlib: compressed XMF inside EAS
-LIBS += -lz

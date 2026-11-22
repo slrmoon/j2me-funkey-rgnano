@@ -304,6 +304,8 @@ if [ -s "$TARGET_CLDC_BIN/cldc_vm" ] || { [ -n "$CLDC_VM_FALLBACK" ] && [ -s "$C
 fi
 cp -R "$BUILD/midp/lib" "$STAGE/lib"
 rm -rf "$STAGE/lib/freepats" "$STAGE/lib/soundfont"
+cp "$ROOT/runtime/midp/src/media-sdl/reference/resource/soundbank/TimGM6mb.sf2" "$STAGE/lib/soundbank.sf2"
+cp "$ROOT/runtime/midp/src/media-sdl/reference/resource/soundbank/LICENSE.TimGM6mb" "$STAGE/lib/"
 build_doja_support
 cp -R "$BUILD/midp/appdb" "$STAGE/appdb"
 echo "Compiling SDL launcher (browser mode)"
@@ -406,7 +408,7 @@ else
     echo "appdb already exists, preserving" >> "$EARLY_LOG"
 fi
 export MIDP_HOME="$APP_DIR"
-export PHONEME_SYNTH="${PHONEME_SYNTH:-hybrid}"
+export PHONEME_SYNTH="${PHONEME_SYNTH:-soundfont}"
 export PHONEME_ENABLE_GP2X_KEYS="${PHONEME_ENABLE_GP2X_KEYS:-1}"
 # debug switches: shared with the launcher and the in-game Debug menu
 DEBUG_CFG="$APP_DIR/debug.cfg"

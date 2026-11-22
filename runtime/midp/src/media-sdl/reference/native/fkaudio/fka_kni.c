@@ -3,9 +3,8 @@
  * the C entry points used by the SDL UI port (lfjport_st_export.c).
  *
  * Environment:
- *   PHONEME_SYNTH       hybrid (default) | wavetable | fm
- *   PHONEME_SOUNDBANK   optional DLS / SF2 bank replacing the built-in one
- *                       (default: <midp home>/lib/soundbank.dls or .sf2)
+ *   PHONEME_SOUNDBANK   optional SF2 bank replacing the bundled TimGM6mb
+ *                       (default: <midp home>/lib/soundbank.sf2)
  *   PHONEME_SOUND_VOLUME master volume 0..100
  */
 #include <kni.h>
@@ -37,8 +36,7 @@ static void load_user_bank(void)
     }
     home = midpGetHomeDir();
     if (home == NULL) return;
-    snprintf(path, sizeof(path), "%s/lib/soundbank.dls", home);
-    if (!file_exists(path)) snprintf(path, sizeof(path), "%s/lib/soundbank.sf2", home);
+    snprintf(path, sizeof(path), "%s/lib/soundbank.sf2", home);
     if (file_exists(path) && fka_load_soundbank(path) != 0)
         fprintf(stderr, "fkaudio: cannot load sound bank %s\n", path);
 }

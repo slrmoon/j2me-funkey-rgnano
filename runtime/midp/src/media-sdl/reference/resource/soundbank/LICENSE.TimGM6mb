@@ -1,0 +1,18 @@
+TimGM6mb SoundFont
+==================
+
+Copyright (C) 2004 Tim Brechbill
+Copyright (C) 2010 David Bolton
+
+This sound bank is licensed under the GNU General Public License version 2.
+It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the repository's GPLv2 license text for the
+full license.
+
+Source:
+https://github.com/musescore/musescore-old/commit/90c33ef9d87b3f5ff92efd3b07d89eb455fb1fef
+
+The Debian timgm6mb-soundfont copyright record additionally documents the
+upstream author's statement that samples he did not create himself are
+public domain or GPL licensed.

@@ -3,10 +3,11 @@
 How the runtime's sound compares with a reference, without a device.
 
 - `build.sh [dir]` builds `fkrender`: the audio engine as a desktop program.
-  `fkrender in.mid out.wav [seconds] [synth 1 wavetable|2 fm|3 hybrid] [volume] [loops]`
+  `fkrender in.mid out.wav [seconds] [synth] [volume] [loops]`
   prints the detected type, the duration and every event with its time.
   `PHONEME_AUDIO_QUALITY=low` renders as the FunKey build does, the default
-  on a PC is the high level; `PHONEME_MIDI_GAIN` as in the runtime.
+  on a PC is the high level. MIDI uses TinySoundFont and the bundled
+  GPLv2 TimGM6mb bank; `PHONEME_SOUNDBANK` can select another SF2 file.
 - `wavs.py game...` - every WAV of `media/<game>/` against a reference
   decode (sox): length, level, time offset, correlation and how much energy
   sits above the sound's own band (images of the resampler).

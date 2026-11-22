@@ -1,263 +1,222 @@
-/*
- * FunKey audio engine: Sonivox EAS synthesizer glue.
- *
- * One EAS instance renders every MIDI player: each player owns an EAS MIDI
- * stream, which in EAS means its own virtual synthesizer (16 channels,
- * programs, controllers), so players never disturb each other's channels.
- * Per-player volume and transposition are applied on that virtual synth.
- * Must be called with the engine lock held.
- */
+/* TinySoundFont MIDI backend. TinySoundFont is MIT; the bundled TimGM6mb
+ * SoundFont is GPL-2. Calls are serialized by the fkaudio engine lock. */
 #include "fka_eas.h"
-#include "fka_config.h"
-
-#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "tsf.h"
 
-#include "eas.h"
-#include "eas_reverb.h"
-#include "eas_chorus.h"
-#include "eas_report.h"
-#include "eas_data.h"
-#include "eas_synth.h"
-#include "eas_miditypes.h"
-#include "eas_vm_protos.h"
+#define RATE 22050
+#define FRAME 64
+#define TAIL_FRAMES (RATE * 2 / FRAME)
 
-#ifndef FKA_EAS_DEFAULT_VOLUME
-#define FKA_EAS_DEFAULT_VOLUME 90
-#endif
+typedef struct Stream {
+    tsf *synth;
+    struct Stream *next;
+    int gain, transpose, notes, tail;
+    uint8_t held[16][128], volume[16], program[16], status, data[2];
+    uint16_t bank[16];
+    int ndata;
+} Stream;
 
-#include "fka_resample.h"
+static tsf *g_bank;
+static Stream *g_streams;
 
-static EAS_DATA_HANDLE g_eas;
-static const S_EAS_LIB_CONFIG *g_cfg;
-static int g_frame;     /* EAS render granularity (samples) */
-
-static S_SYNTH *stream_synth(void *stream);
-
-/* EAS volume is in dB (100 = 0 dB). At 0 dB dense GM songs sit in the
- * limiter a tenth of the time; handsets ran it lower too. The handheld
- * plays every instrument set at -10 dB. That leaves the FM and hybrid sets
- * some 9 dB louder than the wavetable one and in the limiter for 2-6% of
- * the samples of dense music; on its small speaker that passes for
- * loudness. The high quality level matches the sets instead: -7 dB for
- * the wavetable, -16 dB for FM and hybrid - music at -14...-24 dBFS RMS
- * with under 1% of the samples in the knee. PHONEME_MIDI_GAIN overrides. */
-static void apply_volume(int engine)
+static void reset_stream(Stream *s)
 {
-    const char *env = FKA_CONFIG("PHONEME_MIDI_GAIN");
-    int v = FKA_EAS_DEFAULT_VOLUME;
-    if (fka_quality_high()) v = engine == 1 ? 93 : 84;
-    if (env != NULL && env[0] != '\0') v = atoi(env);
-    if (v < 50) v = 50;
-    if (v > 100) v = 100;
-    EAS_SetVolume(g_eas, NULL, v);
-}
-
-int fka_eas_init(int engine)
-{
-    const char *lib_name;
-    E_EAS_SNDLIB_TYPE type;
-    if (g_eas != NULL) return 0;
-    g_cfg = EAS_Config();
-    if (g_cfg == NULL || g_cfg->numChannels != 1 || g_cfg->sampleRate != 22050) return -1;
-    g_frame = g_cfg->mixBufferSize;
-    EAS_SetDebugLevel(1);
-    if (EAS_Init(&g_eas) != EAS_SUCCESS) {
-        g_eas = NULL;
-        return -2;
+    int ch;
+    if (!s || !s->synth) return;
+    tsf_reset(s->synth);
+    memset(s->held, 0, sizeof(s->held));
+    s->notes = s->tail = s->status = s->ndata = 0;
+    for (ch = 0; ch < 16; ++ch) {
+        s->volume[ch] = 100; s->program[ch] = 0; s->bank[ch] = 0;
+        tsf_channel_set_presetnumber(s->synth, ch, 0, ch == 9);
+        tsf_channel_set_volume(s->synth, ch, 100.0f / 127.0f);
+        tsf_channel_set_pan(s->synth, ch, 0.5f);
+        tsf_channel_set_pitchwheel(s->synth, ch, 8192);
+        tsf_channel_set_tuning(s->synth, ch, (float)s->transpose);
     }
-    type = engine == 1 ? EAS_SNDLIB_WT : (engine == 2 ? EAS_SNDLIB_FM : EAS_SNDLIB_HYBRID);
-    lib_name = EAS_GetDefaultSoundLibrary(type);
-    if (lib_name == NULL) lib_name = EAS_GetDefaultSoundLibrary(EAS_SNDLIB_HYBRID);
-    if (lib_name != NULL)
-        EAS_SetSoundLibrary(g_eas, NULL, EAS_GetSoundLibrary(g_eas, lib_name));
-    EAS_SetParameter(g_eas, EAS_MODULE_REVERB, EAS_PARAM_REVERB_BYPASS, EAS_TRUE);
-    EAS_SetParameter(g_eas, EAS_MODULE_CHORUS, EAS_PARAM_CHORUS_BYPASS, EAS_TRUE);
-    apply_volume(engine);
-    return 0;
 }
+
+int fka_eas_init(int engine) { (void)engine; return 0; }
+int fka_eas_frame(void) { return FRAME; }
+int fka_eas_set_engine(int engine) { (void)engine; return 0; }
+void fka_eas_stream_engine(void *stream, int engine) { (void)stream; (void)engine; }
 
 void fka_eas_shutdown(void)
 {
-    if (g_eas != NULL) EAS_Shutdown(g_eas);
-    g_eas = NULL;
-}
-
-int fka_eas_frame(void)
-{
-    return g_frame;
-}
-
-int fka_eas_set_engine(int engine)
-{
-    const char *lib_name;
-    E_EAS_SNDLIB_TYPE type;
-    if (g_eas == NULL) return -1;
-    type = engine == 1 ? EAS_SNDLIB_WT : (engine == 2 ? EAS_SNDLIB_FM : EAS_SNDLIB_HYBRID);
-    lib_name = EAS_GetDefaultSoundLibrary(type);
-    if (lib_name == NULL) return -2;
-    apply_volume(engine);
-    return EAS_SetSoundLibrary(g_eas, NULL, EAS_GetSoundLibrary(g_eas, lib_name)) == EAS_SUCCESS ? 0 : -3;
-}
-
-void fka_eas_stream_engine(void *stream, int engine)
-{
-    const char *lib_name;
-    E_EAS_SNDLIB_TYPE type;
-    if (g_eas == NULL || stream == NULL) return;
-    type = engine == 1 ? EAS_SNDLIB_WT : (engine == 2 ? EAS_SNDLIB_FM : EAS_SNDLIB_HYBRID);
-    lib_name = EAS_GetDefaultSoundLibrary(type);
-    if (lib_name == NULL) return;
-    fka_eas_silence(stream, 1);
-    if (EAS_SetSoundLibrary(g_eas, (EAS_HANDLE) stream, EAS_GetSoundLibrary(g_eas, lib_name)) == EAS_SUCCESS) {
-        /* channels cache a region index into the old library: resolve the
-         * current program again in the new one */
-        S_SYNTH *syn = stream_synth(stream);
-        int ch;
-        for (ch = 0; syn != NULL && ch < 16; ++ch)
-            VMProgramChange(g_eas->pVoiceMgr, syn, (EAS_U8) ch, syn->channels[ch].programNum);
-    }
+    Stream *s = g_streams;
+    while (s) { Stream *next = s->next; tsf_close(s->synth); free(s); s = next; }
+    g_streams = NULL;
+    if (g_bank) tsf_close(g_bank);
+    g_bank = NULL;
 }
 
 void *fka_eas_open(void)
 {
-    EAS_HANDLE h = NULL;
-    if (g_eas == NULL) return NULL;
-    if (EAS_OpenMIDIStream(g_eas, &h, NULL) != EAS_SUCCESS) return NULL;
-    return h;
+    Stream *s;
+    if (!g_bank) return NULL;
+    s = (Stream *)calloc(1, sizeof(*s));
+    if (!s) return NULL;
+    s->synth = tsf_copy(g_bank);
+    if (!s->synth) { free(s); return NULL; }
+    tsf_set_output(s->synth, TSF_MONO, RATE, -3.0f);
+    s->gain = 0x7fff;
+    reset_stream(s);
+    s->next = g_streams; g_streams = s;
+    return s;
 }
 
 void fka_eas_close(void *stream)
 {
-    if (g_eas != NULL && stream != NULL) EAS_CloseMIDIStream(g_eas, (EAS_HANDLE) stream);
+    Stream *s = (Stream *)stream, **p = &g_streams;
+    if (!s) return;
+    while (*p && *p != s) p = &(*p)->next;
+    if (*p == s) *p = s->next;
+    tsf_close(s->synth); free(s);
+}
+
+static void off(Stream *s, int ch, int key)
+{
+    tsf_channel_note_off(s->synth, ch, key);
+    if (s->held[ch][key]) { s->held[ch][key] = 0; if (s->notes) --s->notes; }
+    if (!s->notes) s->tail = TAIL_FRAMES;
+}
+
+static void recount(Stream *s)
+{
+    int ch, key;
+    s->notes = 0;
+    for (ch = 0; ch < 16; ++ch) for (key = 0; key < 128; ++key)
+        s->notes += s->held[ch][key] != 0;
+    if (!s->notes) s->tail = TAIL_FRAMES;
+}
+
+static void message(Stream *s, uint8_t st, uint8_t a, uint8_t b)
+{
+    int ch = st & 15, key, n;
+    switch (st & 0xf0) {
+    case 0x80: off(s, ch, a & 127); break;
+    case 0x90:
+        key = a & 127;
+        if (!(b & 127)) { off(s, ch, key); break; }
+        if (!s->held[ch][key]) ++s->notes;
+        s->held[ch][key] = 1; s->tail = 0;
+        tsf_channel_note_on(s->synth, ch, key, (float)(b & 127) / 127.0f);
+        break;
+    case 0xb0:
+        if (a == 0) s->bank[ch] = (uint16_t)((s->bank[ch] & 127) | ((b & 127) << 7));
+        else if (a == 32) s->bank[ch] = (uint16_t)((s->bank[ch] & 0x3f80) | (b & 127));
+        else if (a == 7) s->volume[ch] = b & 127;
+        tsf_channel_midi_control(s->synth, ch, a & 127, b & 127);
+        if (a == 120 || a == 123) {
+            for (n = 0; n < 128; ++n) s->held[ch][n] = 0;
+            recount(s);
+        }
+        break;
+    case 0xc0:
+        s->program[ch] = a & 127;
+        tsf_channel_set_presetnumber(s->synth, ch, a & 127, ch == 9);
+        break;
+    case 0xe0: tsf_channel_set_pitchwheel(s->synth, ch, (a & 127) | ((b & 127) << 7)); break;
+    default: break;
+    }
 }
 
 void fka_eas_write(void *stream, const uint8_t *msg, int len)
 {
-    if (g_eas != NULL && stream != NULL && len > 0)
-        EAS_WriteMIDIStream(g_eas, (EAS_HANDLE) stream, (EAS_U8 *) msg, len);
+    Stream *s = (Stream *)stream;
+    int i, need;
+    if (!s || !msg) return;
+    for (i = 0; i < len; ++i) {
+        uint8_t b = msg[i];
+        if (b & 0x80) {
+            if (b >= 0xf8) continue;
+            if (b >= 0xf0) { s->status = 0; s->ndata = 0; continue; }
+            s->status = b; s->ndata = 0; continue;
+        }
+        if (!s->status) continue;
+        need = ((s->status & 0xf0) == 0xc0 || (s->status & 0xf0) == 0xd0) ? 1 : 2;
+        s->data[s->ndata++] = b;
+        if (s->ndata == need) {
+            message(s, s->status, s->data[0], need == 2 ? s->data[1] : 0);
+            s->ndata = 0;
+        }
+    }
 }
 
-static S_SYNTH *stream_synth(void *stream)
+void fka_eas_volume(void *stream, int gain)
 {
-    S_EAS_STREAM *s = (S_EAS_STREAM *) stream;
-    S_INTERACTIVE_MIDI *im;
-    if (s == NULL || s->handle == NULL) return NULL;
-    im = (S_INTERACTIVE_MIDI *) s->handle;
-    return im->pSynth;
-}
-
-void fka_eas_volume(void *stream, int gain_q15)
-{
-    S_SYNTH *syn = stream_synth(stream);
-    if (gain_q15 < 0) gain_q15 = 0;
-    if (gain_q15 > 0x7fff) gain_q15 = 0x7fff;
-    if (syn != NULL) VMSetVolume(syn, (EAS_U16) gain_q15);
+    Stream *s = (Stream *)stream;
+    if (!s) return;
+    s->gain = gain < 0 ? 0 : (gain > 0x7fff ? 0x7fff : gain);
 }
 
 void fka_eas_transpose(void *stream, int semitones)
 {
-    S_SYNTH *syn = stream_synth(stream);
-    if (syn != NULL) VMSetTranposition(syn, semitones);
+    Stream *s = (Stream *)stream; int ch;
+    if (!s) return;
+    s->transpose = semitones;
+    for (ch = 0; ch < 16; ++ch) tsf_channel_set_tuning(s->synth, ch, (float)semitones);
 }
 
-/* All notes released (MMAPI stop) or silenced at once (close/seek). */
 void fka_eas_silence(void *stream, int immediate)
 {
-    S_SYNTH *syn = stream_synth(stream);
-    if (syn == NULL) return;
-    if (immediate) VMMuteAllVoices(g_eas->pVoiceMgr, syn);
-    else VMReleaseAllVoices(g_eas->pVoiceMgr, syn);
-}
-
-/* GM reset of all 16 channels of a stream (programs, controllers, bend),
- * used before a song (re)starts from the beginning or after a seek. */
-void fka_eas_reset(void *stream)
-{
-    S_SYNTH *syn = stream_synth(stream);
-    int ch;
-    if (syn == NULL) return;
-    VMMuteAllVoices(g_eas->pVoiceMgr, syn);
+    Stream *s = (Stream *)stream; int ch;
+    if (!s) return;
     for (ch = 0; ch < 16; ++ch) {
-        uint8_t m[3];
-        m[0] = (uint8_t) (0xb0 | ch); m[1] = 121; m[2] = 0;   /* reset controllers */
-        fka_eas_write(stream, m, 3);
-        m[1] = 0; m[2] = ch == 9 ? 0x78 : 0x79;               /* GM2 bank */
-        fka_eas_write(stream, m, 3);
-        m[1] = 32; m[2] = 0;
-        fka_eas_write(stream, m, 3);
-        m[1] = 7; m[2] = 100;
-        fka_eas_write(stream, m, 3);
-        m[1] = 10; m[2] = 64;
-        fka_eas_write(stream, m, 3);
-        m[0] = (uint8_t) (0xc0 | ch); m[1] = 0;
-        fka_eas_write(stream, m, 2);
-        m[0] = (uint8_t) (0xe0 | ch); m[1] = 0; m[2] = 64;
-        fka_eas_write(stream, m, 3);
+        if (immediate) tsf_channel_sounds_off_all(s->synth, ch);
+        else tsf_channel_note_off_all(s->synth, ch);
     }
+    memset(s->held, 0, sizeof(s->held)); s->notes = 0;
+    s->tail = immediate ? 0 : TAIL_FRAMES;
 }
 
+void fka_eas_reset(void *stream) { reset_stream((Stream *)stream); }
 int fka_eas_channel_volume(void *stream, int ch)
 {
-    S_SYNTH *syn = stream_synth(stream);
-    if (syn == NULL || ch < 0 || ch > 15) return -1;
-    return syn->channels[ch].volume;
+    Stream *s = (Stream *)stream;
+    return s && ch >= 0 && ch < 16 ? s->volume[ch] : -1;
 }
-
 int fka_eas_channel_program(void *stream, int ch, int *bank)
 {
-    S_SYNTH *syn = stream_synth(stream);
-    if (syn == NULL || ch < 0 || ch > 15) return -1;
-    if (bank != NULL) *bank = (int) syn->channels[ch].bankNum;
-    return syn->channels[ch].programNum;
+    Stream *s = (Stream *)stream;
+    if (!s || ch < 0 || ch >= 16) return -1;
+    if (bank) *bank = s->bank[ch];
+    return s->program[ch];
 }
-
 int fka_eas_active(void *stream)
 {
-    S_SYNTH *syn = stream_synth(stream);
-    return syn != NULL ? syn->numActiveVoices : 0;
+    Stream *s = (Stream *)stream;
+    return s && (s->notes || s->tail);
 }
 
 int fka_eas_render(int16_t *out)
 {
-    EAS_I32 n = 0;
-    if (g_eas == NULL) return 0;
-    if (EAS_Render(g_eas, (EAS_PCM *) out, g_frame, &n) != EAS_SUCCESS) return 0;
-    return (int) n;
-}
-
-/* ---- external DLS / SF2 sound banks ---- */
-
-static int file_read_at(void *handle, void *buf, int offset, int size)
-{
-    FILE *f = (FILE *) handle;
-    if (fseek(f, offset, SEEK_SET) != 0) return 0;
-    return (int) fread(buf, 1, (size_t) size, f);
-}
-
-static int file_size(void *handle)
-{
-    FILE *f = (FILE *) handle;
-    long cur = ftell(f), end;
-    fseek(f, 0, SEEK_END);
-    end = ftell(f);
-    fseek(f, cur, SEEK_SET);
-    return (int) end;
+    Stream *s; int16_t tmp[FRAME]; int i;
+    if (!out) return 0;
+    memset(out, 0, sizeof(int16_t) * FRAME);
+    for (s = g_streams; s; s = s->next) {
+        if (!fka_eas_active(s)) continue;
+        tsf_render_short(s->synth, tmp, FRAME, 0);
+        for (i = 0; i < FRAME; ++i) {
+            int v = out[i] + (int)(((int64_t)tmp[i] * s->gain) >> 15);
+            out[i] = (int16_t)(v < -32768 ? -32768 : (v > 32767 ? 32767 : v));
+        }
+        if (!s->notes && s->tail) --s->tail;
+    }
+    return FRAME;
 }
 
 int fka_eas_load_bank(const char *path)
 {
-    EAS_FILE loc;
-    EAS_RESULT r;
-    FILE *f;
-    if (g_eas == NULL || path == NULL) return -1;
-    f = fopen(path, "rb");
-    if (f == NULL) return -2;
-    loc.handle = f;
-    loc.readAt = file_read_at;
-    loc.size = file_size;
-    r = EAS_LoadDLSCollection(g_eas, NULL, &loc);
-    fclose(f);
-    return r == EAS_SUCCESS ? 0 : -3;
+    tsf *bank;
+    if (!path || g_streams) return -1;
+    bank = tsf_load_filename(path);
+    if (!bank) return -2;
+    tsf_set_output(bank, TSF_MONO, RATE, -3.0f);
+    if (g_bank) tsf_close(g_bank);
+    g_bank = bank;
+    return 0;
 }
