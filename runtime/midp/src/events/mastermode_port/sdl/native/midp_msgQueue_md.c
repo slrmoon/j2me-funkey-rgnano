@@ -186,6 +186,8 @@ static const RuntimeKeyProfilePreset RuntimeKeyProfiles[] = {
 
 int PhoneMEOverlayHandleSDLEvent(SDL_Event *event);
 int PhoneMEDisplayHandleSDLEvent(SDL_Event *event);
+int PhoneMEDisplayMapPointer(int windowX, int windowY, int clamp,
+                             int *lcdX, int *lcdY);
 int PhoneMEOverlayConsumeShutdown(void);
 void PhoneMEOverlayRefresh(void);
 int PhoneMEOverlayIsVisible(void);
@@ -698,7 +700,8 @@ static void ReleasePhysicalKeys(void)
 }
 
 int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMidpEvent)
-{ if (event->type == SDL_QUIT)
+{ static int PenDown = 0;
+  if (event->type == SDL_QUIT)
      { return RequestGracefulShutdown(pNewSignal, pNewMidpEvent);
      }
   /* desktop window: resize, expose, full screen switch */
@@ -722,6 +725,38 @@ int CheckEvent(SDL_Event *event, MidpReentryData* pNewSignal, MidpEvent* pNewMid
      }
   if ((event->type == SDL_KEYDOWN) || (event->type == SDL_KEYUP))
      { return KeyboardCheck(event, pNewSignal, pNewMidpEvent);
+     }
+  if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_LEFT)
+     { int x, y;
+       if (!PhoneMEDisplayMapPointer(event->button.x, event->button.y, 0, &x, &y)) return 0;
+       PenDown = 1;
+       pNewSignal->waitingFor = UI_SIGNAL;
+       pNewMidpEvent->type = MIDP_PEN_EVENT;
+       pNewMidpEvent->ACTION = KEYMAP_STATE_PRESSED;
+       pNewMidpEvent->X_POS = x;
+       pNewMidpEvent->Y_POS = y;
+       return 1;
+     }
+  if (event->type == SDL_MOUSEMOTION && PenDown)
+     { int x, y;
+       if (!PhoneMEDisplayMapPointer(event->motion.x, event->motion.y, 1, &x, &y)) return 0;
+       pNewSignal->waitingFor = UI_SIGNAL;
+       pNewMidpEvent->type = MIDP_PEN_EVENT;
+       pNewMidpEvent->ACTION = KEYMAP_STATE_DRAGGED;
+       pNewMidpEvent->X_POS = x;
+       pNewMidpEvent->Y_POS = y;
+       return 1;
+     }
+  if (event->type == SDL_MOUSEBUTTONUP && event->button.button == SDL_BUTTON_LEFT && PenDown)
+     { int x, y;
+       PenDown = 0;
+       if (!PhoneMEDisplayMapPointer(event->button.x, event->button.y, 1, &x, &y)) return 0;
+       pNewSignal->waitingFor = UI_SIGNAL;
+       pNewMidpEvent->type = MIDP_PEN_EVENT;
+       pNewMidpEvent->ACTION = KEYMAP_STATE_RELEASED;
+       pNewMidpEvent->X_POS = x;
+       pNewMidpEvent->Y_POS = y;
+       return 1;
      }
   if (IgnoreJoystick) {
      if ((event->type == SDL_JOYBUTTONDOWN) || (event->type == SDL_JOYBUTTONUP) ||

@@ -472,6 +472,10 @@ FunKey launcher there are three more, all with the same in-game menu
 
 Keys on a PC: arrows, Enter/Space = fire, F1/F2 = soft keys, 0-9, `*`, `#`,
 Esc = in-game menu, F11 = full screen. The Windows launcher can remap them.
+Games that support the MIDP pointer API also accept mouse and touchscreen
+input directly on the game picture: press, drag and release are delivered in
+the game's own LCD coordinates. Scaling, cropping, panning and screen rotation
+are taken into account; touches on black bars outside the picture are ignored.
 
 **Linux.** A 32-bit x86 program with an SDL window; it needs the glibc of
 the build machine or newer (build on Ubuntu 20.04 to run on 20.04 and
@@ -496,7 +500,9 @@ games run several times faster than interpreted, still slower than the
 desktop builds. **Buttons** shows
 on-screen keys (soft keys, D-pad, keypad, menu; on by default on phones and
 tablets), **Keys** remaps the keyboard (several keys per phone key, soft key
-type per game).
+type per game). Tapping or dragging directly on the game picture is passed to
+games that support touchscreen/pointer input; the on-screen phone buttons are
+still used by keypad-only games.
 
 Page options (address parameters; URLs in them encoded with
 `encodeURIComponent`):

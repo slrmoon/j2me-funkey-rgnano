@@ -245,6 +245,14 @@ typedef struct {
     const char *name;
 } PresentLayout;
 
+/* Last frame placement, used to translate window/touch coordinates back to
+ * the LCD coordinates seen by MIDP. */
+static PresentLayout LastPresentLayout;
+static int LastPresentValid;
+static int LastPresentRotated;
+static int LastPresentSourceWidth;
+static int LastPresentSourceHeight;
+
 typedef struct {
     const char *id;
     const char *label;
@@ -2145,6 +2153,11 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
                                   &layout);
     }
     apply_pan(&layout);
+    LastPresentLayout = layout;
+    LastPresentRotated = rotateSource;
+    LastPresentSourceWidth = sourceSurface->w;
+    LastPresentSourceHeight = sourceSurface->h;
+    LastPresentValid = 1;
     if (DisplayDebug &&
         (lastSrcW != layout.srcW || lastSrcH != layout.srcH ||
         lastDstX != layout.dstX || lastDstY != layout.dstY ||
@@ -2212,6 +2225,37 @@ static void present_surface(SDL_Surface *sourceSurface, int rotateSource) {
     fps_draw();
     overlay_draw();
     fatal_draw();
+}
+
+/* Return 0 for a press in the black bars. Once a press has started, callers
+ * pass clamp=1 so drags and the release stay at the nearest LCD edge. */
+int PhoneMEDisplayMapPointer(int windowX, int windowY, int clamp,
+                             int *lcdX, int *lcdY) {
+    PresentLayout *p = &LastPresentLayout;
+    int x, y, visibleX, visibleY;
+
+    if (!LastPresentValid || p->dstW <= 0 || p->dstH <= 0) return 0;
+    x = windowX - p->dstX;
+    y = windowY - p->dstY;
+    if (!clamp && (x < 0 || y < 0 || x >= p->dstW || y >= p->dstH)) return 0;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x >= p->dstW) x = p->dstW - 1;
+    if (y >= p->dstH) y = p->dstH - 1;
+    visibleX = p->srcX + (int)(((long long)x * p->srcW) / p->dstW);
+    visibleY = p->srcY + (int)(((long long)y * p->srcH) / p->dstH);
+    if (LastPresentRotated) {
+        *lcdX = visibleY;
+        *lcdY = LastPresentSourceHeight - 1 - visibleX;
+    } else {
+        *lcdX = visibleX;
+        *lcdY = visibleY;
+    }
+    if (*lcdX < 0) *lcdX = 0;
+    if (*lcdY < 0) *lcdY = 0;
+    if (*lcdX >= LastPresentSourceWidth) *lcdX = LastPresentSourceWidth - 1;
+    if (*lcdY >= LastPresentSourceHeight) *lcdY = LastPresentSourceHeight - 1;
+    return 1;
 }
 
 static void desktop_set_mode(int w, int h, int fullscreen) {
