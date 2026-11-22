@@ -53,9 +53,14 @@ final class D4GroupLoader {
             if (n < 3) continue;
             int[] indices = new int[n];
             ib.getIndices(indices);
+            int[] strips = ib instanceof javax.microedition.m3g.TriangleStripArray
+                    ? ((javax.microedition.m3g.TriangleStripArray)ib).fkGetStripLengths() : null;
+            if (strips == null) strips = new int[] { n };
+            int triangleCount = 0;
+            for (int i = 0; i < strips.length; i++) triangleCount += Math.max(0, strips[i] - 2);
             Primitive p = new Primitive(Primitive.PRIMITIVE_TRIANGLES,
                     tex == null ? Primitive.NORMAL_NONE : Primitive.TEXTURE_COORD_PER_VERTEX,
-                    n - 2);
+                    triangleCount);
             javax.microedition.m3g.Appearance appearance = mesh.getAppearance(part);
             if (appearance != null && appearance.getTexture(0) != null) {
                 Texture texture = texture(appearance.getTexture(0).getImage());
@@ -63,17 +68,22 @@ final class D4GroupLoader {
             }
             int[] dst = p.getVertexArray();
             int[] uv = p.getTextureCoordArray();
-            for (int tri = 0; tri < n - 2; tri++) {
-                int a = indices[tri], b = indices[tri + 1], c = indices[tri + 2];
-                if ((tri & 1) != 0) { int swap = a; a = b; b = swap; }
-                putVertex(positions, sb, a, dst, tri * 9);
-                putVertex(positions, sb, b, dst, tri * 9 + 3);
-                putVertex(positions, sb, c, dst, tri * 9 + 6);
-                if (uv != null) {
-                    putTex(tex, tsb, a, uv, tri * 6);
-                    putTex(tex, tsb, b, uv, tri * 6 + 2);
-                    putTex(tex, tsb, c, uv, tri * 6 + 4);
+            int base = 0, triangle = 0;
+            for (int strip = 0; strip < strips.length; strip++) {
+                int stripLength = strips[strip];
+                for (int tri = 0; tri < stripLength - 2; tri++, triangle++) {
+                    int a = indices[base + tri], b = indices[base + tri + 1], c = indices[base + tri + 2];
+                    if ((tri & 1) != 0) { int swap = a; a = b; b = swap; }
+                    putVertex(positions, sb, a, dst, triangle * 9);
+                    putVertex(positions, sb, b, dst, triangle * 9 + 3);
+                    putVertex(positions, sb, c, dst, triangle * 9 + 6);
+                    if (uv != null) {
+                        putTex(tex, tsb, a, uv, triangle * 6);
+                        putTex(tex, tsb, b, uv, triangle * 6 + 2);
+                        putTex(tex, tsb, c, uv, triangle * 6 + 4);
+                    }
                 }
+                base += stripLength;
             }
             group.addElement(p);
         }

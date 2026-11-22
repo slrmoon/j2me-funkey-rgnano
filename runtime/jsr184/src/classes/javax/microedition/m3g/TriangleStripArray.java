@@ -18,6 +18,7 @@
 package javax.microedition.m3g;
 
 public class TriangleStripArray extends IndexBuffer {
+	private int[] fkStripLengths;
 	//------------------------------------------------------------------
 	// Constructors
 	//------------------------------------------------------------------
@@ -26,10 +27,12 @@ public class TriangleStripArray extends IndexBuffer {
 		super(_createImplicit(Interface.getHandle(),
 				firstIndex,
 				stripLengths));
+		fkStoreStripLengths(stripLengths);
 	}
 
 	public TriangleStripArray(final int[] indices, final int[] stripLengths) {
 		super(_createExplicit(Interface.getHandle(), indices, stripLengths));
+		fkStoreStripLengths(stripLengths);
 	}
 
 	TriangleStripArray(long handle) {
@@ -47,6 +50,20 @@ public class TriangleStripArray extends IndexBuffer {
 			throw new IllegalArgumentException();
 		}
 		_getIndices(handle, indices);
+	}
+
+	/** Strip boundaries retained for compatibility adapters. */
+	public int[] fkGetStripLengths() {
+		if (fkStripLengths == null) return null;
+		int[] copy = new int[fkStripLengths.length];
+		System.arraycopy(fkStripLengths, 0, copy, 0, copy.length);
+		return copy;
+	}
+
+	private void fkStoreStripLengths(int[] strips) {
+		if (strips == null) return;
+		fkStripLengths = new int[strips.length];
+		System.arraycopy(strips, 0, fkStripLengths, 0, strips.length);
 	}
 
 	//------------------------------------------------------------------
