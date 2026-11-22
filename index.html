@@ -83,7 +83,8 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
   dialog .row button, dialog select { padding: 6px 12px; font: inherit; }
   dialog select { border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
   canvas { display: block; width: 100%; height: 100%; object-fit: contain;
-           image-rendering: pixelated; outline: none; }
+           image-rendering: pixelated; outline: none; touch-action: none;
+           -webkit-tap-highlight-color: transparent; }
   /* ?rotate=left|right: games made for the phone held sideways */
   #stage.rot canvas { position: absolute; left: 50%; top: 50%; width: var(--rot-w, 100%); height: var(--rot-h, 100%); }
   #stage.rot-left canvas { transform: translate(-50%, -50%) rotate(-90deg); }
@@ -264,7 +265,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
 // IndexedDB, one folder per game.
 const params = new URLSearchParams(location.search);
 // build id (scripts/build-web.sh): a new build is never mixed with cached files
-const V = '?v=d0e2881-1795312261';
+const V = '?v=33cf813-1795315375';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
 function log(s) {
@@ -959,6 +960,45 @@ function padKey(id, down) {
   SDL.events.push({ type: down ? 'keydown' : 'keyup', keyCode: VIRTUAL_SYM + i, charCode: 0,
                     location: 0, preventDefault() {} });
 }
+
+// Mouse and touch on the picture are MIDP pointer input. The SDL build does
+// not open a browser video device (frames are copied to the canvas directly),
+// so Emscripten does not install its usual canvas mouse listeners for us.
+let gamePointer = null;
+function gamePointerEvent(type, e) {
+  if (!running || typeof SDL === 'undefined' || !SDL.events) return;
+  const c = $('canvas'), r = c.getBoundingClientRect();
+  let nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height;
+  if (ROTATE === 'left') [nx, ny] = [1 - ny, nx];
+  else if (ROTATE === 'right') [nx, ny] = [ny, 1 - nx];
+  // Browser.calculateMouseEvent will convert these synthetic page coordinates
+  // to canvas pixels when SDL_PollEvent consumes the event.
+  SDL.events.push({ type, button: 0,
+                    pageX: window.scrollX + r.left + nx * r.width,
+                    pageY: window.scrollY + r.top + ny * r.height });
+}
+const gameCanvas = $('canvas');
+gameCanvas.addEventListener('pointerdown', e => {
+  if (!e.isPrimary || gamePointer !== null) return;
+  e.preventDefault();
+  gamePointer = e.pointerId;
+  try { gameCanvas.setPointerCapture(e.pointerId); } catch (err) {}
+  gamePointerEvent('mousedown', e);
+});
+gameCanvas.addEventListener('pointermove', e => {
+  if (e.pointerId !== gamePointer) return;
+  e.preventDefault();
+  gamePointerEvent('mousemove', e);
+});
+function releaseGamePointer(e) {
+  if (e.pointerId !== gamePointer) return;
+  e.preventDefault();
+  gamePointerEvent('mouseup', e);
+  gamePointer = null;
+}
+gameCanvas.addEventListener('pointerup', releaseGamePointer);
+gameCanvas.addEventListener('pointercancel', releaseGamePointer);
+gameCanvas.addEventListener('contextmenu', e => e.preventDefault());
 for (const b of document.querySelectorAll('#pad button[data-act], #softbar button[data-act]')) {
   const press = e => {
     e.preventDefault();
