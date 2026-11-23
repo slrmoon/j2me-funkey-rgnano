@@ -7,7 +7,11 @@
 <script>
 // ?embed=1: compact page for an <iframe> on another site (set before the
 // page is drawn, so the full page never flashes)
-if (new URLSearchParams(location.search).get('embed') === '1') document.documentElement.classList.add('embed');
+const earlyParams = new URLSearchParams(location.search);
+if (earlyParams.get('embed') === '1') document.documentElement.classList.add('embed');
+const earlyTheme = earlyParams.get('theme');
+if (earlyTheme === 'light' || earlyTheme === 'dark') document.documentElement.dataset.theme = earlyTheme;
+if (earlyParams.get('section') === 'doja') document.documentElement.dataset.section = 'doja';
 </script>
 <style>
   :root {
@@ -16,6 +20,26 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
     --stage-h: 85vh;   /* the game area's largest height */
   }
   html.embed { --stage-h: calc(100vh - 62px); }
+  :root[data-theme="light"] {
+    --bg: #f3f4f5; --panel: #ffffff; --fg: #1d2024; --muted: #5d636a;
+    --accent: #a87a10; --line: #d9dce0; color-scheme: light;
+  }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  html.embed { --accent: #e76f00; }
+  html.embed[data-theme] body { background: var(--bg); }
+  html.embed[data-theme="light"] {
+    --bg: #dddfe4; --panel: #eceef1; --fg: #3e4045; --muted: #6f7176; --line: #c0c2c7;
+  }
+  html.embed[data-theme="dark"] {
+    --bg: #141518; --panel: #1d1f23; --fg: #e6e7ea; --muted: #9a9ca2; --line: #2e3137;
+  }
+  html.embed[data-section="doja"] { --accent: #d4002a; }
+  html.embed[data-section="doja"][data-theme="light"] {
+    --bg: #e2dfe0; --panel: #efeced; --line: #cdc6c8;
+  }
+  html.embed[data-section="doja"][data-theme="dark"] {
+    --accent: #f0284a; --bg: #161415; --panel: #201d1e; --line: #352f31;
+  }
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
       --bg: #f3f4f5; --panel: #ffffff; --fg: #1d2024; --muted: #5d636a;
@@ -138,6 +162,7 @@ if (new URLSearchParams(location.search).get('embed') === '1') document.document
   </span></h1>
 <div id="play">
 <div id="stage">
+  <button id="soundHint" hidden type="button" style="position:absolute;z-index:5;top:8px;left:50%;transform:translateX(-50%);width:max-content;max-width:94%"></button>
   <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
   <div id="overlay">
     <div>Open a J2ME game (.jar) or an i-appli (.jar + .jam, and its .sp
@@ -284,7 +309,7 @@ function softLabels(line) {
   bar.style.maxWidth = $('stage').style.maxWidth || getComputedStyle($('stage')).maxWidth;
   if (typeof fitEmbed === 'function') fitEmbed();
 }
-function status(s) { $('status').textContent = s; }
+function status(s) { $('status').textContent = s; tellHost('status', { text: s }); }
 
 let game = null;   // { name, bytes, main }
 
@@ -414,6 +439,32 @@ ov.addEventListener('drop', async e => {
 // Another site's files load only if that server allows it (CORS header
 // Access-Control-Allow-Origin); files next to this page always do.
 const EMBED = params.get('embed') === '1';
+const AUTOSTART = params.get('autostart') === '1';
+const HIDE_IDS = {
+  debug: ['dbgBtn'], reload: ['reload'], keys: ['keysBtn'],
+  saves: ['export', 'importLabel'], buttons: ['padBtn'], full: ['full'],
+};
+for (const key of (params.get('hide') || '').split(',')) {
+  for (const id of HIDE_IDS[key.trim()] || []) $(id).hidden = true;
+}
+// Messages are limited to the explicitly supplied host, or the iframe
+// referrer's origin. This avoids broadcasting game status and input.
+function expectedHostOrigin() {
+  const requested = params.get('hostOrigin');
+  try { if (requested) return new URL(requested).origin; } catch (e) {}
+  try { if (document.referrer) return new URL(document.referrer).origin; } catch (e) {}
+  return location.origin;
+}
+const HOST_ORIGIN = expectedHostOrigin();
+function tellHost(type, extra) {
+  if (window.parent === window) return;
+  try { parent.postMessage(Object.assign({ source: 'j2me-web', type }, extra || {}), HOST_ORIGIN); } catch (e) {}
+}
+function failed(e) {
+  const message = e && e.message ? e.message : String(e);
+  status(message);
+  tellHost('error', { message });
+}
 const MAX_FILE = 64 << 20;
 async function fetchFile(raw, ext) {
   let url;
@@ -465,10 +516,11 @@ async function loadRemoteGame() {
   // a .sp in the address (a site's player): the game's data downloaded on the phone; it starts
   // the game the first time, later the scratchpad the game kept in this browser is used
   if (game && game.doja && game.doja.sp) game.doja.spSeedOnly = true;
+  if (AUTOSTART && !$('start').disabled) $('start').click();
 }
 $('demo').addEventListener('click', () =>
   fetchFile('MotherLoad.jar', 'jar').then(f => pick([f])).catch(e => status(e.message)));
-if (['jar', 'jam', 'sp'].some(k => params.get(k)) && !params.get('restart')) loadRemoteGame().catch(e => status(e.message));
+if (['jar', 'jam', 'sp'].some(k => params.get(k)) && !params.get('restart')) loadRemoteGame().catch(failed);
 
 // embed: the game area takes the iframe's height left by the buttons under it
 function fitEmbed() {
@@ -752,7 +804,8 @@ $('import').addEventListener('change', async e => {
 async function startAgain(auto) {
   await stash(Object.assign({}, game, { auto }));
   leaving = true;
-  const keep = ['fps', 'jit', 'heap', 'limit', 'lcd', 'trace', 'frame', 'rotate', 'embed'].filter(k => params.get(k))
+  const keep = ['fps', 'jit', 'heap', 'limit', 'lcd', 'trace', 'frame', 'rotate', 'prop',
+                'embed', 'hide', 'theme', 'section', 'hostOrigin'].filter(k => params.get(k))
     .map(k => '&' + k + '=' + encodeURIComponent(params.get(k))).join('');
   location.href = location.pathname + '?restart=1' + keep;
 }
@@ -767,6 +820,20 @@ if (params.get('restart')) {
   }).catch(e => log('cannot restart: ' + e));
 }
 
+addEventListener('message', e => {
+  if (e.source !== window.parent || e.origin !== HOST_ORIGIN || !e.data) return;
+  if (e.data.type === 'j2me:theme') {
+    if (e.data.theme === 'light' || e.data.theme === 'dark') {
+      document.documentElement.dataset.theme = e.data.theme;
+    }
+    return;
+  }
+  if (e.data.type !== 'j2me:close') return;
+  leaving = true;
+  if (!running || typeof FS === 'undefined') { tellHost('saved'); return; }
+  try { FS.syncfs(false, () => tellHost('saved')); } catch (err) { tellHost('saved'); }
+});
+
 // browsers keep sound off until a key or click: resume it on the first one
 function resumeAudio() {
   try {
@@ -777,6 +844,26 @@ function resumeAudio() {
 }
 document.addEventListener('keydown', resumeAudio);
 document.addEventListener('pointerdown', resumeAudio);
+function watchSafariSound() {
+  if (!EMBED || parent === window || !/Version\/.*Safari\//.test(navigator.userAgent) ||
+      /Android|Chrome|Chromium|CriOS|FxiOS|EdgiOS|OPiOS/.test(navigator.userAgent)) return;
+  const hint = $('soundHint');
+  let language = navigator.language;
+  try { language = parent.document.documentElement.lang || language; } catch (e) {}
+  const lang = language.slice(0, 2);
+  hint.textContent = ({
+    ru: 'Для звука коснитесь экрана игры',
+    ja: '音を出すにはゲーム画面をタップしてください',
+  })[lang] || 'Tap the game screen to enable sound';
+  function unlock() {
+    hint.hidden = true;
+    const ctx = typeof SDL !== 'undefined' && SDL.audioContext;
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+  }
+  hint.hidden = false;
+  document.addEventListener('click', unlock, { once: true });
+  document.addEventListener('touchend', unlock, { passive: true, once: true });
+}
 // full screen: in an iframe only if the host page allows it (allowfullscreen)
 function goFullscreen() {
   const p = $('play').requestFullscreen && $('play').requestFullscreen();
@@ -853,7 +940,9 @@ let resizeTimer = 0;
 function stageResized() {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (window.Module && Module._fk_web_resize) Module._fk_web_resize(...stagePixels());
+    if (window.Module && Module.calledRun && Module._fk_web_resize) {
+      try { Module._fk_web_resize(...stagePixels()); } catch (e) {}
+    }
   }, 100);
 }
 window.addEventListener('resize', stageResized);
@@ -951,14 +1040,69 @@ const keyName = c => c.replace(/^Key/, '').replace(/^Digit/, '').replace(/^Numpa
   .replace('ArrowUp', '↑').replace('ArrowDown', '↓').replace('ArrowLeft', '←').replace('ArrowRight', '→');
 
 // on-screen buttons: key events straight into the runtime's SDL queue
+const pendingPad = new Map();
 function padKey(id, down) {
   const i = ACTIONS.findIndex(a => a.id === id);
   if (i < 0) return;
   if (id === 'full') return;
-  if (!running || typeof SDL === 'undefined') return;
+  // A host keypad may be held while the runtime is still booting. Preserve
+  // only held state; a complete tap before SDL is ready must not be replayed.
+  if (!running || typeof SDL === 'undefined') {
+    if (down) pendingPad.set(id, true); else pendingPad.delete(id);
+    return;
+  }
   resumeAudio();
   SDL.events.push({ type: down ? 'keydown' : 'keyup', keyCode: VIRTUAL_SYM + i, charCode: 0,
                     location: 0, preventDefault() {} });
+}
+
+// First connected standard gamepad: A is the phone's Fire/OK button, B/X are
+// the two soft keys, and both the d-pad and left stick control direction.
+const gamepadSources = new Map();
+const gamepadHeld = new Map();
+let gamepadFrame = 0;
+function setGamepadSource(source, id, pressed) {
+  if (pressed) gamepadSources.set(source, id); else gamepadSources.delete(source);
+  const now = [...gamepadSources.values()].includes(id);
+  const old = gamepadHeld.get(id) || false;
+  if (now !== old) {
+    gamepadHeld.set(id, now);
+    padKey(id, now);
+  }
+}
+function gamepadButton(g, index, id) {
+  setGamepadSource('button:' + index, id, !!(g.buttons[index] && g.buttons[index].pressed));
+}
+function gamepadAxis(g, axis, negative, id) {
+  const value = g.axes[axis] || 0;
+  setGamepadSource('axis:' + axis + (negative ? '-' : '+'), id,
+    negative ? value < -0.45 : value > 0.45);
+}
+function releaseGamepad() {
+  gamepadSources.clear();
+  for (const [id, held] of gamepadHeld) if (held) padKey(id, false);
+  gamepadHeld.clear();
+}
+function pollGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const g = Array.from(pads || []).find(x => x && x.connected);
+  if (g) {
+    gamepadButton(g, 0, 'fire');
+    gamepadButton(g, 1, 'soft2');
+    gamepadButton(g, 2, 'soft1');
+    gamepadButton(g, 12, 'up'); gamepadButton(g, 13, 'down');
+    gamepadButton(g, 14, 'left'); gamepadButton(g, 15, 'right');
+    gamepadAxis(g, 0, true, 'left'); gamepadAxis(g, 0, false, 'right');
+    gamepadAxis(g, 1, true, 'up'); gamepadAxis(g, 1, false, 'down');
+  } else if (gamepadSources.size) {
+    releaseGamepad();
+  }
+  gamepadFrame = requestAnimationFrame(pollGamepad);
+}
+if (navigator.getGamepads) {
+  addEventListener('gamepadconnected', e => { if (e.gamepad) status('Gamepad connected'); });
+  addEventListener('gamepaddisconnected', releaseGamepad);
+  gamepadFrame = requestAnimationFrame(pollGamepad);
 }
 
 // Mouse and touch on the picture are MIDP pointer input. The SDL build does
@@ -1000,15 +1144,21 @@ gameCanvas.addEventListener('pointerup', releaseGamePointer);
 gameCanvas.addEventListener('pointercancel', releaseGamePointer);
 gameCanvas.addEventListener('contextmenu', e => e.preventDefault());
 for (const b of document.querySelectorAll('#pad button[data-act], #softbar button[data-act]')) {
+  let handledPress = false;
   const press = e => {
+    if (e.pointerType === 'touch' && 'ontouchstart' in window) return;
+    handledPress = true;
     e.preventDefault();
     if (b.classList.contains('on')) return;
     b.classList.add('on');
     try { b.setPointerCapture(e.pointerId); } catch (err) {}
     if (navigator.vibrate) navigator.vibrate(8);
     padKey(b.dataset.act, true);
+    if (running) tellHost('key', { key: b.dataset.act });
   };
   const release = e => {
+    if (e.pointerType === 'touch' && 'ontouchstart' in window) return;
+    e.preventDefault();
     if (!b.classList.contains('on')) return;
     b.classList.remove('on');
     padKey(b.dataset.act, false);
@@ -1017,6 +1167,19 @@ for (const b of document.querySelectorAll('#pad button[data-act], #softbar butto
   b.addEventListener('pointerup', release);
   b.addEventListener('pointercancel', release);
   b.addEventListener('lostpointercapture', release);
+  b.addEventListener('touchstart', press, { passive: false });
+  b.addEventListener('touchend', release, { passive: false });
+  b.addEventListener('touchcancel', release, { passive: false });
+  b.addEventListener('click', e => {
+    e.preventDefault();
+    const alreadySent = handledPress;
+    handledPress = false;
+    if (alreadySent && e.detail !== 0) return;
+    if (b.classList.contains('on')) return;
+    padKey(b.dataset.act, true);
+    if (running) tellHost('key', { key: b.dataset.act });
+    setTimeout(() => padKey(b.dataset.act, false), 70);
+  });
   b.addEventListener('contextmenu', e => e.preventDefault());
 }
 function showPad(on) {
@@ -1026,7 +1189,8 @@ function showPad(on) {
   store.set('phoneme-pad', on);
   stageResized();
 }
-showPad(store.get('phoneme-pad', matchMedia('(pointer: coarse)').matches));
+const touchDevice = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0;
+showPad(store.get('phoneme-pad', touchDevice));
 $('padBtn').addEventListener('click', () => showPad($('pad').hidden));
 
 // key bindings dialog
@@ -1075,6 +1239,15 @@ window.addEventListener('keydown', e => {
   keysChanged();
 }, true);
 window.addEventListener('keyup', e => { if ($('keysDlg').open) e.stopImmediatePropagation(); }, true);
+function actionOfCode(code) {
+  for (const id in keymap) if ((keymap[id] || []).some(k => k.code === code)) return id;
+  return null;
+}
+window.addEventListener('keydown', e => {
+  if (!running || e.repeat || capturing || $('keysDlg').open) return;
+  const id = actionOfCode(e.code);
+  if (id && id !== 'full') tellHost('key', { key: id });
+});
 $('keysBtn').addEventListener('click', () => {
   $('phone').value = phoneOf(game);
   $('phone').disabled = !game;
@@ -1303,10 +1476,14 @@ $('start').addEventListener('click', async () => {
     }],
     onRuntimeInitialized() {
       running = true;
+      watchSafariSound();
       ov.style.display = 'none';
       $('full').disabled = false;
       $('canvas').focus({ preventScroll: true });
       status('Running ' + game.name);
+      tellHost('started', { name: game.name });
+      for (const id of pendingPad.keys()) padKey(id, true);
+      pendingPad.clear();
       setInterval(saveRms, 3000);
       document.addEventListener('visibilitychange', saveRms);
       window.addEventListener('pagehide', saveRms);
@@ -1330,6 +1507,7 @@ $('start').addEventListener('click', async () => {
         return;
       }
       status(game.name + ' ended');
+      tellHost('ended', { name: game.name });
       $('picked').textContent = game.name + ' ended.';
       $('start').textContent = 'Start again';
       $('start').disabled = false;
@@ -1342,7 +1520,7 @@ $('start').addEventListener('click', async () => {
     await loadScript('midp-files.js' + V);
     await loadScript('runMidlet.js' + V);
   } catch (e) {
-    status(e.message);
+    failed(e);
   }
 });
 </script>
