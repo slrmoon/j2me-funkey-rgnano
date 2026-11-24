@@ -43,6 +43,44 @@ int ClassFileParser::_total_bytecode_bytes  = 0;
 int ClassFileParser::_total_stackmap_bytes  = 0;
 #endif
 
+static bool symbol_equals_ascii(Symbol* symbol, const char* text) {
+  const int length = jvm_strlen(text);
+  return symbol != NULL && symbol->length() == length &&
+         jvm_memcmp(symbol->base_address(), text, length) == 0;
+}
+
+/* Some 2004 iFone games bundle Motorola's FullCn compatibility class.  Its
+ * getGameAction() translates Nokia directions to Siemens key codes (-59..
+ * -62), while the game immediately expects the MIDP action constants.  The
+ * result is that every direction becomes zero and all controls appear dead.
+ * Patch only the known byte-for-byte method, leaving genuine Siemens games
+ * and every other Canvas implementation untouched. */
+static void patch_hellomoto_fullcn_game_actions(Symbol* class_name,
+                                                Symbol* method_name,
+                                                Symbol* signature,
+                                                Method* method) {
+  static const int offsets[] = { 93, 96, 99, 102 };
+  static const jbyte old_values[] = { -59, -61, -60, -62 };
+  static const jbyte new_values[] = { 1, 2, 6, 5 };
+  int i;
+
+  if (!symbol_equals_ascii(class_name, "com/hellomoto/fullscreen/FullCn") ||
+      !symbol_equals_ascii(method_name, "getGameAction") ||
+      !symbol_equals_ascii(signature, "(I)I") || method->code_size() != 109) {
+    return;
+  }
+  for (i = 0; i < 4; i++) {
+    const int operand = offsets[i];
+    if (method->bytecode_at(operand - 1) != Bytecodes::_bipush ||
+        method->ubyte_at(operand) != (jubyte)old_values[i]) {
+      return;
+    }
+  }
+  for (i = 0; i < 4; i++) {
+    method->byte_at_put(offsets[i], new_values[i]);
+  }
+}
+
 #ifndef PRODUCT
 inline void classfile_parse_error(ErrorMsgTag err JVM_TRAPS) {
   Throw::class_format_error(err JVM_NO_CHECK_AT_BOTTOM);
@@ -720,7 +758,7 @@ bool ClassFileParser::are_valid_method_access_flags(
       //
       //if (!class_access_flags.is_abstract()) {
       //  //abstract methods must be declared in an abstract class, 
-      //  //   JVMS ง2.10.3
+      //  //   JVMS ยง2.10.3
       //  return false;
       //}
       if ((flags & JVM_ACC_STRICT) != 0) {
@@ -1181,6 +1219,9 @@ ReturnOop ClassFileParser::parse_method(ClassParserState *state, ConstantPool* c
       // been checked when skipping over the code (see
       // 'skip_u1(code_length JVM_CHECK_0)' above):
       jvm_memcpy(m().code_base(), raw_u1_buffer(code_offset), code_length);
+
+      patch_hellomoto_fullcn_game_actions(_loader_ctx->class_name(), &name,
+                                          &signature, &m);
 
 #if ENABLE_ROM_GENERATOR
       _total_bytecode_bytes += code_length;
