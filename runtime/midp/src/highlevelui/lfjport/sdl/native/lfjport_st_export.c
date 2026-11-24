@@ -444,9 +444,8 @@ static unsigned long long FrameLimitNext;
 static const struct {
     const char *id;
     const char *label;
-    int engine;
 } OverlaySynths[] = {
-    { "soundfont", "TinySoundFont", 1 }
+    { "soundfont", "TinySoundFont" }
 };
 #define OVERLAY_SYNTH_COUNT ((int) (sizeof(OverlaySynths) / sizeof(OverlaySynths[0])))
 
@@ -891,13 +890,6 @@ static void overlay_set_volume(int volume) {
     if (volume > 100) volume = 100;
     OverlayVolume = volume;
     MediaSDL_SetMasterVolume(OverlayVolume);
-}
-
-static void overlay_set_synth_index(int index) {
-    if (index < 0) index = OVERLAY_SYNTH_COUNT - 1;
-    if (index >= OVERLAY_SYNTH_COUNT) index = 0;
-    OverlaySynthSel = index;
-    MediaSDL_SetSynth(OverlaySynths[index].engine);
 }
 
 static int overlay_find_synth(const char *id) {
@@ -1567,7 +1559,7 @@ static void overlay_draw_sound(void) {
     char value[32];
     snprintf(value, sizeof(value), "%d%%", OverlayVolume);
     overlay_draw_row(54, "Volume", value, OverlayRow == 0);
-    overlay_draw_row(70, "MIDI synth", OverlaySynths[OverlaySynthSel].label, OverlayRow == 1);
+    stringColor(Native_SDL_Screen, 18, 72, "MIDI: TinySoundFont", 0x9aaab0ff);
 }
 
 static void overlay_draw_controls(void) {
@@ -1664,7 +1656,6 @@ static void overlay_adjust_selected(int direction) {
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_SOUND) {
         if (OverlayRow == 0) overlay_set_volume(OverlayVolume + direction * 5);
-        else if (OverlayRow == 1) overlay_set_synth_index(OverlaySynthSel + direction);
         overlay_save_config();
     } else if (OverlayPage == OVERLAY_PAGE_CONTROLS) {
         if (OverlayRow == 0) {
@@ -1689,7 +1680,7 @@ static int overlay_row_count(void) {
     if (OverlayPage == OVERLAY_PAGE_MAIN) return OVERLAY_MAIN_COUNT;
     if (OverlayPage == OVERLAY_PAGE_DEBUG) return OVERLAY_DEBUG_COUNT + 1;
     if (OverlayPage == OVERLAY_PAGE_DISPLAY) return 6;
-    if (OverlayPage == OVERLAY_PAGE_SOUND) return 2;
+    if (OverlayPage == OVERLAY_PAGE_SOUND) return 1;
     if (OverlayPage == OVERLAY_PAGE_CONTROLS) return OVERLAY_PHONE_COUNT + OVERLAY_CONTROL_ROW_OFFSET;
     return 1;
 }

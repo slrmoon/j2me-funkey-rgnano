@@ -477,7 +477,7 @@ static void settings_apply(Settings *s, const char *key, const char *v) {
     else if (!strcasecmp(key, "VMARGS")) copy_str(s->vmargs, sizeof(s->vmargs), v);
     else if (!strcasecmp(key, "MUTE")) s->mute = atoi(v) != 0;
     else if (!strcasecmp(key, "VOLUME")) s->volume = atoi(v);
-    else if (!strcasecmp(key, "SYNTH")) copy_str(s->synth, sizeof(s->synth), v);
+    else if (!strcasecmp(key, "SYNTH")) copy_str(s->synth, sizeof(s->synth), "soundfont");
     else if (!strcasecmp(key, "LOG")) s->log = atoi(v) != 0;
     else if (!strcasecmp(key, "LOG_KEYS")) s->log_keys = atoi(v) != 0;
     else if (!strcasecmp(key, "LOG_EVENTS")) s->log_events = atoi(v) != 0;
@@ -872,9 +872,6 @@ static const char *const FilterIds[] = { "sharp", "scale2x", "smooth", "pixel" }
 static const char *const FilterNames[] = { "Sharp", "Scale2x", "Smooth", "Pixel" };
 static const char *const FpsIds[] = { "0", "20", "25", "30", "50", "60" };
 static const char *const FpsNames[] = { "No limit", "20", "25", "30", "50", "60" };
-static const char *const SynthIds[] = { "soundfont" };
-static const char *const SynthNames[] = { "TinySoundFont (TimGM6mb)" };
-
 static int opt_index(const char *v, const char *const *ids, int n) {
     int i;
     for (i = 0; i < n; i++) if (strcasecmp(v, ids[i]) == 0) return i;
@@ -902,8 +899,8 @@ static Item ItemsDisplay[] = {
 
 static Item ItemsSound[] = {
     { "Sound", IT_TOGGLE, NULL, 0, NULL, NULL, 0, 0, 0, 0, NULL, NULL },
-    { "Volume", IT_NUM, NULL, 0, NULL, NULL, 0, 0, 100, 5, NULL, NULL },
-    { "MIDI synthesizer", IT_OPT, NULL, 0, SynthIds, SynthNames, 1, 0, 0, 0, NULL, NULL }
+    { "Volume", IT_NUM, NULL, 0, NULL, NULL, 0, 0, 100, 5, NULL,
+      "MIDI: TinySoundFont with TimGM6mb" }
 };
 #define N_SOUND ((int)(sizeof(ItemsSound) / sizeof(ItemsSound[0])))
 
@@ -939,7 +936,6 @@ static void items_bind(void) {
 
     ItemsSound[0].val = &g_set.mute;       /* shown the other way round */
     ItemsSound[1].val = &g_set.volume;
-    ItemsSound[2].val = g_set.synth;       ItemsSound[2].vsize = sizeof(g_set.synth);
 
     ItemsLogs[0].val = &g_set.log;
     ItemsLogs[1].val = &g_set.log_keys;

@@ -118,7 +118,7 @@ behind it.
 | **Resume** | back to the game |
 | **Display** | Screen, Zoom, Size, Filter, FPS, Adjust view — see [Scaling](#scaling) |
 | **Controls** | key profile and per-button bindings |
-| **Sound** | Volume, MIDI synth — see [Sound](#sound) |
+| **Sound** | Volume; MIDI uses TinySoundFont with TimGM6mb — see [Sound](#sound) |
 | **Debug** | log switches and FPS counter — see [Debugging](#debugging) |
 | **Restart game** | quit and start the game again (applies a new Size and debug settings) |
 | **Exit** | save and quit to the launcher |

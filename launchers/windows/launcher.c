@@ -721,7 +721,7 @@ static void settings_apply(Settings *s, const char *key, const char *v) {
     else if (!_stricmp(key, "VMARGS")) copy_str(s->vmargs, sizeof(s->vmargs), v);
     else if (!_stricmp(key, "MUTE")) s->mute = atoi(v) != 0;
     else if (!_stricmp(key, "VOLUME")) { s->volume = atoi(v); if (s->volume < 0) s->volume = 0; if (s->volume > 100) s->volume = 100; }
-    else if (!_stricmp(key, "SYNTH")) copy_str(s->synth, sizeof(s->synth), v);
+    else if (!_stricmp(key, "SYNTH")) copy_str(s->synth, sizeof(s->synth), "soundfont");
     else if (!_stricmp(key, "LOG")) s->log = atoi(v) != 0;
     else if (!_stricmp(key, "CONSOLE")) s->console = atoi(v) != 0;
     else if (!_stricmp(key, "LOG_KEYS")) s->log_keys = atoi(v) != 0;
@@ -1601,9 +1601,6 @@ static const struct { const char *id; const wchar_t *label; } Fpss[] = {
     { "30", L"30 FPS" }, { "60", L"60 FPS" }, { "50", L"50 FPS" }, { "25", L"25 FPS" },
     { "20", L"20 FPS" }, { "off", L"No limit" }
 };
-static const struct { const char *id; const wchar_t *label; } Synths[] = {
-    { "soundfont", L"TinySoundFont (TimGM6mb)" }
-};
 static const wchar_t *Lcds[] = {
     L"Auto", L"128x128", L"128x160", L"176x208", L"176x220", L"208x208", L"240x240",
     L"240x320", L"320x240", L"240x400", L"352x416", L"360x640", L"480x800", NULL
@@ -1685,7 +1682,6 @@ static void pages_load(void) {
     SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETPOS, TRUE, g_set.volume);
     _snwprintf(w, 64, L"%d%%", g_set.volume);
     SetDlgItemTextW(so, IDC_VOLTEXT, w);
-    for (i = 0; i < N(Synths); i++) if (!strcmp(Synths[i].id, g_set.synth)) combo_sel(so, IDC_SYNTH, i);
     check(so, IDC_LOG, g_set.log);
     check(so, IDC_CONSOLE, g_set.console);
     check(so, IDC_LOGKEYS, g_set.log_keys);
@@ -1770,7 +1766,7 @@ static void pages_read(void) {
     i = combo_get(c, IDC_PHONE); if (i >= 0) copy_str(g_set.phone, sizeof(g_set.phone), Phones[i].id);
     g_set.mute = checked(so, IDC_MUTE);
     g_set.volume = (int)SendDlgItemMessageW(so, IDC_VOLUME, TBM_GETPOS, 0, 0);
-    i = combo_get(so, IDC_SYNTH); if (i >= 0) copy_str(g_set.synth, sizeof(g_set.synth), Synths[i].id);
+    copy_str(g_set.synth, sizeof(g_set.synth), "soundfont");
     g_set.log = checked(so, IDC_LOG);
     g_set.console = checked(so, IDC_CONSOLE);
     g_set.log_keys = checked(so, IDC_LOGKEYS);
@@ -2261,7 +2257,6 @@ static INT_PTR CALLBACK main_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 combo_add(d, IDC_HEAP, t);
             }
             for (i = 0; i < PHONE_COUNT; i++) combo_add(c, IDC_PHONE, Phones[i].label);
-            for (i = 0; i < N(Synths); i++) combo_add(so, IDC_SYNTH, Synths[i].label);
             SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
             SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETTICFREQ, 10, 0);
             SendDlgItemMessageW(so, IDC_VOLUME, TBM_SETPAGESIZE, 0, 10);

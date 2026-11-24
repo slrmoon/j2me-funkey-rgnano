@@ -314,7 +314,16 @@ tmp_c=${TMPDIR:-/tmp}/phoneme-t32-$$.c
 tmp_exe=${TMPDIR:-/tmp}/phoneme-t32-$$
 printf '%s\n' '#include <errno.h>' 'int main(void){return 0;}' > "$tmp_c"
 gcc $HOST_CFLAGS "$tmp_c" -o "$tmp_exe"
-"$tmp_exe"
+if ! "$tmp_exe" 2>/dev/null; then
+    # Some container hosts do not register i386 binfmt handlers even though
+    # the required 32-bit libraries and qemu-user are available.
+    if command -v qemu-i386 >/dev/null 2>&1; then
+        qemu-i386 -L / "$tmp_exe"
+    else
+        echo "Cannot execute 32-bit host build tools (install qemu-user or i386 support)." >&2
+        exit 1
+    fi
+fi
 rm -f "$tmp_c" "$tmp_exe"
 
 echo "Checking ARM cross compiler..."

@@ -39,7 +39,8 @@ Controls: which PC keys press which phone key (up to 3 each). Select a
   (Nokia -6/-7, Motorola -21/-22, ...): if a game ignores the soft keys,
   try another brand. [Runtime menu] (Esc) opens the runtime's own menu,
   [Full screen] (F11) switches full screen.
-Sound & logs: sound on/off, volume, MIDI synth; log file on/off, a console
+Sound & logs: sound on/off, volume (MIDI uses TinySoundFont with TimGM6mb);
+log file on/off, a console
   window instead, key/event/display logging, FPS counter.
 
 All settings apply to every game, unless "Own settings for the selected

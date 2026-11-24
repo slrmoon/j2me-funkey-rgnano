@@ -32,7 +32,8 @@ The launcher lists the games of the "games" folder (sub-folders too; G
 picks another folder) by their own name, and has the settings the Windows
 launcher has: Display (window size, full screen, how the picture fills the
 window, filter, frame limit, screen size the game sees, zoom, heap,
-compiler, bytecode check), Sound (volume, MIDI synthesizer), Controls (the
+compiler, bytecode check), Sound (volume; MIDI uses TinySoundFont with
+TimGM6mb), Controls (the
 keyboard keys of every phone key, soft key type) and Logs. Enter starts
 the selected game, Tab turns the page, Esc quits. O gives the selected
 game its own settings, kept apart from the common ones.

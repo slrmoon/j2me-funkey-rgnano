@@ -1797,10 +1797,9 @@ static void load_binds(const char *game_name, const char *jar_path) {
             continue;
         }
         if (strcmp(key, "SYNTH") == 0) {
-            if (strcmp(value, "hybrid") == 0 || strcmp(value, "wavetable") == 0 ||
-                strcmp(value, "fm") == 0) {
-                snprintf(synth_id, sizeof(synth_id), "%s", value);
-            }
+            /* Old releases offered Sonivox engines.  Keep the setting in the
+             * file format, but the GPLv2 audio path has one supported synth. */
+            strcpy(synth_id, "soundfont");
             continue;
         }
         if (strcmp(key, "PROFILE") == 0 || strcmp(key, "KEY_PROFILE") == 0) {
@@ -2619,7 +2618,7 @@ static int launch_game_once(int idx) {
         snprintf(volume, sizeof(volume), "%d", sound_volume);
         setenv("PHONEME_SOUND_VOLUME", volume, 1);
     }
-    setenv("PHONEME_SYNTH", synth_id, 1);
+    setenv("PHONEME_SYNTH", "soundfont", 1);
     setenv("PHONEME_SCALE_FILTER", filter_id, 1);
     {
         char pan[32];

@@ -101,8 +101,7 @@ BEGIN
     LTEXT           "Volume:", -1, 12, 32, 50, 9
     CONTROL         "", IDC_VOLUME, "msctls_trackbar32", TBS_AUTOTICKS | TBS_HORZ | WS_TABSTOP, 64, 29, 180, 16
     LTEXT           "", IDC_VOLTEXT, 250, 32, 40, 9
-    LTEXT           "MIDI synth:", -1, 12, 50, 50, 9
-    COMBOBOX        IDC_SYNTH, 64, 48, 120, 80, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "MIDI: TinySoundFont with TimGM6mb", -1, 12, 50, 180, 9
 
     GROUPBOX        "Logs and debugging", -1, 4, 70, 320, 118
     AUTOCHECKBOX    "Write a log file (data\\logs\\<game>.log)", IDC_LOG, 12, 84, 200, 10

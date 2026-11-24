@@ -153,6 +153,8 @@ Motorola 21/22, Siemens -1/-4), clear -8, call -10, end -11, game A–D
 | `PHONEME_ENABLE_AUDIO` | set: sound on |
 | `PHONEME_SOUND_VOLUME` | master volume `0`..`100` |
 | `PHONEME_SOUNDBANK` | optional path to an SF2 bank; defaults to `lib/soundbank.sf2` (TimGM6mb) |
+| `PHONEME_SYNTH` | legacy launcher setting; all values now select TinySoundFont |
+| `PHONEME_MIDI_GAIN` | legacy compatibility setting; currently ignored |
 | `PHONEME_AUDIO_QUALITY` | `low` or `high` (default: `low` in the FunKey build, `high` elsewhere). High: sampled sounds and the output (44100 Hz) go through a windowed-sinc resampler |
 | `PHONEME_AUDIO_BUFFER` | audio buffer in samples, `128`..`8192` (default 1024) |
 | `PHONEME_AUDIO_SUM` | `1`/`0`: mix stereo to mono (default: from `/etc/asound.conf`) |
