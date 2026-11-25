@@ -67,11 +67,16 @@ public abstract class Image {
         }
         if (data[0] == 'G' && data[1] == 'I' && data[2] == 'F') {
             GifDecoder.DecodedImage d = GifDecoder.decode(data);
-            return new FkImage(javax.microedition.lcdui.Image.createRGBImage(
+            Image image = new FkImage(javax.microedition.lcdui.Image.createRGBImage(
                     d.argb, d.width, d.height, d.hasAlpha), false);
+            com.funkey.doja.DoJaRuntime.resourceLoaded();
+            return image;
         }
         try {
-            return new FkImage(javax.microedition.lcdui.Image.createImage(data, 0, data.length), false);
+            Image image = new FkImage(javax.microedition.lcdui.Image.createImage(
+                    data, 0, data.length), false);
+            com.funkey.doja.DoJaRuntime.resourceLoaded();
+            return image;
         } catch (IllegalArgumentException e) {
             StringBuffer sb = new StringBuffer("image data (");
             sb.append(data.length).append(" bytes:");

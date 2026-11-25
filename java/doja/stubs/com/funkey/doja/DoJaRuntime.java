@@ -406,6 +406,12 @@ public final class DoJaRuntime implements Runnable {
     }
 
     private static long lastPaced;
+    private static volatile long resourceBusyUntil;
+
+    /** Images loaded in a batch are application work, not rendered frames. */
+    public static void resourceLoaded() {
+        resourceBusyUntil = System.currentTimeMillis() + 100;
+    }
 
     /**
      * Canvas.repaint() from the game's own thread: a loop that does
@@ -418,6 +424,9 @@ public final class DoJaRuntime implements Runnable {
             return;
         }
         long now = System.currentTimeMillis();
+        if (now < resourceBusyUntil) {
+            return;
+        }
         long work = now - frameEnd;
         if (work < 0 || work >= BUSY_MS) {
             lastPaced = now;

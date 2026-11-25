@@ -119,12 +119,20 @@ public abstract class Canvas extends Frame {
     public abstract void paint(Graphics g);
 
     public void repaint() {
+        boolean queued = false;
         if (!repaintQueued) {
             repaintQueued = true;
             paintPending = true;
             DoJaRuntime.postRepaint(this);
+            queued = true;
         }
-        DoJaRuntime.repaintPace(this);
+        /* A pending repaint is already scheduled and DoJa coalesces another
+         * request into it.  Do not wait for that paint here: loaders often
+         * call repaint() once per decoded sprite, and serializing hundreds
+         * of coalesced requests turns a short splash into minutes. */
+        if (queued) {
+            DoJaRuntime.repaintPace(this);
+        }
     }
 
     public void repaint(int x, int y, int width, int height) {
